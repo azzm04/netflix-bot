@@ -252,6 +252,143 @@ def cek_logout():
     return expired_list
 
 
+# ─── Ganti Hari ────────────────────────────────────────────
+
+def _cek_masih_ada_hari_ini(sheet, tanggal_str: str):
+    """
+    Cek apakah masih ada akun dengan tanggal hari ini di kolom E yang belum expired.
+    tanggal_str: misal "27 Mei"
+    Return: list of dict akun yang masih aktif hari ini.
+    """
+    semua_data = sheet.get_all_values()
+    masih_aktif = []
+
+    for i, baris in enumerate(semua_data):
+        nomor_baris = i + 1
+        if nomor_baris < DATA_START_ROW:
+            continue
+        if not is_baris_data(baris):
+            continue
+
+        logout_text = baris[COL_LOGOUT].strip() if len(baris) > COL_LOGOUT else ""
+        if not logout_text or logout_text.upper() == "EXPIRED":
+            continue
+
+        # Cek apakah tanggal di kolom E mengandung tanggal hari ini
+        if tanggal_str.lower() in logout_text.lower():
+            # Cek apakah jam-nya sudah lewat
+            tgl_logout = _parse_tanggal_logout(logout_text)
+            if tgl_logout and tgl_logout > datetime.now():
+                # Masih aktif (belum lewat jam-nya)
+                email = baris[COL_EMAIL].strip()
+                profil = baris[COL_PROFILE].strip() if len(baris) > COL_PROFILE else ""
+                pelanggan = baris[COL_PHONE].strip() if len(baris) > COL_PHONE else ""
+                masih_aktif.append({
+                    "baris": nomor_baris,
+                    "email": email,
+                    "profil": profil,
+                    "logout_text": logout_text,
+                    "pelanggan": pelanggan,
+                })
+
+    return masih_aktif
+
+
+def _ubah_warna_biru_besok(sheet, tanggal_besok_str: str):
+    """
+    Cari semua cell di kolom E yang mengandung tanggal besok,
+    lalu ubah format: font Netflix Sans, size 12, bold, warna biru.
+    tanggal_besok_str: misal "28 Mei"
+    """
+    semua_data = sheet.get_all_values()
+    ranges_to_format = []
+
+    for i, baris in enumerate(semua_data):
+        nomor_baris = i + 1
+        if nomor_baris < DATA_START_ROW:
+            continue
+        if not is_baris_data(baris):
+            continue
+
+        logout_text = baris[COL_LOGOUT].strip() if len(baris) > COL_LOGOUT else ""
+        if not logout_text or logout_text.upper() == "EXPIRED":
+            continue
+
+        # Cek apakah mengandung tanggal besok
+        if tanggal_besok_str.lower() in logout_text.lower():
+            cell_ref = gspread.utils.rowcol_to_a1(nomor_baris, COL_LOGOUT + 1)
+            ranges_to_format.append(cell_ref)
+
+    # Ubah format: Netflix Sans, size 12, bold, warna biru
+    if ranges_to_format:
+        format_config = {
+            "textFormat": {
+                "fontFamily": "Netflix Sans",
+                "fontSize": 12,
+                "bold": True,
+                "foregroundColorStyle": {
+                    "rgbColor": {"red": 0, "green": 0, "blue": 1}
+                }
+            }
+        }
+        for cell_ref in ranges_to_format:
+            sheet.format(cell_ref, format_config)
+
+    return len(ranges_to_format)
+
+
+def gantihari():
+    """
+    Proses ganti hari:
+    1. Cek apakah masih ada akun hari ini yang belum lewat jam-nya
+    2. Jika masih ada → return daftar akun yang belum logout
+    3. Jika sudah semua → ubah warna font biru untuk tanggal besok
+
+    Return: (status, data)
+    - ("belum_selesai", list_akun_masih_aktif) → masih ada yang belum logout
+    - ("berhasil", jumlah_cell_diubah) → sudah semua, warna diubah
+    """
+    spreadsheet = get_spreadsheet()
+    now = datetime.now()
+
+    # Format tanggal hari ini dan besok
+    tanggal_hari_ini = f"{now.day} {BULAN_ID[now.month]}"
+    besok = now + timedelta(days=1)
+    tanggal_besok = f"{besok.day} {BULAN_ID[besok.month]}"
+
+    # Kumpulkan semua sheet
+    sheets_to_check = []
+    for nama_sheet in [SHEET_HARIAN, SHEET_MINGGUAN]:
+        try:
+            sheets_to_check.append((nama_sheet, spreadsheet.worksheet(nama_sheet)))
+        except Exception:
+            pass
+    try:
+        sheet_bulanan = cari_worksheet_bulanan(spreadsheet)
+        sheets_to_check.append(("BULANAN", sheet_bulanan))
+    except Exception:
+        pass
+
+    # Step 1: Cek apakah masih ada akun hari ini yang belum lewat
+    semua_masih_aktif = []
+    for nama_sheet, sheet in sheets_to_check:
+        aktif = _cek_masih_ada_hari_ini(sheet, tanggal_hari_ini)
+        for item in aktif:
+            item["sheet"] = nama_sheet
+        semua_masih_aktif.extend(aktif)
+
+    if semua_masih_aktif:
+        return ("belum_selesai", semua_masih_aktif)
+
+    # Step 2: Semua sudah logout, ubah warna biru untuk besok
+    total_diubah = 0
+    for nama_sheet, sheet in sheets_to_check:
+        jumlah = _ubah_warna_biru_besok(sheet, tanggal_besok)
+        total_diubah += jumlah
+
+    return ("berhasil", total_diubah)
+
+
 # ─── Helper ────────────────────────────────────────────────
 
 def pilih_sheet(durasi: int):
@@ -376,7 +513,7 @@ def hitung_tanggal_logout(durasi_hari: int) -> str:
 # ─── Tulis ke sheet (batch = lebih cepat) ──────────────────
 
 def tulis_logout_ke_sheet(nama_sheet: str, nomor_baris: int, tanggal_logout: str, nomor_pelanggan: str):
-    """Tulis logout (E) dan nomor pelanggan (F) dalam 1 batch update."""
+    """Tulis logout (E) dan nomor pelanggan (F) dalam 1 batch update, lalu ubah background E jadi putih."""
     spreadsheet = get_spreadsheet()
     sheet = spreadsheet.worksheet(nama_sheet)
 
@@ -387,6 +524,11 @@ def tulis_logout_ke_sheet(nama_sheet: str, nomor_baris: int, tanggal_logout: str
         {"range": col_e, "values": [[tanggal_logout]]},
         {"range": col_f, "values": [[nomor_pelanggan]]},
     ])
+
+    # Ubah background kolom E jadi putih (slot sudah terisi)
+    sheet.format(col_e, {
+        "backgroundColor": {"red": 1, "green": 1, "blue": 1}
+    })
 
 
 def tulis_rekapan(nomor_pelanggan: str, durasi: int, email_akun: str):

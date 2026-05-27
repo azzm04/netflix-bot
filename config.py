@@ -2,8 +2,11 @@
 #  config.py — Konfigurasi bot Netflix
 # ============================================================
 
+import os
+
 # Token dari @BotFather Telegram
-BOT_TOKEN = "8976693990:AAF4tkZE5p2W-tRqd3bgyfPCN02X7tBKdc8"
+# Di Railway: set sebagai environment variable BOT_TOKEN
+BOT_TOKEN = os.getenv("BOT_TOKEN", "8976693990:AAF4tkZE5p2W-tRqd3bgyfPCN02X7tBKdc8")
 
 # Nama file credentials Google Service Account
 CREDENTIALS_FILE = "credentials.json"

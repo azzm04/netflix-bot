@@ -3,6 +3,9 @@
 # ============================================================
 
 import logging
+import json
+import os
+from datetime import datetime
 from telegram import Update, BotCommand, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import (
     Application,
@@ -13,7 +16,7 @@ from telegram.ext import (
     ContextTypes,
     filters,
 )
-from config import BOT_TOKEN, ADMIN_CHAT_ID, ADMIN_ID, USERS_FILE
+from config import BOT_TOKEN, ADMIN_CHAT_ID, ADMIN_ID, USERS_FILE, HARGA, HARGA_BULANAN
 from sheets_handler import (
     cari_slot_kosong,
     hitung_tanggal_logout,
@@ -26,6 +29,7 @@ from sheets_handler import (
     format_template_bulanan,
     cek_stok,
     cek_logout,
+    gantihari,
     verifikasi_slot_masih_kosong,
     _order_lock,
 )
@@ -38,24 +42,34 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 
-# ─── User management ──────────────────────────────────────
+# ─── User management (cached) ─────────────────────────────
 
-import json
-import os
+_allowed_users_cache = None
+_allowed_users_mtime = 0
 
 
 def load_allowed_users() -> list:
-    """Load daftar user dari file JSON."""
-    if os.path.exists(USERS_FILE):
+    """Load daftar user dari file JSON (dengan cache berdasarkan mtime)."""
+    global _allowed_users_cache, _allowed_users_mtime
+    try:
+        mtime = os.path.getmtime(USERS_FILE)
+        if _allowed_users_cache is not None and mtime == _allowed_users_mtime:
+            return _allowed_users_cache
         with open(USERS_FILE, "r") as f:
-            return json.load(f)
-    return [ADMIN_ID]
+            _allowed_users_cache = json.load(f)
+            _allowed_users_mtime = mtime
+            return _allowed_users_cache
+    except (FileNotFoundError, json.JSONDecodeError):
+        return [ADMIN_ID]
 
 
 def save_allowed_users(users: list):
-    """Simpan daftar user ke file JSON."""
+    """Simpan daftar user ke file JSON dan update cache."""
+    global _allowed_users_cache, _allowed_users_mtime
     with open(USERS_FILE, "w") as f:
         json.dump(users, f)
+    _allowed_users_cache = users
+    _allowed_users_mtime = os.path.getmtime(USERS_FILE)
 
 
 def is_allowed(user_id: int) -> bool:
@@ -65,7 +79,6 @@ def is_allowed(user_id: int) -> bool:
 
 async def kirim_notif_admin(context: ContextTypes.DEFAULT_TYPE, data: dict):
     """Kirim notifikasi order berhasil ke admin."""
-    from datetime import datetime
     now = datetime.now()
     tanggal = now.strftime("%d/%b/%Y")
     waktu = now.strftime("%H:%M")
@@ -360,7 +373,6 @@ async def callback_device(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
         )
 
         # Notifikasi admin
-        from config import HARGA
         sheet_info = "HARIAN" if durasi in [1, 2, 3] else "MINGGUAN"
         await kirim_notif_admin(context, {
             "produk": f"Netflix {sheet_info} {durasi} Hari",
@@ -492,7 +504,6 @@ async def callback_device_bulanan(update: Update, context: ContextTypes.DEFAULT_
         )
 
         # Kirim notifikasi ke admin
-        from config import HARGA_BULANAN
         key = f"{jumlah_bulan}_{tipe}"
         harga = HARGA_BULANAN.get(key, "?")
         tipe_label = "Semi Private" if tipe == "sempriv" else "1P1U"
@@ -668,6 +679,46 @@ async def ceklogout(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await pesan.edit_text("⚠️ Gagal mengecek logout.")
 
 
+# ─── /gantihari ────────────────────────────────────────────
+
+async def cmd_gantihari(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Ganti hari: cek semua sudah logout, lalu ubah warna biru untuk besok."""
+    if not is_allowed(update.effective_user.id):
+        await update.message.reply_text("⛔ Akses ditolak.")
+        return
+
+    pesan = await update.message.reply_text("🔄 Memeriksa akun hari ini...")
+
+    try:
+        status, data = gantihari()
+
+        if status == "belum_selesai":
+            teks = f"❌ *Belum bisa ganti hari!*\n\n"
+            teks += f"Masih ada *{len(data)} akun* yang belum lewat waktu logout:\n\n"
+            for item in data[:10]:
+                teks += (
+                    f"• Baris {item['baris']} ({item['sheet']})\n"
+                    f"  `{item['email']}` — {item['profil']}\n"
+                    f"  ⏰ {item['logout_text']}\n\n"
+                )
+            if len(data) > 10:
+                teks += f"_...dan {len(data) - 10} lainnya_\n"
+            teks += "Tunggu sampai semua akun melewati waktu logout."
+            await pesan.edit_text(teks, parse_mode="Markdown")
+
+        elif status == "berhasil":
+            await pesan.edit_text(
+                f"✅ *Ganti hari berhasil!*\n\n"
+                f"Semua akun hari ini sudah lewat waktu logout.\n"
+                f"Warna font biru diterapkan ke *{data} akun* untuk tanggal besok.",
+                parse_mode="Markdown"
+            )
+
+    except Exception as e:
+        logger.error(f"Error gantihari: {e}", exc_info=True)
+        await pesan.edit_text("⚠️ Gagal proses ganti hari.")
+
+
 # ─── /cancel ───────────────────────────────────────────────
 
 async def callback_order_lagi(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
@@ -724,6 +775,7 @@ async def post_init(application):
         BotCommand("start", "Mulai cari akun Netflix"),
         BotCommand("stok", "Cek stok slot kosong"),
         BotCommand("ceklogout", "Cek akun yang perlu di-logout"),
+        BotCommand("gantihari", "Ganti hari & ubah warna besok"),
         BotCommand("adduser", "Tambah user (admin only)"),
         BotCommand("removeuser", "Hapus user (admin only)"),
         BotCommand("listuser", "Lihat daftar user"),
@@ -779,6 +831,7 @@ def main():
     app.add_handler(conv_handler)
     app.add_handler(CommandHandler("stok", stok))
     app.add_handler(CommandHandler("ceklogout", ceklogout))
+    app.add_handler(CommandHandler("gantihari", cmd_gantihari))
     app.add_handler(CommandHandler("adduser", adduser))
     app.add_handler(CommandHandler("removeuser", removeuser))
     app.add_handler(CommandHandler("listuser", listuser))
