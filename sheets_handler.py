@@ -123,6 +123,135 @@ def _hitung_slot_kosong(semua_data):
     return kosong
 
 
+# ─── Mapping bulan Indonesia → angka (untuk parse tanggal) ─
+
+BULAN_ID_REVERSE = {v.lower(): k for k, v in BULAN_ID.items()}
+# Tambah alias singkat
+BULAN_ID_REVERSE["mei"] = 5
+
+
+def _parse_tanggal_logout(teks: str):
+    """
+    Parse teks logout ke datetime.
+    Format yang didukung:
+    - "28 Mei 12:30"
+    - "27 Mei 21.40" (pakai titik)
+    - "30 Mei 22:10"
+    - "23 Juni ( Sempriv )" → jam default 19:00
+    Return: datetime atau None jika gagal parse.
+    """
+    teks = teks.strip()
+    if not teks or teks.upper() == "EXPIRED":
+        return None
+
+    try:
+        parts = teks.split()
+        if len(parts) < 2:
+            return None
+
+        hari = int(parts[0])
+        bulan_str = parts[1].lower().rstrip(",")
+        bulan = BULAN_ID_REVERSE.get(bulan_str)
+        if bulan is None:
+            return None
+
+        # Cari jam — support ":" dan "."
+        jam = 19
+        menit = 0
+        found_time = False
+        for part in parts[2:]:
+            if ":" in part:
+                time_parts = part.split(":")
+                jam = int(time_parts[0])
+                menit = int(time_parts[1]) if len(time_parts) > 1 else 0
+                found_time = True
+                break
+            elif "." in part:
+                # Cek apakah ini format jam (misal "21.40")
+                time_parts = part.split(".")
+                if time_parts[0].isdigit() and time_parts[1].isdigit():
+                    j = int(time_parts[0])
+                    m = int(time_parts[1])
+                    if 0 <= j <= 23 and 0 <= m <= 59:
+                        jam = j
+                        menit = m
+                        found_time = True
+                        break
+
+        # Tentukan tahun
+        now = datetime.now()
+        tahun = now.year
+
+        return datetime(tahun, bulan, hari, jam, menit)
+    except (ValueError, IndexError):
+        return None
+
+
+def cek_logout():
+    """
+    Scan semua sheet (HARIAN, MINGGUAN, BULANAN).
+    Cari akun yang waktu logout-nya sudah lewat dari sekarang.
+    Return: list of dict {sheet, baris, email, profil, logout_text, pelanggan}
+    """
+    spreadsheet = get_spreadsheet()
+    now = datetime.now()
+    expired_list = []
+
+    sheets_to_check = []
+
+    # HARIAN & MINGGUAN
+    for nama_sheet in [SHEET_HARIAN, SHEET_MINGGUAN]:
+        try:
+            sheets_to_check.append((nama_sheet, spreadsheet.worksheet(nama_sheet)))
+        except Exception:
+            pass
+
+    # BULANAN
+    try:
+        sheet_bulanan = cari_worksheet_bulanan(spreadsheet)
+        sheets_to_check.append(("BULANAN", sheet_bulanan))
+    except Exception:
+        pass
+
+    for nama_sheet, sheet in sheets_to_check:
+        semua_data = sheet.get_all_values()
+
+        for i, baris in enumerate(semua_data):
+            nomor_baris = i + 1
+            if nomor_baris < DATA_START_ROW:
+                continue
+            if not is_baris_data(baris):
+                continue
+
+            logout_text = baris[COL_LOGOUT].strip() if len(baris) > COL_LOGOUT else ""
+
+            # Skip kosong atau sudah ditandai EXPIRED
+            if not logout_text or logout_text.upper() == "EXPIRED":
+                continue
+
+            # Parse tanggal logout
+            tgl_logout = _parse_tanggal_logout(logout_text)
+            if tgl_logout is None:
+                continue
+
+            # Cek apakah sudah lewat
+            if tgl_logout <= now:
+                email = baris[COL_EMAIL].strip()
+                profil = baris[COL_PROFILE].strip() if len(baris) > COL_PROFILE else ""
+                pelanggan = baris[COL_PHONE].strip() if len(baris) > COL_PHONE else ""
+
+                expired_list.append({
+                    "sheet": nama_sheet,
+                    "baris": nomor_baris,
+                    "email": email,
+                    "profil": profil,
+                    "logout_text": logout_text,
+                    "pelanggan": pelanggan,
+                })
+
+    return expired_list
+
+
 # ─── Helper ────────────────────────────────────────────────
 
 def pilih_sheet(durasi: int):

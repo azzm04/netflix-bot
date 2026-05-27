@@ -25,6 +25,7 @@ from sheets_handler import (
     tulis_rekapan_bulanan,
     format_template_bulanan,
     cek_stok,
+    cek_logout,
     verifikasi_slot_masih_kosong,
     _order_lock,
 )
@@ -118,7 +119,12 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     # Cek whitelist
     user_id = update.effective_user.id
     if not is_allowed(user_id):
-        await update.message.reply_text("⛔ Akses ditolak. Bot ini hanya untuk admin.")
+        await update.message.reply_text(
+            f"⛔ Akses ditolak.\n\n"
+            f"ID kamu: `{user_id}`\n"
+            f"Minta admin untuk menambahkan ID ini.",
+            parse_mode="Markdown"
+        )
         return ConversationHandler.END
 
     keyboard = [
@@ -610,6 +616,58 @@ async def stok(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await pesan.edit_text("⚠️ Gagal mengecek stok.")
 
 
+# ─── /ceklogout ────────────────────────────────────────────
+
+async def ceklogout(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Cek akun yang sudah melewati batas waktu logout."""
+    if not is_allowed(update.effective_user.id):
+        await update.message.reply_text("⛔ Akses ditolak.")
+        return
+
+    pesan = await update.message.reply_text("🔍 Mengecek akun expired...")
+
+    try:
+        expired = cek_logout()
+
+        if not expired:
+            await pesan.edit_text("✅ Tidak ada akun yang perlu di-logout saat ini.")
+            return
+
+        # Group by sheet
+        by_sheet = {}
+        for item in expired:
+            sheet = item["sheet"]
+            if sheet not in by_sheet:
+                by_sheet[sheet] = []
+            by_sheet[sheet].append(item)
+
+        teks = f"⚠️ *AKUN PERLU DI-LOGOUT ({len(expired)} akun)*\n"
+        teks += "━━━━━━━━━━━━━━━━\n"
+
+        for sheet, items in by_sheet.items():
+            teks += f"\n📌 *{sheet}:*\n"
+            for item in items[:15]:  # Max 15 per sheet biar tidak kepanjangan
+                teks += (
+                    f"• Baris {item['baris']}: `{item['email']}`\n"
+                    f"  🔖 {item['profil']} | ⏰ {item['logout_text']}\n"
+                    f"  👤 {item['pelanggan']}\n\n"
+                )
+            if len(items) > 15:
+                teks += f"  _...dan {len(items) - 15} lainnya_\n"
+
+        teks += "━━━━━━━━━━━━━━━━"
+
+        # Telegram max 4096 chars, split jika perlu
+        if len(teks) > 4000:
+            teks = teks[:4000] + "\n\n_...terpotong, terlalu banyak_"
+
+        await pesan.edit_text(teks, parse_mode="Markdown")
+
+    except Exception as e:
+        logger.error(f"Error cek logout: {e}", exc_info=True)
+        await pesan.edit_text("⚠️ Gagal mengecek logout.")
+
+
 # ─── /cancel ───────────────────────────────────────────────
 
 async def callback_order_lagi(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
@@ -665,6 +723,7 @@ async def post_init(application):
     await application.bot.set_my_commands([
         BotCommand("start", "Mulai cari akun Netflix"),
         BotCommand("stok", "Cek stok slot kosong"),
+        BotCommand("ceklogout", "Cek akun yang perlu di-logout"),
         BotCommand("adduser", "Tambah user (admin only)"),
         BotCommand("removeuser", "Hapus user (admin only)"),
         BotCommand("listuser", "Lihat daftar user"),
@@ -719,6 +778,7 @@ def main():
 
     app.add_handler(conv_handler)
     app.add_handler(CommandHandler("stok", stok))
+    app.add_handler(CommandHandler("ceklogout", ceklogout))
     app.add_handler(CommandHandler("adduser", adduser))
     app.add_handler(CommandHandler("removeuser", removeuser))
     app.add_handler(CommandHandler("listuser", listuser))
