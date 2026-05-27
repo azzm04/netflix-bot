@@ -786,17 +786,35 @@ async def pesan_tidak_dikenal(update: Update, context: ContextTypes.DEFAULT_TYPE
 # ─── Main ──────────────────────────────────────────────────
 
 async def post_init(application):
-    """Set menu commands."""
+    """Set menu commands berbeda untuk admin dan user biasa."""
+    from telegram import BotCommandScopeChat
+
+    # Menu untuk semua user (default)
     await application.bot.set_my_commands([
         BotCommand("start", "Mulai cari akun Netflix"),
         BotCommand("stok", "Cek stok slot kosong"),
+        BotCommand("cancel", "Batalkan proses"),
         BotCommand("ceklogout", "Cek akun yang perlu di-logout"),
         BotCommand("gantihari", "Ganti hari & ubah warna besok"),
-        BotCommand("adduser", "Tambah user (admin only)"),
-        BotCommand("removeuser", "Hapus user (admin only)"),
-        BotCommand("listuser", "Lihat daftar user"),
-        BotCommand("cancel", "Batalkan proses"),
     ])
+
+    # Menu khusus admin (lebih lengkap)
+    try:
+        await application.bot.set_my_commands(
+            [
+                BotCommand("start", "Mulai cari akun Netflix"),
+                BotCommand("stok", "Cek stok slot kosong"),
+                BotCommand("ceklogout", "Cek akun yang perlu di-logout"),
+                BotCommand("gantihari", "Ganti hari & ubah warna besok"),
+                BotCommand("adduser", "Tambah user"),
+                BotCommand("removeuser", "Hapus user"),
+                BotCommand("listuser", "Lihat daftar user"),
+                BotCommand("cancel", "Batalkan proses"),
+            ],
+            scope=BotCommandScopeChat(chat_id=ADMIN_ID)
+        )
+    except Exception:
+        pass  # Gagal set scope admin tidak fatal
 
 
 def main():
