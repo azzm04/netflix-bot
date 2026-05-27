@@ -3,15 +3,16 @@
 # ============================================================
 
 import random
+import threading
 import gspread
 from google.oauth2.service_account import Credentials
 from datetime import datetime, timedelta
 from config import (
     CREDENTIALS_FILE, SPREADSHEET_NAME,
-    SHEET_HARIAN, SHEET_MINGGUAN,
+    SHEET_HARIAN, SHEET_MINGGUAN, SHEET_BULANAN,
     COL_EMAIL, COL_PASSWORD, COL_PROFILE, COL_PIN,
     COL_LOGOUT, COL_PHONE, DATA_START_ROW, JAM_LOGOUT,
-    HARGA
+    HARGA, HARGA_BULANAN, DURASI_BULANAN_HARI
 )
 
 # Scope yang dibutuhkan untuk akses Google Sheets
@@ -42,31 +43,84 @@ BULAN_REKAP = {
 }
 
 
-# ─── Cache koneksi agar tidak buat ulang tiap request ──────
+# ─── Cache koneksi & lock untuk thread safety ──────────────
 
 _client_cache = None
+_spreadsheet_cache = None
+# Lock global: hanya 1 order yang boleh akses sheet bersamaan
+# Mencegah 2 order ambil slot yang sama (race condition)
+_order_lock = threading.Lock()
 
 
 def get_client():
-    """Buat koneksi ke Google Sheets (dengan simple cache)."""
+    """Buat koneksi ke Google Sheets (dengan cache)."""
     global _client_cache
-    try:
-        if _client_cache is not None:
-            # Test apakah masih valid
-            _client_cache.list_spreadsheet_files(title=SPREADSHEET_NAME)
-            return _client_cache
-    except Exception:
-        pass
-
-    creds = Credentials.from_service_account_file(CREDENTIALS_FILE, scopes=SCOPES)
-    _client_cache = gspread.authorize(creds)
+    if _client_cache is None:
+        creds = Credentials.from_service_account_file(CREDENTIALS_FILE, scopes=SCOPES)
+        _client_cache = gspread.authorize(creds)
     return _client_cache
 
 
 def get_spreadsheet():
     """Buka spreadsheet sekali, reuse untuk semua operasi."""
-    client = get_client()
-    return client.open(SPREADSHEET_NAME)
+    global _spreadsheet_cache
+    if _spreadsheet_cache is None:
+        client = get_client()
+        _spreadsheet_cache = client.open(SPREADSHEET_NAME)
+    return _spreadsheet_cache
+
+
+def reset_cache():
+    """Reset cache jika koneksi error."""
+    global _client_cache, _spreadsheet_cache
+    _client_cache = None
+    _spreadsheet_cache = None
+
+
+def cari_worksheet_bulanan(spreadsheet):
+    """Cari worksheet yang namanya mengandung 'BULANAN'."""
+    for ws in spreadsheet.worksheets():
+        if "BULANAN" in ws.title.upper():
+            return ws
+    return spreadsheet.worksheet(SHEET_BULANAN)
+
+
+def cek_stok():
+    """
+    Hitung jumlah slot kosong di tiap sheet (HARIAN, MINGGUAN, BULANAN).
+    Return: dict {nama_sheet: jumlah_slot_kosong}
+    """
+    spreadsheet = get_spreadsheet()
+    hasil = {}
+
+    for nama_sheet in [SHEET_HARIAN, SHEET_MINGGUAN]:
+        try:
+            sheet = spreadsheet.worksheet(nama_sheet)
+            hasil[nama_sheet] = _hitung_slot_kosong(sheet.get_all_values())
+        except Exception:
+            hasil[nama_sheet] = "?"
+
+    try:
+        sheet_bulanan = cari_worksheet_bulanan(spreadsheet)
+        hasil["BULANAN"] = _hitung_slot_kosong(sheet_bulanan.get_all_values())
+    except Exception:
+        hasil["BULANAN"] = "?"
+
+    return hasil
+
+
+def _hitung_slot_kosong(semua_data):
+    """Helper: hitung jumlah slot kosong dari data sheet."""
+    kosong = 0
+    for i, baris in enumerate(semua_data):
+        if (i + 1) < DATA_START_ROW:
+            continue
+        if not is_baris_data(baris):
+            continue
+        logout = baris[COL_LOGOUT].strip() if len(baris) > COL_LOGOUT else ""
+        if logout == "":
+            kosong += 1
+    return kosong
 
 
 # ─── Helper ────────────────────────────────────────────────
@@ -89,24 +143,17 @@ def is_baris_data(baris):
 
 # ─── Cari slot kosong (RANDOM) ─────────────────────────────
 
-def cari_slot_kosong(durasi: int, device: str = ""):
+def _cari_slot_dari_sheet(sheet, device: str = ""):
     """
-    Kumpulkan SEMUA slot kosong, lalu pilih RANDOM.
-    - Slot kosong = baris data valid + kolom E kosong
-    - Device TV = skip akun "PAKE KODE"
+    Helper: kumpulkan semua slot kosong dari sheet, return list dict.
     """
-    spreadsheet = get_spreadsheet()
-    nama_sheet = pilih_sheet(durasi)
-    sheet = spreadsheet.worksheet(nama_sheet)
     semua_data = sheet.get_all_values()
-
     slot_tersedia = []
 
     for i, baris in enumerate(semua_data):
         nomor_baris = i + 1
         if nomor_baris < DATA_START_ROW:
             continue
-
         if not is_baris_data(baris):
             continue
 
@@ -116,11 +163,8 @@ def cari_slot_kosong(durasi: int, device: str = ""):
         pin = baris[COL_PIN].strip() if len(baris) > COL_PIN else ""
         logout = baris[COL_LOGOUT].strip() if len(baris) > COL_LOGOUT else ""
 
-        # Kolom E kosong = slot tersedia
         if logout != "":
             continue
-
-        # Device TV: skip akun "PAKE KODE"
         if device == "TV" and password.upper() == "PAKE KODE":
             continue
 
@@ -130,23 +174,74 @@ def cari_slot_kosong(durasi: int, device: str = ""):
             "password": password,
             "profil": profil,
             "pin": pin,
-            "nama_sheet": nama_sheet,
+            "nama_sheet": sheet.title,
         })
 
-    if not slot_tersedia:
-        return None
+    return slot_tersedia
 
-    # Pilih random dari semua slot yang tersedia
-    return random.choice(slot_tersedia)
+
+def cari_slot_kosong(durasi: int, device: str = ""):
+    """Cari slot kosong di sheet HARIAN/MINGGUAN, pilih random."""
+    spreadsheet = get_spreadsheet()
+    nama_sheet = pilih_sheet(durasi)
+    sheet = spreadsheet.worksheet(nama_sheet)
+    slot_tersedia = _cari_slot_dari_sheet(sheet, device)
+    return random.choice(slot_tersedia) if slot_tersedia else None
+
+
+def cari_slot_kosong_bulanan(device: str = ""):
+    """Cari slot kosong di sheet BULANAN, pilih random."""
+    spreadsheet = get_spreadsheet()
+    sheet = cari_worksheet_bulanan(spreadsheet)
+    slot_tersedia = _cari_slot_dari_sheet(sheet, device)
+    return random.choice(slot_tersedia) if slot_tersedia else None
+
+
+def verifikasi_slot_masih_kosong(nama_sheet: str, nomor_baris: int) -> bool:
+    """
+    Cek ulang slot masih kosong sebelum tulis (anti race condition).
+    Return True jika masih kosong, False jika sudah terisi.
+    """
+    spreadsheet = get_spreadsheet()
+    sheet = spreadsheet.worksheet(nama_sheet)
+    cell_value = sheet.cell(nomor_baris, COL_LOGOUT + 1).value
+    return cell_value is None or cell_value.strip() == ""
+
+
+def bulatkan_jam():
+    """
+    Bulatkan jam sekarang ke kelipatan 10 menit terdekat.
+    Aturan: sisa menit 0-5 bulatkan ke bawah, 6-9 bulatkan ke atas.
+    Contoh: 20:52 → 20:50, 20:57 → 21:00
+    """
+    now = datetime.now()
+    menit = now.minute
+    sisa = menit % 10
+
+    if sisa <= 5:
+        menit_bulat = menit - sisa
+    else:
+        menit_bulat = menit + (10 - sisa)
+
+    # Handle overflow (60 menit = +1 jam)
+    jam = now.hour
+    if menit_bulat >= 60:
+        menit_bulat = 0
+        jam += 1
+    if jam >= 24:
+        jam = 0
+
+    return f"{jam:02d}:{menit_bulat:02d}"
 
 
 # ─── Hitung tanggal logout ─────────────────────────────────
 
 def hitung_tanggal_logout(durasi_hari: int) -> str:
-    """Hitung tanggal logout: sekarang + durasi, jam 19:00."""
+    """Hitung tanggal logout: sekarang + durasi, jam dibulatkan."""
     tgl_logout = datetime.now() + timedelta(days=durasi_hari)
     bulan = BULAN_ID[tgl_logout.month]
-    return f"{tgl_logout.day} {bulan} {JAM_LOGOUT}"
+    jam = bulatkan_jam()
+    return f"{tgl_logout.day} {bulan} {jam}"
 
 
 # ─── Tulis ke sheet (batch = lebih cepat) ──────────────────
@@ -196,6 +291,142 @@ def tulis_rekapan(nomor_pelanggan: str, durasi: int, email_akun: str):
         {"range": gspread.utils.rowcol_to_a1(row, 4), "values": [[harga]]},
         {"range": gspread.utils.rowcol_to_a1(row, 5), "values": [[email_akun]]},
     ])
+
+
+# ─── Fungsi khusus BULANAN ──────────────────────────────────
+
+
+def hitung_tanggal_logout_bulanan(jumlah_bulan: int, is_sempriv: bool) -> str:
+    """
+    Hitung tanggal logout bulanan.
+    1 bulan = 27 hari, 2 bulan = 54 hari.
+    Format: '23 Juni 20:50' atau '23 Juni ( Sempriv )' jika sempriv.
+    """
+    hari = DURASI_BULANAN_HARI.get(jumlah_bulan, 27)
+    tgl_logout = datetime.now() + timedelta(days=hari)
+    bulan = BULAN_ID[tgl_logout.month]
+    jam = bulatkan_jam()
+
+    if is_sempriv:
+        return f"{tgl_logout.day} {bulan} ( Sempriv )"
+    else:
+        return f"{tgl_logout.day} {bulan} {jam}"
+
+
+def tulis_rekapan_bulanan(nomor_pelanggan: str, jumlah_bulan: int, tipe: str, email_akun: str):
+    """Tulis rekapan bulanan. tipe = '1p1u' atau 'sempriv'."""
+    now = datetime.now()
+    nama_sheet_rekap = f"REKAPAN {BULAN_REKAP[now.month]} {now.year}"
+
+    spreadsheet = get_spreadsheet()
+    sheet_rekap = spreadsheet.worksheet(nama_sheet_rekap)
+
+    tanggal = f"{now.day} {BULAN_EN[now.month]} {now.year}"
+
+    # Durasi text
+    if tipe == "sempriv":
+        durasi_text = f"{jumlah_bulan} b sempriv"
+    else:
+        durasi_text = f"{jumlah_bulan} b 1 u"
+
+    # Harga
+    key = f"{jumlah_bulan}_{tipe}"
+    harga = HARGA_BULANAN.get(key, "Rp0")
+
+    # Cari baris terakhir
+    kolom_a = sheet_rekap.col_values(1)
+    baris_target = len(kolom_a) + 1
+    for i in range(len(kolom_a) - 1, -1, -1):
+        if kolom_a[i].strip() != "":
+            baris_target = i + 2
+            break
+
+    row = baris_target
+    sheet_rekap.batch_update([
+        {"range": gspread.utils.rowcol_to_a1(row, 1), "values": [[nomor_pelanggan]]},
+        {"range": gspread.utils.rowcol_to_a1(row, 2), "values": [[tanggal]]},
+        {"range": gspread.utils.rowcol_to_a1(row, 3), "values": [[durasi_text]]},
+        {"range": gspread.utils.rowcol_to_a1(row, 4), "values": [[harga]]},
+        {"range": gspread.utils.rowcol_to_a1(row, 5), "values": [[email_akun]]},
+    ])
+
+
+def format_template_bulanan(data: dict, tanggal_logout: str, tipe: str) -> str:
+    """
+    Template bulanan:
+    - tipe 'sempriv' → template semiprivate (2 device)
+    - tipe '1p1u' → template 1p1u (1 device)
+    """
+    if tipe == "sempriv":
+        pesan = (
+            f"  ꔘ  NETFLIX 1 Profile 1 User  ꔘ \n"
+            f" ﹉﹉﹉﹉﹉﹉﹉﹉﹉﹉﹉﹉﹉﹉\n"
+            f"*WAJIB KIRIM SS LOGIN MAX 1x24 JAM.*\n"
+            f"*NO SS = GARANSI HANGUS = NO KOMPLAIN.*\n"
+            f"\n"
+            f"*ⓘ SNK ⦂*\n"
+            f"𖹭 𓋰 LOGIN PAKE JARINGAN DATA INTERNET / HOTSPOT DATA\n"
+            f"𖹭 𓋰 Login 2 device SAJA (terpantau)\n"
+            f"𖹭 𓋰 NO VPN\n"
+            f"𖹭 𓋰 1 bulan = 27 hari\n"
+            f"𖹭 𓋰 Dilarang login-logout berulang\n"
+            f"𖹭 𓋰 *TIDAK BISA PINDAH DEVICE!!*\n"
+            f"𖹭 𓋰 *DILARANG UBAH APAPUN!!*\n"
+            f"𖹭 𓋰 *Berani otak-atik isi akun? DENDA 500k + SPILL + BLACKLIST!!*\n"
+            f"𖹭 𓋰 LOGOUT JIKA DURASI SEWA SUDAH HABIS. MOHON KESADARANNYA!!\n"
+            f"𖹭 𓋰 This is BLACKMARKET, so don't expect stability 100%. Ini akun sharing, patuhi segala aturan, satu kesalahan berdampak pada semua pengguna akun\n"
+            f"𖹭 𓋰 ERROR? ESTIMASI GARANSI PROSES MAX 0 - 3 HARI JADI SABAR\n"
+            f"\n"
+            f"*ⓘ SANKSI ⦂*\n"
+            f"⚠️ Ketauan login lebih dari 2 device = KICK\n"
+            f"⚠️ Melanggar = DENDA 500K = NO GARANSI\n"
+            f"\n"
+            f"🍿 *DATA AKUN* 🍿\n"
+            f"💌 ⦂ `{data['email']}`\n"
+            f"🗝️ ⦂ `{data['password']}`\n"
+            f"🔖 ⦂ `{data['profil']}`\n"
+            f"🔒 ⦂ `{data['pin']}`\n"
+            f"⏰ Logout ⦂ `{tanggal_logout}`\n"
+            f" `WAJIB LOGOUT TEPAT WAKTU!!`\n"
+            f"\n"
+            f"Aku respect kepada siapapun yang menaati rules dan menggunakan akun dengan bijak. Terima kasih banyak kak! Selamat menonton yaaa~♡ Have a nice day 💖 💖"
+        )
+    else:
+        pesan = (
+            f" ꔘ  NETFLIX 1 Profile 1 User  ꔘ \n"
+            f" ﹉﹉﹉﹉﹉﹉﹉﹉﹉﹉﹉﹉﹉﹉\n"
+            f"*WAJIB KIRIM SS LOGIN MAX 1x24 JAM.*\n"
+            f"*NO SS = GARANSI HANGUS = NO KOMPLAIN.*\n"
+            f"\n"
+            f"*ⓘ SNK ⦂*\n"
+            f"𖹭 𓋰 LOGIN PAKE JARINGAN DATA INTERNET / HOTSPOT DATA\n"
+            f"𖹭 𓋰 Login 1 device SAJA (terpantau)\n"
+            f"𖹭 𓋰 NO VPN\n"
+            f"𖹭 𓋰 1 bulan = 27 hari\n"
+            f"𖹭 𓋰 Dilarang login-logout berulang\n"
+            f"𖹭 𓋰 *TIDAK BISA PINDAH DEVICE!!*\n"
+            f"𖹭 𓋰 *DILARANG UBAH APAPUN!!*\n"
+            f"𖹭 𓋰 *Berani otak-atik isi akun? DENDA 500k + SPILL + BLACKLIST!!*\n"
+            f"𖹭 𓋰 LOGOUT JIKA DURASI SEWA SUDAH HABIS. MOHON KESADARANNYA!!\n"
+            f"𖹭 𓋰 This is BLACKMARKET, so don't expect stability 100%. Ini akun sharing, patuhi segala aturan, satu kesalahan berdampak pada semua pengguna akun\n"
+            f"𖹭 𓋰 ERROR? ESTIMASI GARANSI PROSES MAX 0 - 3 HARI JADI SABAR\n"
+            f"\n"
+            f"*ⓘ SANKSI ⦂*\n"
+            f"⚠️ Ketauan login lebih dari 1 device = KICK\n"
+            f"⚠️ Melanggar = DENDA 500K = NO GARANSI\n"
+            f"\n"
+            f"🍿 *DATA AKUN* 🍿\n"
+            f"💌 ⦂ `{data['email']}`\n"
+            f"🗝️ ⦂ `{data['password']}`\n"
+            f"🔖 ⦂ `{data['profil']}`\n"
+            f"🔒 ⦂ `{data['pin']}`\n"
+            f"⏰ Logout ⦂ `{tanggal_logout}`\n"
+            f" `WAJIB LOGOUT TEPAT WAKTU!!`\n"
+            f"\n"
+            f"Aku respect kepada siapapun yang menaati rules dan menggunakan akun dengan bijak. Terima kasih banyak kak! Selamat menonton yaaa~♡ Have a nice day 💖 💖"
+        )
+
+    return pesan
 
 
 # ─── Template formatting ───────────────────────────────────
