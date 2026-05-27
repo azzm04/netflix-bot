@@ -3,7 +3,7 @@
 # ============================================================
 
 import random
-import threading
+import asyncio
 import gspread
 from google.oauth2.service_account import Credentials
 from datetime import datetime, timedelta
@@ -43,13 +43,13 @@ BULAN_REKAP = {
 }
 
 
-# ─── Cache koneksi & lock untuk thread safety ──────────────
+# ─── Cache koneksi & lock untuk async safety ──────────────
 
 _client_cache = None
 _spreadsheet_cache = None
-# Lock global: hanya 1 order yang boleh akses sheet bersamaan
+# Lock global async: hanya 1 order yang boleh akses sheet bersamaan
 # Mencegah 2 order ambil slot yang sama (race condition)
-_order_lock = threading.Lock()
+_order_lock = asyncio.Lock()
 
 
 def get_client():

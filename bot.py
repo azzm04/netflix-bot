@@ -41,11 +41,25 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
+# Sembunyikan token dari log httpx (mencegah token terekspos di log)
+logging.getLogger("httpx").setLevel(logging.WARNING)
+
 
 # ─── User management (cached) ─────────────────────────────
 
 _allowed_users_cache = None
 _allowed_users_mtime = 0
+
+
+def _init_users_file():
+    """Buat file allowed_users.json jika belum ada."""
+    if not os.path.exists(USERS_FILE):
+        with open(USERS_FILE, "w") as f:
+            json.dump([ADMIN_ID], f)
+
+
+# Inisialisasi saat module di-load
+_init_users_file()
 
 
 def load_allowed_users() -> list:
@@ -315,7 +329,7 @@ async def callback_device(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
 
     try:
         # Lock global: cegah race condition (2 order ambil slot sama)
-        with _order_lock:
+        async with _order_lock:
             slot = None
             # Retry max 3x kalau slot keburu diambil order lain
             for attempt in range(3):
@@ -449,7 +463,7 @@ async def callback_device_bulanan(update: Update, context: ContextTypes.DEFAULT_
 
     try:
         # Lock global: cegah race condition
-        with _order_lock:
+        async with _order_lock:
             slot = None
             for attempt in range(3):
                 slot = cari_slot_kosong_bulanan(device)
@@ -764,6 +778,8 @@ async def timeout_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
 
 async def pesan_tidak_dikenal(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Balas pesan di luar alur percakapan."""
+    if not is_allowed(update.effective_user.id):
+        return  # Abaikan user yang tidak terdaftar
     await update.message.reply_text("Ketik /start untuk memulai.")
 
 
