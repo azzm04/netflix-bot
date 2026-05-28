@@ -315,6 +315,35 @@ def _detect_device_type(device_text: str) -> str:
     return "HP / TAB"
 
 
+def _format_nomor(nomor: str) -> str:
+    """
+    Format nomor ke format XXX-XXXX-XXXX.
+    081267664005 → 812-6766-4005
+    +6281267664005 → 812-6766-4005
+    856-4647-3850 → 856-4647-3850 (sudah benar, biarkan)
+    Nomor tidak valid → return None (akan ditolak).
+    """
+    # Kalau sudah ada strip, kembalikan apa adanya
+    if "-" in nomor:
+        return nomor.strip()
+
+    # Hapus semua non-digit
+    digits = "".join(c for c in nomor if c.isdigit())
+
+    # Hapus prefix 62 atau 0
+    if digits.startswith("62") and len(digits) > 10:
+        digits = digits[2:]
+    elif digits.startswith("0"):
+        digits = digits[1:]
+
+    # Hanya format jika panjang 9-12 digit (nomor Indonesia valid)
+    if 9 <= len(digits) <= 12:
+        return f"{digits[:3]}-{digits[3:7]}-{digits[7:]}"
+
+    # Nomor tidak valid
+    return None
+
+
 def _parse_quick_order(teks: str) -> dict:
     """
     Parse form quick order.
@@ -378,9 +407,18 @@ async def terima_quick_order(update: Update, context: ContextTypes.DEFAULT_TYPE)
         return TANYA_QUICK_ORDER
 
     durasi = data["durasi"]
-    nomor_pelanggan = data["nomor"]
+    nomor_pelanggan = _format_nomor(data["nomor"])
     device_text = data["device"]
     lokasi = data["lokasi"]
+
+    # Validasi nomor
+    if nomor_pelanggan is None:
+        await update.message.reply_text(
+            "❌ *Nomor WhatsApp tidak valid* (terlalu panjang/pendek).\n\n"
+            "Cek kembali dan paste ulang form yang benar.",
+            parse_mode="Markdown"
+        )
+        return TANYA_QUICK_ORDER
 
     # Deteksi tipe device untuk filter akun
     device_type = _detect_device_type(device_text)

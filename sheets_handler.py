@@ -213,20 +213,41 @@ def cek_logout():
     except Exception:
         pass
 
+    # CRACK sheets
+    for nama_sheet in ["CRACK_1-160_PREMIUM", "CRACK_161-320_PREMIUM", "CRACK_1-250"]:
+        try:
+            sheets_to_check.append((nama_sheet, spreadsheet.worksheet(nama_sheet)))
+        except Exception:
+            pass
+
+    CRACK_SHEETS = ["CRACK_1-160_PREMIUM", "CRACK_161-320_PREMIUM", "CRACK_1-250"]
+
     for nama_sheet, sheet in sheets_to_check:
         semua_data = sheet.get_all_values()
+        is_crack = nama_sheet in CRACK_SHEETS
 
         for i, baris in enumerate(semua_data):
             nomor_baris = i + 1
             if nomor_baris < DATA_START_ROW:
                 continue
-            if not is_baris_data(baris):
-                continue
+
+            # Untuk CRACK: cek @ di kolom A atau B (struktur berbeda)
+            # Untuk sheet lain: cek @ di kolom A saja
+            if is_crack:
+                has_email = (
+                    (len(baris) > 0 and "@" in baris[0]) or
+                    (len(baris) > 1 and "@" in baris[1])
+                )
+                if not has_email:
+                    continue
+            else:
+                if not is_baris_data(baris):
+                    continue
 
             logout_text = baris[COL_LOGOUT].strip() if len(baris) > COL_LOGOUT else ""
 
-            # Skip kosong atau sudah ditandai EXPIRED
-            if not logout_text or logout_text.upper() == "EXPIRED":
+            # Skip kosong, MATI, atau EXPIRED
+            if not logout_text or logout_text.upper() in ("EXPIRED", "MATI"):
                 continue
 
             # Parse tanggal logout
@@ -236,8 +257,13 @@ def cek_logout():
 
             # Cek apakah sudah lewat
             if tgl_logout <= now:
-                email = baris[COL_EMAIL].strip()
-                profil = baris[COL_PROFILE].strip() if len(baris) > COL_PROFILE else ""
+                # Untuk CRACK: email bisa di kolom A atau B, profil di kolom D
+                if is_crack:
+                    email = baris[1].strip() if len(baris) > 1 and "@" in baris[1] else baris[0].strip()
+                    profil = baris[3].strip() if len(baris) > 3 else ""  # Kolom D = profil di CRACK
+                else:
+                    email = baris[COL_EMAIL].strip()
+                    profil = baris[COL_PROFILE].strip() if len(baris) > COL_PROFILE else ""
                 pelanggan = baris[COL_PHONE].strip() if len(baris) > COL_PHONE else ""
 
                 expired_list.append({
