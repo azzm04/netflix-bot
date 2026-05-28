@@ -564,6 +564,70 @@ def tulis_rekapan(nomor_pelanggan: str, durasi: int, email_akun: str):
     ])
 
 
+def tulis_rekapan_quick(nomor_pelanggan: str, durasi: int, email_akun: str, lokasi: str):
+    """Tulis rekapan dengan lokasi. Kolom E = email + ', ' + lokasi."""
+    now = datetime.now()
+    nama_sheet_rekap = f"REKAPAN {BULAN_REKAP[now.month]} {now.year}"
+
+    spreadsheet = get_spreadsheet()
+    sheet_rekap = spreadsheet.worksheet(nama_sheet_rekap)
+
+    tanggal = f"{now.day} {BULAN_EN[now.month]} {now.year}"
+    durasi_text = f"{durasi} hari"
+    harga = HARGA.get(durasi, "Rp0")
+    email_lokasi = f"{email_akun}, {lokasi}"
+
+    kolom_a = sheet_rekap.col_values(1)
+    baris_target = len(kolom_a) + 1
+    for i in range(len(kolom_a) - 1, -1, -1):
+        if kolom_a[i].strip() != "":
+            baris_target = i + 2
+            break
+
+    row = baris_target
+    sheet_rekap.batch_update([
+        {"range": gspread.utils.rowcol_to_a1(row, 1), "values": [[nomor_pelanggan]]},
+        {"range": gspread.utils.rowcol_to_a1(row, 2), "values": [[tanggal]]},
+        {"range": gspread.utils.rowcol_to_a1(row, 3), "values": [[durasi_text]]},
+        {"range": gspread.utils.rowcol_to_a1(row, 4), "values": [[harga]]},
+        {"range": gspread.utils.rowcol_to_a1(row, 5), "values": [[email_lokasi]]},
+    ])
+
+
+def tulis_rekapan_bulanan_quick(nomor_pelanggan: str, jumlah_bulan: int, tipe: str, email_akun: str, lokasi: str):
+    """Tulis rekapan bulanan dengan lokasi. Kolom E = email + ', ' + lokasi."""
+    now = datetime.now()
+    nama_sheet_rekap = f"REKAPAN {BULAN_REKAP[now.month]} {now.year}"
+
+    spreadsheet = get_spreadsheet()
+    sheet_rekap = spreadsheet.worksheet(nama_sheet_rekap)
+
+    tanggal = f"{now.day} {BULAN_EN[now.month]} {now.year}"
+    if tipe == "sempriv":
+        durasi_text = f"{jumlah_bulan} b sempriv"
+    else:
+        durasi_text = f"{jumlah_bulan} b 1 u"
+    key = f"{jumlah_bulan}_{tipe}"
+    harga = HARGA_BULANAN.get(key, "Rp0")
+    email_lokasi = f"{email_akun}, {lokasi}"
+
+    kolom_a = sheet_rekap.col_values(1)
+    baris_target = len(kolom_a) + 1
+    for i in range(len(kolom_a) - 1, -1, -1):
+        if kolom_a[i].strip() != "":
+            baris_target = i + 2
+            break
+
+    row = baris_target
+    sheet_rekap.batch_update([
+        {"range": gspread.utils.rowcol_to_a1(row, 1), "values": [[nomor_pelanggan]]},
+        {"range": gspread.utils.rowcol_to_a1(row, 2), "values": [[tanggal]]},
+        {"range": gspread.utils.rowcol_to_a1(row, 3), "values": [[durasi_text]]},
+        {"range": gspread.utils.rowcol_to_a1(row, 4), "values": [[harga]]},
+        {"range": gspread.utils.rowcol_to_a1(row, 5), "values": [[email_lokasi]]},
+    ])
+
+
 # ─── Fungsi khusus BULANAN ──────────────────────────────────
 
 

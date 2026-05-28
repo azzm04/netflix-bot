@@ -17,11 +17,14 @@ from telegram.ext import (
     filters,
 )
 from config import BOT_TOKEN, ADMIN_CHAT_ID, ADMIN_ID, USERS_FILE, HARGA, HARGA_BULANAN
+import gspread
 from sheets_handler import (
     cari_slot_kosong,
     hitung_tanggal_logout,
     tulis_logout_ke_sheet,
     tulis_rekapan,
+    tulis_rekapan_quick,
+    tulis_rekapan_bulanan_quick,
     format_template,
     cari_slot_kosong_bulanan,
     hitung_tanggal_logout_bulanan,
@@ -31,6 +34,7 @@ from sheets_handler import (
     cek_logout,
     gantihari,
     verifikasi_slot_masih_kosong,
+    get_spreadsheet,
     _order_lock,
 )
 
@@ -121,7 +125,8 @@ async def kirim_notif_admin(context: ContextTypes.DEFAULT_TYPE, data: dict):
 
 # State untuk ConversationHandler
 (TANYA_TIPE, TANYA_DURASI, TANYA_NOMOR, TANYA_DEVICE,
- TANYA_PAKET_BULANAN, TANYA_NOMOR_BULANAN, TANYA_DEVICE_BULANAN) = range(7)
+ TANYA_PAKET_BULANAN, TANYA_NOMOR_BULANAN, TANYA_DEVICE_BULANAN,
+ TANYA_QUICK_ORDER) = range(8)
 
 # Mapping device
 DEVICE_MAP = {
@@ -155,12 +160,13 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
         return ConversationHandler.END
 
     keyboard = [
+        [InlineKeyboardButton("⚡ Quick Order", callback_data="tipe_quick")],
         [InlineKeyboardButton("📅 Harian / Mingguan", callback_data="tipe_harian")],
         [InlineKeyboardButton("📆 Bulanan", callback_data="tipe_bulanan")],
     ]
     await update.message.reply_text(
         "🍿 *Bot Netflix Otomatis*\n\n"
-        "Halo! Pilih tipe langganan:",
+        "Pilih mode order:",
         parse_mode="Markdown",
         reply_markup=InlineKeyboardMarkup(keyboard)
     )
@@ -170,11 +176,26 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
 # ─── Pilih tipe ────────────────────────────────────────────
 
 async def callback_tipe(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-    """Pilih harian/mingguan atau bulanan."""
+    """Pilih harian/mingguan, bulanan, atau quick order."""
     query = update.callback_query
     await query.answer()
 
-    if query.data == "tipe_harian":
+    if query.data == "tipe_quick":
+        context.user_data["mode"] = "quick"
+        await query.edit_message_text(
+            "⚡ *Quick Order*\n\n"
+            "Paste form order dari customer:\n\n"
+            "```\n"
+            "𖥻 Durasi order : \n"
+            "𖥻 Nomor WhatsApp : \n"
+            "𖥻 Merk & tipe device : \n"
+            "𖥻 Lokasi login (kota) : \n"
+            "```",
+            parse_mode="Markdown"
+        )
+        return TANYA_QUICK_ORDER
+
+    elif query.data == "tipe_harian":
         context.user_data["mode"] = "harian"
         keyboard = [
             [
@@ -273,6 +294,220 @@ async def callback_back_paket(update: Update, context: ContextTypes.DEFAULT_TYPE
         reply_markup=InlineKeyboardMarkup(keyboard)
     )
     return TANYA_PAKET_BULANAN
+
+
+# ═══════════════════════════════════════════════════════════
+#  ALUR QUICK ORDER
+# ═══════════════════════════════════════════════════════════
+
+def _detect_device_type(device_text: str) -> str:
+    """Deteksi tipe device dari teks merk.
+    Return: 'TV', 'HP / TAB', atau 'PC / LAPTOP'
+    """
+    lower = device_text.lower()
+    # TV keywords
+    if any(kw in lower for kw in ["tv", "smart tv", "android tv", "fire stick"]):
+        return "TV"
+    # PC/Laptop keywords
+    if any(kw in lower for kw in ["laptop", "pc", "komputer", "macbook", "notebook"]):
+        return "PC / LAPTOP"
+    # Default: HP/TAB (iPhone, Samsung, Xiaomi, iPad, tablet, dll)
+    return "HP / TAB"
+
+
+def _parse_quick_order(teks: str) -> dict:
+    """
+    Parse form quick order.
+    Format:
+    𖥻 Durasi order : 3
+    𖥻 Nomor WhatsApp : 856-4647-3850
+    𖥻 Merk & tipe device : iPhone 17
+    𖥻 Lokasi login (kota) : Jakarta
+
+    Return: dict {durasi, nomor, device, lokasi} atau None jika gagal.
+    """
+    result = {"durasi": None, "nomor": None, "device": None, "lokasi": None}
+
+    for line in teks.strip().split("\n"):
+        line = line.strip()
+        if ":" not in line:
+            continue
+
+        # Ambil value setelah ":"
+        value = line.split(":", 1)[1].strip()
+        lower_line = line.lower()
+
+        if "durasi" in lower_line:
+            # Extract angka dari value (misal "3 hari" → 3, "1 bulan" → 30)
+            angka = ""
+            for ch in value:
+                if ch.isdigit():
+                    angka += ch
+            if angka:
+                result["durasi"] = int(angka)
+        elif "nomor" in lower_line or "whatsapp" in lower_line:
+            result["nomor"] = value
+        elif "device" in lower_line or "merk" in lower_line:
+            result["device"] = value
+        elif "lokasi" in lower_line or "kota" in lower_line:
+            result["lokasi"] = value
+
+    # Validasi semua field terisi
+    if all(v for v in result.values()):
+        return result
+    return None
+
+
+async def terima_quick_order(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    """Parse form quick order dan proses."""
+    teks = update.message.text
+
+    # Parse form
+    data = _parse_quick_order(teks)
+    if data is None:
+        await update.message.reply_text(
+            "❌ Format tidak valid. Pastikan semua field terisi:\n\n"
+            "```\n"
+            "𖥻 Durasi order : 3\n"
+            "𖥻 Nomor WhatsApp : 856-4647-3850\n"
+            "𖥻 Merk & tipe device : iPhone 17\n"
+            "𖥻 Lokasi login (kota) : Jakarta\n"
+            "```",
+            parse_mode="Markdown"
+        )
+        return TANYA_QUICK_ORDER
+
+    durasi = data["durasi"]
+    nomor_pelanggan = data["nomor"]
+    device_text = data["device"]
+    lokasi = data["lokasi"]
+
+    # Deteksi tipe device untuk filter akun
+    device_type = _detect_device_type(device_text)
+
+    # Tentukan sheet dan harga
+    durasi_valid_harian = [1, 2, 3, 7]
+    durasi_valid_bulanan = [27, 28, 30, 54, 56, 60]  # 1 bulan / 2 bulan
+
+    pesan_loading = await update.message.reply_text("🔍 Sedang mencari slot kosong...")
+
+    try:
+        async with _order_lock:
+            # Pilih alur berdasarkan durasi
+            if durasi in durasi_valid_harian:
+                # HARIAN / MINGGUAN
+                slot = None
+                for attempt in range(3):
+                    slot = cari_slot_kosong(durasi, device_type)
+                    if slot is None:
+                        break
+                    if verifikasi_slot_masih_kosong(slot["nama_sheet"], slot["nomor_baris"]):
+                        break
+                    slot = None
+
+                if slot is None:
+                    await pesan_loading.edit_text(
+                        "😔 *Stok habis.* Hubungi admin.",
+                        parse_mode="Markdown"
+                    )
+                    return ConversationHandler.END
+
+                tanggal_logout = hitung_tanggal_logout(durasi)
+                harga = HARGA.get(durasi, "?")
+                sheet_info = "HARIAN" if durasi in [1, 2, 3] else "MINGGUAN"
+
+            else:
+                # BULANAN (durasi > 7 dianggap bulanan)
+                # Tentukan jumlah bulan: <= 30 = 1 bulan, > 30 = 2 bulan
+                jumlah_bulan = 1 if durasi <= 30 else 2
+                # Default 1p1u (sempriv harus via step-by-step)
+                tipe = "1p1u"
+
+                slot = None
+                for attempt in range(3):
+                    slot = cari_slot_kosong_bulanan(device_type)
+                    if slot is None:
+                        break
+                    if verifikasi_slot_masih_kosong(slot["nama_sheet"], slot["nomor_baris"]):
+                        break
+                    slot = None
+
+                if slot is None:
+                    await pesan_loading.edit_text(
+                        "😔 *Stok BULANAN habis.* Hubungi admin.",
+                        parse_mode="Markdown"
+                    )
+                    return ConversationHandler.END
+
+                tanggal_logout = hitung_tanggal_logout_bulanan(jumlah_bulan, False)
+                key = f"{jumlah_bulan}_{tipe}"
+                harga = HARGA_BULANAN.get(key, "?")
+                sheet_info = "BULANAN"
+
+            # Tulis ke sheet HARIAN/MINGGUAN/BULANAN
+            tulis_logout_ke_sheet(
+                nama_sheet=slot["nama_sheet"],
+                nomor_baris=slot["nomor_baris"],
+                tanggal_logout=tanggal_logout,
+                nomor_pelanggan=nomor_pelanggan
+            )
+
+            # Tulis merk device di kolom G
+            from sheets_handler import get_spreadsheet
+            spreadsheet = get_spreadsheet()
+            sheet = spreadsheet.worksheet(slot["nama_sheet"])
+            col_g = gspread.utils.rowcol_to_a1(slot["nomor_baris"], 7)  # Kolom G
+            sheet.update_acell(col_g, device_text)
+
+            # Tulis rekapan (kolom E = email + ", " + lokasi)
+            try:
+                if durasi in durasi_valid_harian:
+                    tulis_rekapan_quick(
+                        nomor_pelanggan=nomor_pelanggan,
+                        durasi=durasi,
+                        email_akun=slot["email"],
+                        lokasi=lokasi
+                    )
+                else:
+                    tulis_rekapan_bulanan_quick(
+                        nomor_pelanggan=nomor_pelanggan,
+                        jumlah_bulan=jumlah_bulan,
+                        tipe=tipe,
+                        email_akun=slot["email"],
+                        lokasi=lokasi
+                    )
+            except Exception as e:
+                logger.warning(f"Gagal tulis rekapan: {e}")
+
+        # Kirim template
+        template = format_template(slot, tanggal_logout, nomor_pelanggan, durasi, device_type)
+        await pesan_loading.edit_text(template, parse_mode="Markdown")
+
+        # Tombol Order Lagi
+        keyboard = [[InlineKeyboardButton("🔄 Order Lagi", callback_data="order_lagi")]]
+        await update.message.reply_text("✅ Selesai!", reply_markup=InlineKeyboardMarkup(keyboard))
+
+        logger.info(
+            f"[QUICK] Sheet: {slot['nama_sheet']} | Baris: {slot['nomor_baris']} | "
+            f"Pelanggan: {nomor_pelanggan} | Device: {device_text} ({device_type}) | "
+            f"Lokasi: {lokasi} | Logout: {tanggal_logout}"
+        )
+
+        # Notif admin
+        await kirim_notif_admin(context, {
+            "produk": f"Netflix {sheet_info} {durasi} Hari",
+            "harga": harga,
+            "pelanggan": nomor_pelanggan,
+            "email": slot["email"],
+            "device": f"{device_text} ({device_type})",
+            "logout": tanggal_logout,
+        })
+
+    except Exception as e:
+        logger.error(f"Error quick order: {e}", exc_info=True)
+        await pesan_loading.edit_text("⚠️ Terjadi kesalahan. Coba lagi atau hubungi admin.")
+
+    return ConversationHandler.END
 
 
 # ═══════════════════════════════════════════════════════════
@@ -828,6 +1063,10 @@ def main():
         states={
             TANYA_TIPE: [
                 CallbackQueryHandler(callback_tipe, pattern="^tipe_")
+            ],
+            # Quick Order
+            TANYA_QUICK_ORDER: [
+                MessageHandler(filters.TEXT & ~filters.COMMAND, terima_quick_order)
             ],
             # Harian/Mingguan
             TANYA_DURASI: [
