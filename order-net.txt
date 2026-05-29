@@ -6,6 +6,12 @@
 𖥻 *Lokasi login (kota)* :
 
 *Mohon isi form dengan lengkap ya kak*
+ⓘ *Durasi order bisa diisi:*
+• Harian: 1 / 2 / 3 / 7
+• Bulanan 1P1U: 1 Bulan
+• Bulanan Semi Private: 1 Bulan Sempriv
+• 2 Bulan 1P1U: 2 Bulan
+• 2 Bulan Semi Private: 2 Bulan Sempriv
 ⓘ *Merk device harus detail*
 contoh: iPhone XR / Samsung A15 / Laptop HP / TV Samsung
 ⓘ *Lokasi login cukup isi nama kota tempat kakak login Netflix*

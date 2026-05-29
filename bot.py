@@ -344,18 +344,87 @@ def _format_nomor(nomor: str) -> str:
     return None
 
 
+def _parse_durasi(value: str) -> dict:
+    """
+    Parse durasi order dari teks.
+
+    Contoh input & output:
+      "3"              → {"durasi": 3, "mode": "harian", "tipe": None}
+      "7"              → {"durasi": 7, "mode": "harian", "tipe": None}
+      "1 Bulan"        → {"durasi": 30, "mode": "bulanan", "bulan": 1, "tipe": "1p1u"}
+      "1 Bulan Sempriv"→ {"durasi": 30, "mode": "bulanan", "bulan": 1, "tipe": "sempriv"}
+      "2 Bulan"        → {"durasi": 60, "mode": "bulanan", "bulan": 2, "tipe": "1p1u"}
+      "2 Bulan Sempriv"→ {"durasi": 60, "mode": "bulanan", "bulan": 2, "tipe": "sempriv"}
+      "30"             → {"durasi": 30, "mode": "bulanan", "bulan": 1, "tipe": "1p1u"}
+      "60"             → {"durasi": 60, "mode": "bulanan", "bulan": 2, "tipe": "1p1u"}
+
+    Return None jika tidak bisa diparsing.
+    """
+    lower = value.lower().strip()
+
+    # Deteksi apakah ada kata "bulan"
+    if "bulan" in lower:
+        # Extract angka bulan
+        angka = ""
+        for ch in lower:
+            if ch.isdigit():
+                angka += ch
+        if not angka:
+            return None
+        jumlah_bulan = int(angka)
+        if jumlah_bulan not in [1, 2]:
+            return None
+
+        # Deteksi tipe: sempriv atau 1p1u (default)
+        tipe = "1p1u"
+        if any(kw in lower for kw in ["sempriv", "semi", "sp"]):
+            tipe = "sempriv"
+
+        return {
+            "durasi": jumlah_bulan * 30,
+            "mode": "bulanan",
+            "bulan": jumlah_bulan,
+            "tipe": tipe,
+        }
+
+    # Tidak ada kata "bulan" → ambil angka saja
+    angka = ""
+    for ch in value:
+        if ch.isdigit():
+            angka += ch
+    if not angka:
+        return None
+
+    durasi_int = int(angka)
+
+    # Angka besar (>7) tanpa kata "bulan" → tetap dianggap bulanan (backward compat)
+    if durasi_int > 7:
+        jumlah_bulan = 1 if durasi_int <= 30 else 2
+        return {
+            "durasi": durasi_int,
+            "mode": "bulanan",
+            "bulan": jumlah_bulan,
+            "tipe": "1p1u",
+        }
+
+    # Harian/mingguan
+    return {"durasi": durasi_int, "mode": "harian", "tipe": None}
+
+
 def _parse_quick_order(teks: str) -> dict:
     """
     Parse form quick order.
     Format:
     𖥻 Durasi order : 3
+    𖥻 Durasi order : 1 Bulan
+    𖥻 Durasi order : 1 Bulan Sempriv
     𖥻 Nomor WhatsApp : 856-4647-3850
     𖥻 Merk & tipe device : iPhone 17
     𖥻 Lokasi login (kota) : Jakarta
 
-    Return: dict {durasi, nomor, device, lokasi} atau None jika gagal.
+    Return: dict {durasi_info, nomor, device, lokasi} atau None jika gagal.
     """
-    result = {"durasi": None, "nomor": None, "device": None, "lokasi": None}
+    result = {"durasi_info": None, "nomor": None, "device": None, "lokasi": None}
 
     for line in teks.strip().split("\n"):
         line = line.strip()
@@ -367,13 +436,7 @@ def _parse_quick_order(teks: str) -> dict:
         lower_line = line.lower()
 
         if "durasi" in lower_line:
-            # Extract angka dari value (misal "3 hari" → 3, "1 bulan" → 30)
-            angka = ""
-            for ch in value:
-                if ch.isdigit():
-                    angka += ch
-            if angka:
-                result["durasi"] = int(angka)
+            result["durasi_info"] = _parse_durasi(value)
         elif "nomor" in lower_line or "whatsapp" in lower_line:
             result["nomor"] = value
         elif "device" in lower_line or "merk" in lower_line:
@@ -382,9 +445,9 @@ def _parse_quick_order(teks: str) -> dict:
             result["lokasi"] = value
 
     # Validasi semua field terisi
-    if all(v for v in result.values()):
-        return result
-    return None
+    if result["durasi_info"] is None or not result["nomor"] or not result["device"] or not result["lokasi"]:
+        return None
+    return result
 
 
 async def terima_quick_order(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
@@ -401,12 +464,17 @@ async def terima_quick_order(update: Update, context: ContextTypes.DEFAULT_TYPE)
             "𖥻 Nomor WhatsApp : 856-4647-3850\n"
             "𖥻 Merk & tipe device : iPhone 17\n"
             "𖥻 Lokasi login (kota) : Jakarta\n"
-            "```",
+            "```\n\n"
+            "ⓘ Durasi bisa diisi:\n"
+            "• Harian: `1`, `2`, `3`, `7`\n"
+            "• Bulanan: `1 Bulan`, `2 Bulan`\n"
+            "• Semi Private: `1 Bulan Sempriv`, `2 Bulan Sempriv`",
             parse_mode="Markdown"
         )
         return TANYA_QUICK_ORDER
 
-    durasi = data["durasi"]
+    durasi_info = data["durasi_info"]
+    durasi = durasi_info["durasi"]
     nomor_pelanggan = _format_nomor(data["nomor"])
     device_text = data["device"]
     lokasi = data["lokasi"]
@@ -423,16 +491,12 @@ async def terima_quick_order(update: Update, context: ContextTypes.DEFAULT_TYPE)
     # Deteksi tipe device untuk filter akun
     device_type = _detect_device_type(device_text)
 
-    # Tentukan sheet dan harga
-    durasi_valid_harian = [1, 2, 3, 7]
-    durasi_valid_bulanan = [27, 28, 30, 54, 56, 60]  # 1 bulan / 2 bulan
-
     pesan_loading = await update.message.reply_text("🔍 Sedang mencari slot kosong...")
 
     try:
         async with _order_lock:
-            # Pilih alur berdasarkan durasi
-            if durasi in durasi_valid_harian:
+            # Pilih alur berdasarkan mode dari parsing durasi
+            if durasi_info["mode"] == "harian":
                 # HARIAN / MINGGUAN
                 slot = None
                 for attempt in range(3):
@@ -455,11 +519,10 @@ async def terima_quick_order(update: Update, context: ContextTypes.DEFAULT_TYPE)
                 sheet_info = "HARIAN" if durasi in [1, 2, 3] else "MINGGUAN"
 
             else:
-                # BULANAN (durasi > 7 dianggap bulanan)
-                # Tentukan jumlah bulan: <= 30 = 1 bulan, > 30 = 2 bulan
-                jumlah_bulan = 1 if durasi <= 30 else 2
-                # Default 1p1u (sempriv harus via step-by-step)
-                tipe = "1p1u"
+                # BULANAN
+                jumlah_bulan = durasi_info.get("bulan", 1)
+                tipe = durasi_info.get("tipe", "1p1u")
+                is_sempriv = tipe == "sempriv"
 
                 slot = None
                 for attempt in range(3):
@@ -477,7 +540,7 @@ async def terima_quick_order(update: Update, context: ContextTypes.DEFAULT_TYPE)
                     )
                     return ConversationHandler.END
 
-                tanggal_logout = hitung_tanggal_logout_bulanan(jumlah_bulan, False)
+                tanggal_logout = hitung_tanggal_logout_bulanan(jumlah_bulan, is_sempriv)
                 key = f"{jumlah_bulan}_{tipe}"
                 harga = HARGA_BULANAN.get(key, "?")
                 sheet_info = "BULANAN"
@@ -499,7 +562,7 @@ async def terima_quick_order(update: Update, context: ContextTypes.DEFAULT_TYPE)
 
             # Tulis rekapan (kolom E = email + ", " + lokasi)
             try:
-                if durasi in durasi_valid_harian:
+                if durasi_info["mode"] == "harian":
                     tulis_rekapan_quick(
                         nomor_pelanggan=nomor_pelanggan,
                         durasi=durasi,
@@ -518,7 +581,10 @@ async def terima_quick_order(update: Update, context: ContextTypes.DEFAULT_TYPE)
                 logger.warning(f"Gagal tulis rekapan: {e}")
 
         # Kirim template
-        template = format_template(slot, tanggal_logout, nomor_pelanggan, durasi, device_type)
+        if durasi_info["mode"] == "bulanan":
+            template = format_template_bulanan(slot, tanggal_logout, tipe)
+        else:
+            template = format_template(slot, tanggal_logout, nomor_pelanggan, durasi, device_type)
         await pesan_loading.edit_text(template, parse_mode="Markdown")
 
         # Tombol Order Lagi
@@ -532,8 +598,14 @@ async def terima_quick_order(update: Update, context: ContextTypes.DEFAULT_TYPE)
         )
 
         # Notif admin
+        if durasi_info["mode"] == "bulanan":
+            tipe_label = "Semi Private" if tipe == "sempriv" else "1P1U"
+            produk_label = f"Netflix BULANAN {jumlah_bulan} Bulan {tipe_label}"
+        else:
+            produk_label = f"Netflix {sheet_info} {durasi} Hari"
+
         await kirim_notif_admin(context, {
-            "produk": f"Netflix {sheet_info} {durasi} Hari",
+            "produk": produk_label,
             "harga": harga,
             "pelanggan": nomor_pelanggan,
             "email": slot["email"],
