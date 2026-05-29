@@ -661,17 +661,18 @@ def hitung_tanggal_logout_bulanan(jumlah_bulan: int, is_sempriv: bool) -> str:
     """
     Hitung tanggal logout bulanan.
     1 bulan = 27 hari, 2 bulan = 54 hari.
-    Format: '23 Juni 20:50' atau '23 Juni ( Sempriv )' jika sempriv.
+    Format:
+    - 1P1U: '25 Juni (1U)'
+    - Sempriv: '25 Juni (Sempriv)'
     """
     hari = DURASI_BULANAN_HARI.get(jumlah_bulan, 27)
     tgl_logout = datetime.now() + timedelta(days=hari)
     bulan = BULAN_ID[tgl_logout.month]
-    jam = bulatkan_jam()
 
     if is_sempriv:
-        return f"{tgl_logout.day} {bulan} ( Sempriv )"
+        return f"{tgl_logout.day} {bulan} (Sempriv)"
     else:
-        return f"{tgl_logout.day} {bulan} {jam}"
+        return f"{tgl_logout.day} {bulan} (1U)"
 
 
 def tulis_rekapan_bulanan(nomor_pelanggan: str, jumlah_bulan: int, tipe: str, email_akun: str):

@@ -240,12 +240,13 @@ async def callback_back_tipe(update: Update, context: ContextTypes.DEFAULT_TYPE)
     await query.answer()
 
     keyboard = [
+        [InlineKeyboardButton("⚡ Quick Order", callback_data="tipe_quick")],
         [InlineKeyboardButton("📅 Harian / Mingguan", callback_data="tipe_harian")],
         [InlineKeyboardButton("📆 Bulanan", callback_data="tipe_bulanan")],
     ]
     await query.edit_message_text(
         "🍿 *Bot Netflix Otomatis*\n\n"
-        "Pilih tipe langganan:",
+        "Pilih mode order:",
         parse_mode="Markdown",
         reply_markup=InlineKeyboardMarkup(keyboard)
     )
@@ -345,21 +346,6 @@ def _format_nomor(nomor: str) -> str:
 
 
 def _parse_durasi(value: str) -> dict:
-    """
-    Parse durasi order dari teks.
-
-    Contoh input & output:
-      "3"              → {"durasi": 3, "mode": "harian", "tipe": None}
-      "7"              → {"durasi": 7, "mode": "harian", "tipe": None}
-      "1 Bulan"        → {"durasi": 30, "mode": "bulanan", "bulan": 1, "tipe": "1p1u"}
-      "1 Bulan Sempriv"→ {"durasi": 30, "mode": "bulanan", "bulan": 1, "tipe": "sempriv"}
-      "2 Bulan"        → {"durasi": 60, "mode": "bulanan", "bulan": 2, "tipe": "1p1u"}
-      "2 Bulan Sempriv"→ {"durasi": 60, "mode": "bulanan", "bulan": 2, "tipe": "sempriv"}
-      "30"             → {"durasi": 30, "mode": "bulanan", "bulan": 1, "tipe": "1p1u"}
-      "60"             → {"durasi": 60, "mode": "bulanan", "bulan": 2, "tipe": "1p1u"}
-
-    Return None jika tidak bisa diparsing.
-    """
     lower = value.lower().strip()
 
     # Deteksi apakah ada kata "bulan"
@@ -1088,14 +1074,15 @@ async def callback_order_lagi(update: Update, context: ContextTypes.DEFAULT_TYPE
     # Hapus tombol
     await query.edit_message_text("🔄 Memulai order baru...")
 
-    # Tampilkan pilihan tipe lagi
+    # Tampilkan pilihan tipe lagi (termasuk Quick Order)
     keyboard = [
+        [InlineKeyboardButton("⚡ Quick Order", callback_data="tipe_quick")],
         [InlineKeyboardButton("📅 Harian / Mingguan", callback_data="tipe_harian")],
         [InlineKeyboardButton("📆 Bulanan", callback_data="tipe_bulanan")],
     ]
     await query.message.reply_text(
         "🍿 *Bot Netflix Otomatis*\n\n"
-        "Pilih tipe langganan:",
+        "Pilih mode order:",
         parse_mode="Markdown",
         reply_markup=InlineKeyboardMarkup(keyboard)
     )
