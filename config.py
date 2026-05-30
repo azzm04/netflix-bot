@@ -14,6 +14,13 @@ CREDENTIALS_FILE = "credentials.json"
 # Nama spreadsheet Google Sheets (harus sama persis)
 SPREADSHEET_NAME = "netflix account jaeminies's"
 
+# Spreadsheet REKAPAN MODAL (untuk /closing)
+SPREADSHEET_MODAL = "REKAPAN MODAL"
+SHEET_MODAL = "modal netflix"
+
+# Pajak merchant (0.7%)
+PAJAK_MERCHANT = 0.007
+
 # ---- Nama sheet berdasarkan durasi ----
 SHEET_HARIAN = "HARIAN"       # Untuk durasi 1, 2, 3 hari
 SHEET_MINGGUAN = "MINGGUAN"   # Untuk durasi 7 hari

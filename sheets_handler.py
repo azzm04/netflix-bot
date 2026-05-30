@@ -12,7 +12,8 @@ from config import (
     SHEET_HARIAN, SHEET_MINGGUAN, SHEET_BULANAN,
     COL_EMAIL, COL_PASSWORD, COL_PROFILE, COL_PIN,
     COL_LOGOUT, COL_PHONE, DATA_START_ROW, JAM_LOGOUT,
-    HARGA, HARGA_BULANAN, DURASI_BULANAN_HARI
+    HARGA, HARGA_BULANAN, DURASI_BULANAN_HARI,
+    SPREADSHEET_MODAL, SHEET_MODAL, PAJAK_MERCHANT
 )
 
 # Scope yang dibutuhkan untuk akses Google Sheets
@@ -711,6 +712,148 @@ def tulis_rekapan_bulanan(nomor_pelanggan: str, jumlah_bulan: int, tipe: str, em
         {"range": gspread.utils.rowcol_to_a1(row, 4), "values": [[harga]]},
         {"range": gspread.utils.rowcol_to_a1(row, 5), "values": [[email_akun]]},
     ])
+
+
+# ─── Rekap & Closing ────────────────────────────────────────
+
+def _parse_harga(harga_str: str) -> int:
+    """Parse 'Rp5,000' atau 'Rp17,000' ke integer 5000 / 17000."""
+    digits = "".join(c for c in harga_str if c.isdigit())
+    return int(digits) if digits else 0
+
+
+def rekap_pendapatan(periode: str) -> dict:
+    """
+    Hitung rekap pendapatan dari sheet REKAPAN.
+    periode: 'hari_ini', 'minggu_ini', 'bulan_ini'
+    
+    Return: {
+        'total_order': int,
+        'total_pendapatan': int,
+        'detail': {durasi_text: {'count': int, 'total': int}},
+        'tanggal_range': str
+    }
+    """
+    now = datetime.now()
+    spreadsheet = get_spreadsheet()
+    nama_sheet_rekap = f"REKAPAN {BULAN_REKAP[now.month]} {now.year}"
+
+    try:
+        sheet_rekap = spreadsheet.worksheet(nama_sheet_rekap)
+    except Exception:
+        return None
+
+    semua_data = sheet_rekap.get_all_values()
+
+    # Tentukan range tanggal
+    if periode == "hari_ini":
+        tanggal_target = f"{now.day} {BULAN_EN[now.month]} {now.year}"
+        tanggal_range = tanggal_target
+    elif periode == "minggu_ini":
+        # 7 hari terakhir
+        tanggal_list = []
+        for i in range(7):
+            d = now - timedelta(days=i)
+            tanggal_list.append(f"{d.day} {BULAN_EN[d.month]} {d.year}")
+        tanggal_range = f"{tanggal_list[-1]} - {tanggal_list[0]}"
+    elif periode == "bulan_ini":
+        # Semua tanggal bulan ini
+        tanggal_list = []
+        for day in range(1, now.day + 1):
+            d = now.replace(day=day)
+            tanggal_list.append(f"{d.day} {BULAN_EN[d.month]} {d.year}")
+        tanggal_range = f"1 - {now.day} {BULAN_EN[now.month]} {now.year}"
+    else:
+        return None
+
+    total_order = 0
+    total_pendapatan = 0
+    detail = {}
+
+    for i, baris in enumerate(semua_data):
+        if i == 0:  # Skip header
+            continue
+        if len(baris) < 4:
+            continue
+
+        tanggal_baris = baris[1].strip() if len(baris) > 1 else ""
+        durasi_text = baris[2].strip() if len(baris) > 2 else ""
+        harga_text = baris[3].strip() if len(baris) > 3 else ""
+
+        # Cek apakah tanggal masuk range
+        match = False
+        if periode == "hari_ini":
+            match = tanggal_baris == tanggal_target
+        elif periode in ("minggu_ini", "bulan_ini"):
+            match = tanggal_baris in tanggal_list
+
+        if match and durasi_text:
+            harga = _parse_harga(harga_text)
+            total_order += 1
+            total_pendapatan += harga
+
+            if durasi_text not in detail:
+                detail[durasi_text] = {"count": 0, "total": 0}
+            detail[durasi_text]["count"] += 1
+            detail[durasi_text]["total"] += harga
+
+    return {
+        "total_order": total_order,
+        "total_pendapatan": total_pendapatan,
+        "detail": detail,
+        "tanggal_range": tanggal_range,
+    }
+
+
+def closing_hari() -> dict:
+    """
+    Closing hari:
+    1. Hitung total pendapatan hari ini dari REKAPAN
+    2. Kalikan (1 - 0.7%) = pendapatan setelah pajak merchant
+    3. Tulis ke spreadsheet REKAPAN MODAL, kolom B pada baris tanggal hari ini
+    
+    Return: {'total': int, 'setelah_pajak': int, 'pajak': int} atau None jika gagal
+    """
+    now = datetime.now()
+
+    # 1. Hitung total pendapatan hari ini
+    rekap = rekap_pendapatan("hari_ini")
+    if rekap is None or rekap["total_pendapatan"] == 0:
+        return {"total": 0, "setelah_pajak": 0, "pajak": 0}
+
+    total = rekap["total_pendapatan"]
+    pajak = int(total * PAJAK_MERCHANT)
+    setelah_pajak = total - pajak
+
+    # 2. Buka spreadsheet REKAPAN MODAL
+    client = get_client()
+    spreadsheet_modal = client.open(SPREADSHEET_MODAL)
+    sheet_modal = spreadsheet_modal.worksheet(SHEET_MODAL)
+
+    # 3. Cari baris dengan tanggal hari ini (format DD/MM/YYYY)
+    tanggal_hari_ini = now.strftime("%d/%m/%Y")
+    semua_data = sheet_modal.get_all_values()
+
+    baris_target = None
+    for i, baris in enumerate(semua_data):
+        if len(baris) > 0 and baris[0].strip() == tanggal_hari_ini:
+            baris_target = i + 1  # gspread index dari 1
+            break
+
+    if baris_target is None:
+        return None  # Tanggal tidak ditemukan di REKAPAN MODAL
+
+    # 4. Tulis setelah_pajak ke kolom B
+    col_b = gspread.utils.rowcol_to_a1(baris_target, 2)
+    sheet_modal.update_acell(col_b, f"Rp{setelah_pajak:,}".replace(",", ","))
+
+    return {
+        "total": total,
+        "setelah_pajak": setelah_pajak,
+        "pajak": pajak,
+        "detail": rekap["detail"],
+        "total_order": rekap["total_order"],
+    }
 
 
 def format_template_bulanan(data: dict, tanggal_logout: str, tipe: str) -> str:

@@ -35,6 +35,8 @@ from sheets_handler import (
     gantihari,
     verifikasi_slot_masih_kosong,
     get_spreadsheet,
+    rekap_pendapatan,
+    closing_hari,
     _order_lock,
 )
 
@@ -1064,6 +1066,113 @@ async def cmd_gantihari(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await pesan.edit_text("⚠️ Gagal proses ganti hari.")
 
 
+# ─── /rekap ────────────────────────────────────────────────
+
+async def cmd_rekap(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Lihat rekap pendapatan."""
+    if update.effective_user.id != ADMIN_ID:
+        await update.message.reply_text("⛔ Hanya admin utama.")
+        return
+
+    keyboard = [
+        [InlineKeyboardButton("📅 Hari Ini", callback_data="rekap_hari_ini")],
+        [InlineKeyboardButton("📆 Minggu Ini", callback_data="rekap_minggu_ini")],
+        [InlineKeyboardButton("📊 Bulan Ini", callback_data="rekap_bulan_ini")],
+    ]
+    await update.message.reply_text(
+        "📊 *REKAP PENDAPATAN*\n\nPilih periode:",
+        parse_mode="Markdown",
+        reply_markup=InlineKeyboardMarkup(keyboard)
+    )
+
+
+async def callback_rekap(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Handle pilihan periode rekap."""
+    query = update.callback_query
+    await query.answer()
+
+    periode_map = {
+        "rekap_hari_ini": "hari_ini",
+        "rekap_minggu_ini": "minggu_ini",
+        "rekap_bulan_ini": "bulan_ini",
+    }
+    periode = periode_map.get(query.data)
+    if not periode:
+        return
+
+    await query.edit_message_text("🔍 Menghitung rekap...")
+
+    try:
+        rekap = rekap_pendapatan(periode)
+
+        if rekap is None:
+            await query.edit_message_text("⚠️ Sheet rekapan tidak ditemukan.")
+            return
+
+        if rekap["total_order"] == 0:
+            await query.edit_message_text("ℹ️ Belum ada order untuk periode ini.")
+            return
+
+        label = {"hari_ini": "HARI INI", "minggu_ini": "MINGGU INI", "bulan_ini": "BULAN INI"}
+        teks = f"📊 *REKAP {label[periode]}*\n"
+        teks += f"_{rekap['tanggal_range']}_\n"
+        teks += "━━━━━━━━━━━━━━━━\n"
+        teks += f"📦 Total Order: *{rekap['total_order']}*\n\n"
+        teks += "Detail:\n"
+
+        for durasi, info in sorted(rekap["detail"].items()):
+            teks += f"• {durasi}: {info['count']}x (Rp{info['total']:,})\n"
+
+        teks += f"\n💰 *Total Pendapatan: Rp{rekap['total_pendapatan']:,}*\n"
+        teks += "━━━━━━━━━━━━━━━━"
+
+        await query.edit_message_text(teks, parse_mode="Markdown")
+
+    except Exception as e:
+        logger.error(f"Error rekap: {e}", exc_info=True)
+        await query.edit_message_text("⚠️ Gagal menghitung rekap.")
+
+
+# ─── /closing ──────────────────────────────────────────────
+
+async def cmd_closing(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Closing hari: hitung pendapatan, potong pajak 0.7%, tulis ke REKAPAN MODAL."""
+    if update.effective_user.id != ADMIN_ID:
+        await update.message.reply_text("⛔ Hanya admin utama.")
+        return
+
+    pesan = await update.message.reply_text("🔄 Proses closing hari ini...")
+
+    try:
+        result = closing_hari()
+
+        if result is None:
+            await pesan.edit_text(
+                "❌ Tanggal hari ini tidak ditemukan di spreadsheet REKAPAN MODAL.\n"
+                "Pastikan tanggal sudah ada di kolom A."
+            )
+            return
+
+        if result["total"] == 0:
+            await pesan.edit_text("ℹ️ Belum ada pendapatan hari ini.")
+            return
+
+        teks = (
+            f"✅ *CLOSING HARI INI BERHASIL*\n"
+            f"━━━━━━━━━━━━━━━━\n"
+            f"📦 Total Order: *{result['total_order']}*\n"
+            f"💰 Total Pendapatan: Rp{result['total']:,}\n"
+            f"📉 Pajak Merchant (0.7%): -Rp{result['pajak']:,}\n"
+            f"✅ *Ditulis ke REKAPAN MODAL: Rp{result['setelah_pajak']:,}*\n"
+            f"━━━━━━━━━━━━━━━━"
+        )
+        await pesan.edit_text(teks, parse_mode="Markdown")
+
+    except Exception as e:
+        logger.error(f"Error closing: {e}", exc_info=True)
+        await pesan.edit_text("⚠️ Gagal proses closing.")
+
+
 # ─── /cancel ───────────────────────────────────────────────
 
 async def callback_order_lagi(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
@@ -1138,6 +1247,8 @@ async def post_init(application):
                 BotCommand("stok", "Cek stok slot kosong"),
                 BotCommand("ceklogout", "Cek akun yang perlu di-logout"),
                 BotCommand("gantihari", "Ganti hari & ubah warna besok"),
+                BotCommand("rekap", "Lihat rekap pendapatan"),
+                BotCommand("closing", "Closing hari & tulis ke REKAPAN MODAL"),
                 BotCommand("adduser", "Tambah user"),
                 BotCommand("removeuser", "Hapus user"),
                 BotCommand("listuser", "Lihat daftar user"),
@@ -1202,6 +1313,9 @@ def main():
     app.add_handler(CommandHandler("stok", stok))
     app.add_handler(CommandHandler("ceklogout", ceklogout))
     app.add_handler(CommandHandler("gantihari", cmd_gantihari))
+    app.add_handler(CommandHandler("rekap", cmd_rekap))
+    app.add_handler(CommandHandler("closing", cmd_closing))
+    app.add_handler(CallbackQueryHandler(callback_rekap, pattern="^rekap_"))
     app.add_handler(CommandHandler("adduser", adduser))
     app.add_handler(CommandHandler("removeuser", removeuser))
     app.add_handler(CommandHandler("listuser", listuser))
