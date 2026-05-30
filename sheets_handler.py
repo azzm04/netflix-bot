@@ -845,7 +845,7 @@ def closing_hari() -> dict:
 
     # 4. Tulis setelah_pajak ke kolom B
     col_b = gspread.utils.rowcol_to_a1(baris_target, 2)
-    sheet_modal.update_acell(col_b, f"Rp{setelah_pajak:,}".replace(",", ","))
+    sheet_modal.update_acell(col_b, f"{setelah_pajak:,}".replace(",", ","))
 
     return {
         "total": total,
