@@ -13,7 +13,7 @@ from config import (
     COL_EMAIL, COL_PASSWORD, COL_PROFILE, COL_PIN,
     COL_LOGOUT, COL_PHONE, DATA_START_ROW, JAM_LOGOUT,
     HARGA, HARGA_BULANAN, DURASI_BULANAN_HARI,
-    SPREADSHEET_MODAL, SHEET_MODAL, PAJAK_MERCHANT
+    SPREADSHEET_MODAL_ID, SHEET_MODAL, PAJAK_MERCHANT
 )
 
 # Scope yang dibutuhkan untuk akses Google Sheets
@@ -325,10 +325,18 @@ def _ubah_warna_biru_besok(sheet, tanggal_besok_str: str):
     """
     Cari semua cell di kolom E yang mengandung tanggal besok,
     lalu ubah format: font Netflix Sans, size 12, bold, warna biru.
-    tanggal_besok_str: misal "28 Mei"
+    Pakai batch format (1 API call) untuk hindari rate limit.
     """
     semua_data = sheet.get_all_values()
     ranges_to_format = []
+
+    # Buat pattern yang strict: "1 Juni" harus match exact (bukan "11 Juni" atau "21 Juni")
+    # Cek: teks dimulai dengan angka tanggal + spasi + bulan
+    parts = tanggal_besok_str.split()
+    if len(parts) < 2:
+        return 0
+    hari_besok = parts[0]  # misal "1"
+    bulan_besok = parts[1]  # misal "Juni"
 
     for i, baris in enumerate(semua_data):
         nomor_baris = i + 1
@@ -341,12 +349,14 @@ def _ubah_warna_biru_besok(sheet, tanggal_besok_str: str):
         if not logout_text or logout_text.upper() == "EXPIRED":
             continue
 
-        # Cek apakah mengandung tanggal besok
-        if tanggal_besok_str.lower() in logout_text.lower():
-            cell_ref = gspread.utils.rowcol_to_a1(nomor_baris, COL_LOGOUT + 1)
-            ranges_to_format.append(cell_ref)
+        # Strict match: split teks logout, cek hari dan bulan exact
+        logout_parts = logout_text.split()
+        if len(logout_parts) >= 2:
+            if logout_parts[0] == hari_besok and logout_parts[1].lower() == bulan_besok.lower():
+                cell_ref = gspread.utils.rowcol_to_a1(nomor_baris, COL_LOGOUT + 1)
+                ranges_to_format.append(cell_ref)
 
-    # Ubah format: Netflix Sans, size 12, bold, warna biru
+    # Batch format: semua cell dalam 1 API call
     if ranges_to_format:
         format_config = {
             "textFormat": {
@@ -358,8 +368,9 @@ def _ubah_warna_biru_besok(sheet, tanggal_besok_str: str):
                 }
             }
         }
-        for cell_ref in ranges_to_format:
-            sheet.format(cell_ref, format_config)
+        # Gabung semua range jadi 1 batch call
+        batch_formats = [{"range": r, "format": format_config} for r in ranges_to_format]
+        sheet.batch_format(batch_formats)
 
     return len(ranges_to_format)
 
@@ -419,10 +430,10 @@ def gantihari():
 # ─── Helper ────────────────────────────────────────────────
 
 def pilih_sheet(durasi: int):
-    """Pilih sheet: 1/2/3 → HARIAN, 7 → MINGGUAN."""
+    """Pilih sheet: 1/2/3 → HARIAN, 7/14 → MINGGUAN."""
     if durasi in [1, 2, 3]:
         return SHEET_HARIAN
-    elif durasi == 7:
+    elif durasi in [7, 14]:
         return SHEET_MINGGUAN
     return SHEET_HARIAN
 
@@ -825,9 +836,9 @@ def closing_hari() -> dict:
     pajak = int(total * PAJAK_MERCHANT)
     setelah_pajak = total - pajak
 
-    # 2. Buka spreadsheet REKAPAN MODAL
+    # 2. Buka spreadsheet REKAPAN MODAL (pakai ID)
     client = get_client()
-    spreadsheet_modal = client.open(SPREADSHEET_MODAL)
+    spreadsheet_modal = client.open_by_key(SPREADSHEET_MODAL_ID)
     sheet_modal = spreadsheet_modal.worksheet(SHEET_MODAL)
 
     # 3. Cari baris dengan tanggal hari ini (format DD/MM/YYYY)

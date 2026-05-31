@@ -16,7 +16,7 @@ from telegram.ext import (
     ContextTypes,
     filters,
 )
-from config import BOT_TOKEN, ADMIN_CHAT_ID, ADMIN_ID, USERS_FILE, HARGA, HARGA_BULANAN
+from config import BOT_TOKEN, ADMIN_ID, USERS_FILE, HARGA, HARGA_BULANAN, NOTIF_ORDER_IDS
 import gspread
 from sheets_handler import (
     cari_slot_kosong,
@@ -98,7 +98,7 @@ def is_allowed(user_id: int) -> bool:
 
 
 async def kirim_notif_admin(context: ContextTypes.DEFAULT_TYPE, data: dict):
-    """Kirim notifikasi order berhasil ke admin."""
+    """Kirim notifikasi order berhasil ke semua ID di NOTIF_ORDER_IDS."""
     now = datetime.now()
     tanggal = now.strftime("%d/%b/%Y")
     waktu = now.strftime("%H:%M")
@@ -116,14 +116,15 @@ async def kirim_notif_admin(context: ContextTypes.DEFAULT_TYPE, data: dict):
         f"━━━━━━━━━━━━━━━━"
     )
 
-    try:
-        await context.bot.send_message(
-            chat_id=ADMIN_CHAT_ID,
-            text=teks,
-            parse_mode="Markdown"
-        )
-    except Exception as e:
-        logger.error(f"Gagal kirim notif admin: {e}")
+    for chat_id in NOTIF_ORDER_IDS:
+        try:
+            await context.bot.send_message(
+                chat_id=chat_id,
+                text=teks,
+                parse_mode="Markdown"
+            )
+        except Exception as e:
+            logger.error(f"Gagal kirim notif ke {chat_id}: {e}")
 
 # State untuk ConversationHandler
 (TANYA_TIPE, TANYA_DURASI, TANYA_NOMOR, TANYA_DEVICE,
@@ -208,6 +209,7 @@ async def callback_tipe(update: Update, context: ContextTypes.DEFAULT_TYPE) -> i
                 InlineKeyboardButton("3 Hari", callback_data="durasi_3"),
                 InlineKeyboardButton("7 Hari", callback_data="durasi_7"),
             ],
+            [InlineKeyboardButton("14 Hari", callback_data="durasi_14")],
             [InlineKeyboardButton("⬅️ Kembali", callback_data="back_tipe")],
         ]
         await query.edit_message_text(
@@ -269,6 +271,7 @@ async def callback_back_durasi(update: Update, context: ContextTypes.DEFAULT_TYP
             InlineKeyboardButton("3 Hari", callback_data="durasi_3"),
             InlineKeyboardButton("7 Hari", callback_data="durasi_7"),
         ],
+        [InlineKeyboardButton("14 Hari", callback_data="durasi_14")],
         [InlineKeyboardButton("⬅️ Kembali", callback_data="back_tipe")],
     ]
     await query.edit_message_text(
@@ -385,8 +388,12 @@ def _parse_durasi(value: str) -> dict:
 
     durasi_int = int(angka)
 
-    # Angka besar (>7) tanpa kata "bulan" → tetap dianggap bulanan (backward compat)
-    if durasi_int > 7:
+    # 14 hari = mingguan (bukan bulanan)
+    if durasi_int == 14:
+        return {"durasi": 14, "mode": "harian", "tipe": None}
+
+    # Angka besar (>14) tanpa kata "bulan" → dianggap bulanan
+    if durasi_int > 14:
         jumlah_bulan = 1 if durasi_int <= 30 else 2
         return {
             "durasi": durasi_int,

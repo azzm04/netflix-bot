@@ -5,7 +5,6 @@
 import os
 
 # Token dari @BotFather Telegram
-# Di Railway: set sebagai environment variable BOT_TOKEN
 BOT_TOKEN = os.getenv("BOT_TOKEN", "8976693990:AAF4tkZE5p2W-tRqd3bgyfPCN02X7tBKdc8")
 
 # Nama file credentials Google Service Account
@@ -15,7 +14,7 @@ CREDENTIALS_FILE = "credentials.json"
 SPREADSHEET_NAME = "netflix account jaeminies's"
 
 # Spreadsheet REKAPAN MODAL (untuk /closing)
-SPREADSHEET_MODAL = "REKAPAN MODAL"
+SPREADSHEET_MODAL_ID = "1-o6jOoE3rH2SOlH9975HODC7MpzDBg8zD8Z1RLnRK7g"
 SHEET_MODAL = "modal netflix"
 
 # Pajak merchant (0.7%)
@@ -38,10 +37,10 @@ COL_PHONE      = 5   # F - nomor telepon pelanggan
 DATA_START_ROW = 2
 
 # Jam logout default
-JAM_LOGOUT = "19:00"
+JAM_LOGOUT = "10:00"
 
-# ---- Admin Chat ID (untuk notifikasi order) ----
-ADMIN_CHAT_ID = 5728717900
+# ---- ID yang menerima notifikasi setiap order berhasil ----
+NOTIF_ORDER_IDS = -1005278264601
 
 # ---- User yang boleh pakai bot (whitelist) ----
 # Admin utama yang tidak bisa dihapus
@@ -52,10 +51,11 @@ USERS_FILE = "allowed_users.json"
 
 # ---- Harga berdasarkan durasi (Harian/Mingguan) ----
 HARGA = {
-    1: "Rp5,000",
-    2: "Rp7,000",
-    3: "Rp10,000",
-    7: "Rp17,000",
+    1: "Rp6,000",
+    2: "Rp8,000",
+    3: "Rp12,000",
+    7: "Rp20,000",
+    14: "Rp30,000",
 }
 
 # ---- Harga Bulanan ----
