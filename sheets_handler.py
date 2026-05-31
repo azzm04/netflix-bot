@@ -361,7 +361,7 @@ def _ubah_warna_biru_besok(sheet, tanggal_besok_str: str):
         format_config = {
             "textFormat": {
                 "fontFamily": "Netflix Sans",
-                "fontSize": 12,
+                "fontSize": 11,
                 "bold": True,
                 "foregroundColorStyle": {
                     "rgbColor": {"red": 0, "green": 0, "blue": 1}
