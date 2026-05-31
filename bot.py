@@ -1175,6 +1175,15 @@ async def cmd_closing(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
         await pesan.edit_text(teks, parse_mode="Markdown")
 
+        # Kirim juga ke grup
+        for chat_id in NOTIF_ORDER_IDS:
+            try:
+                await context.bot.send_message(
+                    chat_id=chat_id, text=teks, parse_mode="Markdown"
+                )
+            except Exception:
+                pass
+
     except Exception as e:
         logger.error(f"Error closing: {e}", exc_info=True)
         await pesan.edit_text("⚠️ Gagal proses closing.")
