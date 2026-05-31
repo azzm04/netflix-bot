@@ -40,7 +40,7 @@ DATA_START_ROW = 2
 JAM_LOGOUT = "10:00"
 
 # ---- ID yang menerima notifikasi setiap order berhasil ----
-NOTIF_ORDER_IDS = -1005278264601
+NOTIF_ORDER_IDS = [-1005278264601]
 
 # ---- User yang boleh pakai bot (whitelist) ----
 # Admin utama yang tidak bisa dihapus
