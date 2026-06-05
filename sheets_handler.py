@@ -285,11 +285,19 @@ def cek_logout():
 def _cek_masih_ada_hari_ini(sheet, tanggal_str: str):
     """
     Cek apakah masih ada akun dengan tanggal hari ini di kolom E yang belum expired.
-    tanggal_str: misal "27 Mei"
+    tanggal_str: misal "5 Juni" atau "27 Mei"
     Return: list of dict akun yang masih aktif hari ini.
     """
     semua_data = sheet.get_all_values()
     masih_aktif = []
+
+    # Pecah tanggal_str jadi hari dan bulan untuk exact match
+    # misal "5 Juni" → hari="5", bulan="juni"
+    parts_target = tanggal_str.strip().split()
+    if len(parts_target) < 2:
+        return masih_aktif
+    hari_target  = parts_target[0]   # "5"
+    bulan_target = parts_target[1].lower()  # "juni"
 
     for i, baris in enumerate(semua_data):
         nomor_baris = i + 1
@@ -302,22 +310,25 @@ def _cek_masih_ada_hari_ini(sheet, tanggal_str: str):
         if not logout_text or logout_text.upper() == "EXPIRED":
             continue
 
-        # Cek apakah tanggal di kolom E mengandung tanggal hari ini
-        if tanggal_str.lower() in logout_text.lower():
-            # Cek apakah jam-nya sudah lewat
-            tgl_logout = _parse_tanggal_logout(logout_text)
-            if tgl_logout and tgl_logout > datetime.now():
-                # Masih aktif (belum lewat jam-nya)
-                email = baris[COL_EMAIL].strip()
-                profil = baris[COL_PROFILE].strip() if len(baris) > COL_PROFILE else ""
-                pelanggan = baris[COL_PHONE].strip() if len(baris) > COL_PHONE else ""
-                masih_aktif.append({
-                    "baris": nomor_baris,
-                    "email": email,
-                    "profil": profil,
-                    "logout_text": logout_text,
-                    "pelanggan": pelanggan,
-                })
+        # Exact match: split logout_text, cek hari == hari_target DAN bulan == bulan_target
+        # "5 Juni 10:00" → parts[0]="5", parts[1]="Juni"
+        # "15 Juni 10:00" → parts[0]="15" → TIDAK cocok dengan hari_target="5"
+        parts_logout = logout_text.split()
+        if len(parts_logout) >= 2:
+            if parts_logout[0] == hari_target and parts_logout[1].lower() == bulan_target:
+                # Cek apakah jam-nya sudah lewat
+                tgl_logout = _parse_tanggal_logout(logout_text)
+                if tgl_logout and tgl_logout > datetime.now():
+                    email = baris[COL_EMAIL].strip()
+                    profil = baris[COL_PROFILE].strip() if len(baris) > COL_PROFILE else ""
+                    pelanggan = baris[COL_PHONE].strip() if len(baris) > COL_PHONE else ""
+                    masih_aktif.append({
+                        "baris": nomor_baris,
+                        "email": email,
+                        "profil": profil,
+                        "logout_text": logout_text,
+                        "pelanggan": pelanggan,
+                    })
 
     return masih_aktif
 
