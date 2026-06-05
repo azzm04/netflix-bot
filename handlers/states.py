@@ -1,0 +1,15 @@
+# ============================================================
+#  handlers/states.py — State constants untuk ConversationHandler
+# ============================================================
+
+# Semua state integer untuk ConversationHandler
+(TANYA_TIPE, TANYA_DURASI, TANYA_NOMOR, TANYA_DEVICE,
+ TANYA_PAKET_BULANAN, TANYA_NOMOR_BULANAN, TANYA_DEVICE_BULANAN,
+ TANYA_QUICK_ORDER,
+ FEE_TANYA_TANGGAL, FEE_TANYA_NOMINAL, FEE_KONFIRMASI,
+ GESTUN_PILIH_MODE,
+ GESTUN_TANYA_TANGGAL, GESTUN_TANYA_NOMINAL, GESTUN_TANYA_PERSEN, GESTUN_KONFIRMASI,
+ GESTUN_QUICK,
+ MODAL_PILIH_MODE,
+ MODAL_TANYA_TANGGAL, MODAL_TANYA_NOMINAL, MODAL_TANYA_KET, MODAL_KONFIRMASI,
+ MODAL_QUICK) = range(23)
