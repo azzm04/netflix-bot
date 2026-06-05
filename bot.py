@@ -124,7 +124,7 @@ def main():
     if job_queue is not None:
         job_queue.run_daily(
             auto_closing,
-            time=dt_time(hour=23, minute=59, second=0),
+            time=dt_time(hour=23, minute=59, second=30),
             name="auto_closing_harian",
         )
         logger.info("✅ Auto closing dijadwalkan setiap hari jam 23:59")
