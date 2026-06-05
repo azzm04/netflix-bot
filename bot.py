@@ -38,6 +38,7 @@ from sheets_handler import (
     rekap_pendapatan,
     closing_hari,
     tulis_fee_admin,
+    tulis_gestun,
     _order_lock,
 )
 
@@ -131,7 +132,10 @@ async def kirim_notif_admin(context: ContextTypes.DEFAULT_TYPE, data: dict):
 (TANYA_TIPE, TANYA_DURASI, TANYA_NOMOR, TANYA_DEVICE,
  TANYA_PAKET_BULANAN, TANYA_NOMOR_BULANAN, TANYA_DEVICE_BULANAN,
  TANYA_QUICK_ORDER,
- FEE_TANYA_TANGGAL, FEE_TANYA_NOMINAL, FEE_KONFIRMASI) = range(11)
+ FEE_TANYA_TANGGAL, FEE_TANYA_NOMINAL, FEE_KONFIRMASI,
+ GESTUN_PILIH_MODE,
+ GESTUN_TANYA_TANGGAL, GESTUN_TANYA_NOMINAL, GESTUN_TANYA_PERSEN, GESTUN_KONFIRMASI,
+ GESTUN_QUICK) = range(17)
 
 # Mapping device
 DEVICE_MAP = {
@@ -1201,6 +1205,399 @@ async def cmd_closing(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await pesan.edit_text("⚠️ Gagal proses closing.")
 
 
+# ─── /gestun ───────────────────────────────────────────────
+
+def _parse_quick_gestun(teks: str) -> dict:
+    """
+    Parse form quick gestun.
+    Format:
+    𖥻 Tanggal (dd/mm/yy) : 05/06/26
+    𖥻 Nominal : 2000000
+    𖥻 Keuntungan (opsional) : 5
+
+    Return: {'tanggal': str DD/MM/YYYY, 'nominal': int, 'persen': float|None}
+            atau None jika gagal parse.
+    """
+    result = {"tanggal": None, "nominal": None, "persen": None}
+
+    for line in teks.strip().split("\n"):
+        line = line.strip()
+        if ":" not in line:
+            continue
+        value = line.split(":", 1)[1].strip()
+        lower = line.lower()
+
+        if "tanggal" in lower:
+            # Support DD/MM/YY dan DD/MM/YYYY
+            val = value.strip()
+            # Coba parse berbagai format
+            for fmt in ("%d/%m/%Y", "%d/%m/%y"):
+                try:
+                    tgl = datetime.strptime(val, fmt)
+                    result["tanggal"] = tgl.strftime("%d/%m/%Y")
+                    break
+                except ValueError:
+                    continue
+
+        elif "nominal" in lower:
+            bersih = "".join(c for c in value if c.isdigit())
+            if bersih:
+                result["nominal"] = int(bersih)
+
+        elif "keuntungan" in lower:
+            if value.strip() in ("-", "", "0", "tidak ada", "none"):
+                result["persen"] = None
+            else:
+                bersih = value.replace("%", "").replace(",", ".").strip()
+                try:
+                    p = float(bersih)
+                    result["persen"] = p if 0 < p <= 100 else None
+                except ValueError:
+                    result["persen"] = None
+
+    if result["tanggal"] is None or result["nominal"] is None:
+        return None
+    return result
+
+
+def _format_konfirmasi_gestun(tanggal: str, nominal: int, persen) -> str:
+    """Format pesan konfirmasi gestun."""
+    persen_str = f"{persen}%" if persen is not None else "-"
+    hasil_str = f"Rp{int(nominal * persen / 100):,}" if persen is not None else "-"
+    return (
+        f"💳 *KONFIRMASI DATA GESTUN*\n"
+        f"━━━━━━━━━━━━━━━━\n"
+        f"📅 Tanggal       : `{tanggal}`\n"
+        f"💰 Nominal       : *Rp{nominal:,}*\n"
+        f"📊 Keuntungan % : *{persen_str}*\n"
+        f"✅ Hasil Bersih  : *{hasil_str}*\n"
+        f"━━━━━━━━━━━━━━━━\n"
+        f"Simpan ke sheet REKAPAN MODAL?"
+    )
+
+
+async def cmd_gestun(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    """Mulai input data gestun. Hanya admin, hanya di group."""
+    if update.effective_user.id != ADMIN_ID:
+        await update.message.reply_text("⛔ Hanya admin utama.")
+        return ConversationHandler.END
+
+    if update.effective_chat.type not in ("group", "supergroup"):
+        await update.message.reply_text("⛔ Command ini hanya bisa digunakan di dalam group.")
+        return ConversationHandler.END
+
+    keyboard = [
+        [InlineKeyboardButton("⚡ Quick (paste form)", callback_data="gestun_mode_quick")],
+        [InlineKeyboardButton("📝 Step-by-step", callback_data="gestun_mode_step")],
+        [InlineKeyboardButton("❌ Batal", callback_data="gestun_batal")],
+    ]
+    await update.message.reply_text(
+        "💳 *INPUT DATA GESTUN*\n\nPilih mode input:",
+        parse_mode="Markdown",
+        reply_markup=InlineKeyboardMarkup(keyboard)
+    )
+    return GESTUN_PILIH_MODE
+
+
+async def callback_gestun_pilih_mode(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    """Pilih mode quick atau step-by-step."""
+    query = update.callback_query
+    await query.answer()
+
+    if query.data == "gestun_batal":
+        await query.edit_message_text("❌ Input gestun dibatalkan.")
+        return ConversationHandler.END
+
+    if query.data == "gestun_mode_quick":
+        await query.edit_message_text(
+            "💳 *QUICK GESTUN*\n\n"
+            "Paste form berikut (isi nilainya):\n\n"
+            "```\n"
+            "𖥻 Tanggal (dd/mm/yy) : \n"
+            "𖥻 Nominal : \n"
+            "𖥻 Keuntungan (opsional) : \n"
+            "```\n\n"
+            "_Keuntungan bisa dikosongkan atau isi `-` jika tidak ada._",
+            parse_mode="Markdown"
+        )
+        return GESTUN_QUICK
+
+    elif query.data == "gestun_mode_step":
+        now = datetime.now()
+        tanggal_hari_ini = now.strftime("%d/%m/%Y")
+        keyboard = [
+            [InlineKeyboardButton(f"📅 Hari ini ({tanggal_hari_ini})", callback_data="gestun_tgl_hari_ini")],
+            [InlineKeyboardButton("✏️ Tanggal lain", callback_data="gestun_tgl_custom")],
+            [InlineKeyboardButton("❌ Batal", callback_data="gestun_batal_step")],
+        ]
+        await query.edit_message_text(
+            "💳 *INPUT DATA GESTUN*\n\nPilih tanggal transaksi:",
+            parse_mode="Markdown",
+            reply_markup=InlineKeyboardMarkup(keyboard)
+        )
+        return GESTUN_TANYA_TANGGAL
+
+    return GESTUN_PILIH_MODE
+
+
+# ── Quick mode ──────────────────────────────────────────────
+
+async def terima_quick_gestun(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    """Parse form quick gestun dan tampilkan konfirmasi."""
+    teks = update.message.text
+
+    data = _parse_quick_gestun(teks)
+    if data is None:
+        await update.message.reply_text(
+            "❌ Format tidak valid. Pastikan tanggal dan nominal terisi.\n\n"
+            "```\n"
+            "𖥻 Tanggal (dd/mm/yy) : 05/06/26\n"
+            "𖥻 Nominal : 2000000\n"
+            "𖥻 Keuntungan (opsional) : 5\n"
+            "```",
+            parse_mode="Markdown"
+        )
+        return GESTUN_QUICK
+
+    context.user_data["gestun_tanggal"] = data["tanggal"]
+    context.user_data["gestun_nominal"] = data["nominal"]
+    context.user_data["gestun_persen"] = data["persen"]
+
+    keyboard = [
+        [
+            InlineKeyboardButton("✅ Ya, simpan", callback_data="gestun_konfirm_ya"),
+            InlineKeyboardButton("❌ Batal", callback_data="gestun_konfirm_tidak"),
+        ]
+    ]
+    await update.message.reply_text(
+        _format_konfirmasi_gestun(data["tanggal"], data["nominal"], data["persen"]),
+        parse_mode="Markdown",
+        reply_markup=InlineKeyboardMarkup(keyboard)
+    )
+    return GESTUN_KONFIRMASI
+
+
+# ── Step-by-step mode ───────────────────────────────────────
+
+async def callback_gestun_pilih_tanggal(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    """Proses pilihan tanggal gestun (step mode)."""
+    query = update.callback_query
+    await query.answer()
+
+    if query.data in ("gestun_batal", "gestun_batal_step"):
+        await query.edit_message_text("❌ Input gestun dibatalkan.")
+        context.user_data.clear()
+        return ConversationHandler.END
+
+    if query.data == "gestun_tgl_hari_ini":
+        tanggal = datetime.now().strftime("%d/%m/%Y")
+        context.user_data["gestun_tanggal"] = tanggal
+        await query.edit_message_text(
+            f"💳 *INPUT DATA GESTUN*\n\n"
+            f"📅 Tanggal: `{tanggal}`\n\n"
+            f"Masukkan *nominal* (angka saja, contoh: `2000000`):",
+            parse_mode="Markdown"
+        )
+        return GESTUN_TANYA_NOMINAL
+
+    elif query.data == "gestun_tgl_custom":
+        await query.edit_message_text(
+            "💳 *INPUT DATA GESTUN*\n\n"
+            "Masukkan tanggal format *DD/MM/YYYY* atau *DD/MM/YY*\n"
+            "Contoh: `05/06/2026` atau `05/06/26`",
+            parse_mode="Markdown"
+        )
+        return GESTUN_TANYA_TANGGAL
+
+    return GESTUN_TANYA_TANGGAL
+
+
+async def terima_tanggal_gestun(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    """Terima input tanggal custom untuk gestun."""
+    teks = update.message.text.strip()
+
+    tanggal_fmt = None
+    for fmt in ("%d/%m/%Y", "%d/%m/%y"):
+        try:
+            tgl = datetime.strptime(teks, fmt)
+            tanggal_fmt = tgl.strftime("%d/%m/%Y")
+            break
+        except ValueError:
+            continue
+
+    if tanggal_fmt is None:
+        await update.message.reply_text(
+            "❌ Format tanggal tidak valid.\n\n"
+            "Gunakan *DD/MM/YYYY* atau *DD/MM/YY*, contoh: `05/06/26`\n\n"
+            "Atau ketik /cancel untuk membatalkan.",
+            parse_mode="Markdown"
+        )
+        return GESTUN_TANYA_TANGGAL
+
+    context.user_data["gestun_tanggal"] = tanggal_fmt
+    await update.message.reply_text(
+        f"💳 *INPUT DATA GESTUN*\n\n"
+        f"📅 Tanggal: `{tanggal_fmt}`\n\n"
+        f"Masukkan *nominal* (angka saja, contoh: `2000000`):",
+        parse_mode="Markdown"
+    )
+    return GESTUN_TANYA_NOMINAL
+
+
+async def terima_nominal_gestun(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    """Terima nominal gestun, lalu tanya persentase."""
+    teks = update.message.text.strip()
+    bersih = "".join(c for c in teks if c.isdigit())
+
+    if not bersih or int(bersih) <= 0:
+        await update.message.reply_text(
+            "❌ Nominal tidak valid. Masukkan angka saja.\n"
+            "Contoh: `2000000`",
+            parse_mode="Markdown"
+        )
+        return GESTUN_TANYA_NOMINAL
+
+    context.user_data["gestun_nominal"] = int(bersih)
+    tanggal = context.user_data.get("gestun_tanggal", "?")
+
+    keyboard = [
+        [InlineKeyboardButton("⏭️ Lewati (tidak ada %)", callback_data="gestun_persen_skip")],
+        [InlineKeyboardButton("❌ Batal", callback_data="gestun_persen_batal")],
+    ]
+    await update.message.reply_text(
+        f"💳 *INPUT DATA GESTUN*\n\n"
+        f"📅 Tanggal : `{tanggal}`\n"
+        f"💰 Nominal : *Rp{int(bersih):,}*\n\n"
+        f"Masukkan *% keuntungan* (contoh: `5` untuk 5%)\n"
+        f"Atau tekan *Lewati* jika tidak ada:",
+        parse_mode="Markdown",
+        reply_markup=InlineKeyboardMarkup(keyboard)
+    )
+    return GESTUN_TANYA_PERSEN
+
+
+async def callback_gestun_persen(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    """Proses pilihan skip/batal untuk persen gestun."""
+    query = update.callback_query
+    await query.answer()
+
+    if query.data == "gestun_persen_batal":
+        await query.edit_message_text("❌ Input gestun dibatalkan.")
+        context.user_data.clear()
+        return ConversationHandler.END
+
+    # Skip → persen = None
+    context.user_data["gestun_persen"] = None
+    tanggal = context.user_data.get("gestun_tanggal", "?")
+    nominal = context.user_data.get("gestun_nominal", 0)
+
+    keyboard = [
+        [
+            InlineKeyboardButton("✅ Ya, simpan", callback_data="gestun_konfirm_ya"),
+            InlineKeyboardButton("❌ Batal", callback_data="gestun_konfirm_tidak"),
+        ]
+    ]
+    await query.edit_message_text(
+        _format_konfirmasi_gestun(tanggal, nominal, None),
+        parse_mode="Markdown",
+        reply_markup=InlineKeyboardMarkup(keyboard)
+    )
+    return GESTUN_KONFIRMASI
+
+
+async def terima_persen_gestun(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    """Terima input % keuntungan, tampilkan konfirmasi."""
+    teks = update.message.text.strip().replace("%", "").replace(",", ".")
+
+    try:
+        persen = float(teks)
+        if persen < 0 or persen > 100:
+            raise ValueError
+    except ValueError:
+        await update.message.reply_text(
+            "❌ Persentase tidak valid. Masukkan angka 0-100.\n"
+            "Contoh: `5` atau `2.5`",
+            parse_mode="Markdown"
+        )
+        return GESTUN_TANYA_PERSEN
+
+    context.user_data["gestun_persen"] = persen
+    tanggal = context.user_data.get("gestun_tanggal", "?")
+    nominal = context.user_data.get("gestun_nominal", 0)
+
+    keyboard = [
+        [
+            InlineKeyboardButton("✅ Ya, simpan", callback_data="gestun_konfirm_ya"),
+            InlineKeyboardButton("❌ Batal", callback_data="gestun_konfirm_tidak"),
+        ]
+    ]
+    await update.message.reply_text(
+        _format_konfirmasi_gestun(tanggal, nominal, persen),
+        parse_mode="Markdown",
+        reply_markup=InlineKeyboardMarkup(keyboard)
+    )
+    return GESTUN_KONFIRMASI
+
+
+# ── Shared: konfirmasi & simpan ─────────────────────────────
+
+async def callback_konfirmasi_gestun(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    """Proses konfirmasi dan tulis data gestun ke sheet."""
+    query = update.callback_query
+    await query.answer()
+
+    if query.data == "gestun_konfirm_tidak":
+        await query.edit_message_text("❌ Input gestun dibatalkan.")
+        context.user_data.clear()
+        return ConversationHandler.END
+
+    tanggal = context.user_data.get("gestun_tanggal")
+    nominal = context.user_data.get("gestun_nominal")
+    persen  = context.user_data.get("gestun_persen")
+
+    await query.edit_message_text("🔄 Menyimpan data gestun ke sheet...")
+
+    try:
+        result = tulis_gestun(tanggal, nominal, persen)
+
+        if not result["ok"]:
+            await query.edit_message_text(
+                f"❌ *Gagal menyimpan data gestun*\n\n{result.get('reason', 'Unknown error')}",
+                parse_mode="Markdown"
+            )
+            return ConversationHandler.END
+
+        persen_str = f"{persen}%" if persen is not None else "-"
+        hasil_str  = f"Rp{int(nominal * persen / 100):,}" if persen is not None else "-"
+
+        teks = (
+            f"✅ *DATA GESTUN TERSIMPAN*\n"
+            f"━━━━━━━━━━━━━━━━\n"
+            f"📅 Tanggal       : `{tanggal}`\n"
+            f"💰 Nominal       : *Rp{nominal:,}*\n"
+            f"📊 Keuntungan % : *{persen_str}*\n"
+            f"✅ Hasil Bersih  : *{hasil_str}*\n"
+            f"📊 Baris         : {result['baris']}\n"
+            f"━━━━━━━━━━━━━━━━"
+        )
+        await query.edit_message_text(teks, parse_mode="Markdown")
+        logger.info(f"[GESTUN] {tanggal} | Nominal: {nominal} | Persen: {persen} | Baris: {result['baris']}")
+
+    except Exception as e:
+        logger.error(f"Error tulis gestun: {e}", exc_info=True)
+        await query.edit_message_text("⚠️ Terjadi kesalahan saat menyimpan data gestun.")
+
+    context.user_data.clear()
+    return ConversationHandler.END
+
+
+async def cancel_gestun(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    """Batalkan input gestun."""
+    context.user_data.clear()
+    await update.message.reply_text("❌ Input gestun dibatalkan.")
+    return ConversationHandler.END
+
+
 # ─── Auto Closing (scheduler jam 23:59) ────────────────────
 
 async def auto_closing(context: ContextTypes.DEFAULT_TYPE):
@@ -1511,12 +1908,13 @@ async def post_init(application):
         BotCommand("cancel", "Batalkan proses"),
     ])
 
-    # Menu khusus di GROUP — hanya 3 command ini
+    # Menu khusus di GROUP — hanya command ini
     await application.bot.set_my_commands(
         [
             BotCommand("rekap", "Lihat rekap pendapatan"),
             BotCommand("closing", "Closing hari & tulis ke REKAPAN MODAL"),
             BotCommand("feeadmin", "Input fee admin ke REKAPAN MODAL"),
+            BotCommand("gestun", "Input data gestun ke REKAPAN MODAL"),
         ],
         scope=BotCommandScopeAllGroupChats()
     )
@@ -1652,6 +2050,39 @@ def main():
         allow_reentry=True,
     )
     app.add_handler(fee_conv_handler)
+
+    # ConversationHandler untuk /gestun (input data gestun di group)
+    gestun_conv_handler = ConversationHandler(
+        entry_points=[CommandHandler("gestun", cmd_gestun, filters=GROUP)],
+        states={
+            GESTUN_PILIH_MODE: [
+                CallbackQueryHandler(callback_gestun_pilih_mode, pattern="^gestun_mode_"),
+                CallbackQueryHandler(callback_gestun_pilih_mode, pattern="^gestun_batal$"),
+            ],
+            GESTUN_QUICK: [
+                MessageHandler(filters.TEXT & ~filters.COMMAND & GROUP, terima_quick_gestun),
+            ],
+            GESTUN_TANYA_TANGGAL: [
+                CallbackQueryHandler(callback_gestun_pilih_tanggal, pattern="^gestun_tgl_"),
+                CallbackQueryHandler(callback_gestun_pilih_tanggal, pattern="^gestun_batal_step$"),
+                MessageHandler(filters.TEXT & ~filters.COMMAND & GROUP, terima_tanggal_gestun),
+            ],
+            GESTUN_TANYA_NOMINAL: [
+                MessageHandler(filters.TEXT & ~filters.COMMAND & GROUP, terima_nominal_gestun),
+            ],
+            GESTUN_TANYA_PERSEN: [
+                CallbackQueryHandler(callback_gestun_persen, pattern="^gestun_persen_"),
+                MessageHandler(filters.TEXT & ~filters.COMMAND & GROUP, terima_persen_gestun),
+            ],
+            GESTUN_KONFIRMASI: [
+                CallbackQueryHandler(callback_konfirmasi_gestun, pattern="^gestun_konfirm_"),
+            ],
+        },
+        fallbacks=[CommandHandler("cancel", cancel_gestun)],
+        conversation_timeout=120,
+        allow_reentry=True,
+    )
+    app.add_handler(gestun_conv_handler)
 
     # Handler pesan tidak dikenal — private only (jangan spam balas di group)
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND & PRIVATE, pesan_tidak_dikenal))

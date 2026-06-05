@@ -16,6 +16,7 @@ SPREADSHEET_NAME = "netflix account jaeminies's"
 # Spreadsheet REKAPAN MODAL (untuk /closing)
 SPREADSHEET_MODAL_ID = "1-o6jOoE3rH2SOlH9975HODC7MpzDBg8zD8Z1RLnRK7g"
 SHEET_MODAL = "modal netflix"
+SHEET_GESTUN = "rekapan"   # Sheet PENDAPATAN GESTUN di spreadsheet REKAPAN MODAL
 
 # Pajak merchant (0.7%)
 PAJAK_MERCHANT = 0.007

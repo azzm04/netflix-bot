@@ -13,7 +13,7 @@ from config import (
     COL_EMAIL, COL_PASSWORD, COL_PROFILE, COL_PIN,
     COL_LOGOUT, COL_PHONE, DATA_START_ROW, JAM_LOGOUT,
     HARGA, HARGA_BULANAN, DURASI_BULANAN_HARI,
-    SPREADSHEET_MODAL_ID, SHEET_MODAL, PAJAK_MERCHANT
+    SPREADSHEET_MODAL_ID, SHEET_MODAL, SHEET_GESTUN, PAJAK_MERCHANT
 )
 
 # Scope yang dibutuhkan untuk akses Google Sheets
@@ -845,6 +845,53 @@ def tulis_fee_admin(tanggal_str: str, nominal: int) -> dict:
     sheet_modal.update_acell(col_c, nominal)
 
     return {"ok": True, "baris": baris_target}
+
+
+def tulis_gestun(tanggal_str: str, nominal: int, persen: float = None) -> dict:
+    """
+    Tulis data gestun sebagai baris baru di sheet "rekapan" di spreadsheet REKAPAN MODAL.
+    Struktur kolom:
+      A: Tanggal (DD/MM/YYYY)
+      B: Nominal
+      C: Keuntungan % (opsional, format desimal misal 0.05 untuk 5%)
+      D: Hasil Bersih (formula di sheet, tidak perlu ditulis)
+
+    tanggal_str : format DD/MM/YYYY
+    nominal     : integer (misal 2000000)
+    persen      : float persen keuntungan (misal 5.0 untuk 5%), None jika tidak diisi
+
+    Return:
+    - {'ok': True, 'baris': int}
+    - {'ok': False, 'reason': str}
+    """
+    client = get_client()
+    spreadsheet_modal = client.open_by_key(SPREADSHEET_MODAL_ID)
+    sheet_gestun = spreadsheet_modal.worksheet(SHEET_GESTUN)
+
+    # Cari baris kosong pertama setelah data terakhir (skip header baris 1-2)
+    semua_data = sheet_gestun.get_all_values()
+    baris_tulis = len(semua_data) + 1  # default append di akhir
+    for i in range(len(semua_data) - 1, 1, -1):  # mundur dari bawah, skip 2 baris header
+        if any(cell.strip() for cell in semua_data[i]):
+            baris_tulis = i + 2  # baris setelah baris terakhir yang ada isinya
+            break
+
+    col_a = gspread.utils.rowcol_to_a1(baris_tulis, 1)
+    col_b = gspread.utils.rowcol_to_a1(baris_tulis, 2)
+
+    batch = [
+        {"range": col_a, "values": [[tanggal_str]]},
+        {"range": col_b, "values": [[nominal]]},
+    ]
+
+    # Kolom C: tulis persentase jika diisi (misal 5% → 0.05 agar formula sheet bisa hitung)
+    if persen is not None:
+        col_c = gspread.utils.rowcol_to_a1(baris_tulis, 3)
+        batch.append({"range": col_c, "values": [[persen / 100]]})
+
+    sheet_gestun.batch_update(batch)
+
+    return {"ok": True, "baris": baris_tulis}
 
 
 def closing_hari() -> dict:
