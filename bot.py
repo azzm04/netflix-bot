@@ -1538,12 +1538,19 @@ def main():
 
     # ─── Scheduler: Auto Closing jam 23:59 setiap hari ─────
     job_queue = app.job_queue
-    job_queue.run_daily(
-        auto_closing,
-        time=dt_time(hour=23, minute=59, second=30),
-        name="auto_closing_harian",
-    )
-    logger.info("✅ Auto closing dijadwalkan setiap hari jam 23:59")
+    if job_queue is not None:
+        job_queue.run_daily(
+            auto_closing,
+            time=dt_time(hour=23, minute=59, second=0),
+            name="auto_closing_harian",
+        )
+        logger.info("✅ Auto closing dijadwalkan setiap hari jam 23:59")
+    else:
+        logger.warning(
+            "⚠️ JobQueue tidak tersedia (APScheduler belum ter-install). "
+            "Auto closing jam 23:59 TIDAK aktif. "
+            "Jalankan: pip install 'python-telegram-bot[job-queue]==20.7'"
+        )
     # ────────────────────────────────────────────────────────
 
     conv_handler = ConversationHandler(
