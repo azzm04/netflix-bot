@@ -1499,19 +1499,29 @@ async def pesan_tidak_dikenal(update: Update, context: ContextTypes.DEFAULT_TYPE
 # ─── Main ──────────────────────────────────────────────────
 
 async def post_init(application):
-    """Set menu commands berbeda untuk admin dan user biasa."""
-    from telegram import BotCommandScopeChat
+    """Set menu commands berbeda untuk admin, user biasa, dan group."""
+    from telegram import BotCommandScopeChat, BotCommandScopeAllGroupChats
 
-    # Menu untuk semua user (default)
+    # Menu untuk semua user di PRIVATE chat (default)
     await application.bot.set_my_commands([
         BotCommand("start", "Mulai cari akun Netflix"),
         BotCommand("stok", "Cek stok slot kosong"),
-        BotCommand("cancel", "Batalkan proses"),
         BotCommand("ceklogout", "Cek akun yang perlu di-logout"),
         BotCommand("gantihari", "Ganti hari & ubah warna besok"),
+        BotCommand("cancel", "Batalkan proses"),
     ])
 
-    # Menu khusus admin (lebih lengkap)
+    # Menu khusus di GROUP — hanya 3 command ini
+    await application.bot.set_my_commands(
+        [
+            BotCommand("rekap", "Lihat rekap pendapatan"),
+            BotCommand("closing", "Closing hari & tulis ke REKAPAN MODAL"),
+            BotCommand("feeadmin", "Input fee admin ke REKAPAN MODAL"),
+        ],
+        scope=BotCommandScopeAllGroupChats()
+    )
+
+    # Menu khusus admin di PRIVATE (lebih lengkap)
     try:
         await application.bot.set_my_commands(
             [
@@ -1519,9 +1529,6 @@ async def post_init(application):
                 BotCommand("stok", "Cek stok slot kosong"),
                 BotCommand("ceklogout", "Cek akun yang perlu di-logout"),
                 BotCommand("gantihari", "Ganti hari & ubah warna besok"),
-                BotCommand("rekap", "Lihat rekap pendapatan"),
-                BotCommand("closing", "Closing hari & tulis ke REKAPAN MODAL"),
-                BotCommand("feeadmin", "Input fee admin ke REKAPAN MODAL"),
                 BotCommand("adduser", "Tambah user"),
                 BotCommand("removeuser", "Hapus user"),
                 BotCommand("listuser", "Lihat daftar user"),
