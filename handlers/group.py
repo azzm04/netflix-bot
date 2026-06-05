@@ -1,6 +1,6 @@
 # ============================================================
 #  handlers/group.py — Group-only commands:
-#                       /feeadmin, /gestun, /modal_netflix
+#                       /feeadmin, /gestun, /modal_netflix /stock
 #
 #  Pola edit-in-place:
 #  - Bot kirim 1 pesan saat command dipanggil, simpan message_id
