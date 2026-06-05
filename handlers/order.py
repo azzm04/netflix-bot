@@ -227,7 +227,7 @@ async def callback_tipe(update: Update, context: ContextTypes.DEFAULT_TYPE) -> i
 
     if query.data == "tipe_quick":
         context.user_data["mode"] = "quick"
-        await query.edit_message_text(
+        msg = await query.edit_message_text(
             "⚡ *Quick Order*\n\n"
             "Paste form order dari customer:\n\n"
             "```\n"
@@ -238,6 +238,9 @@ async def callback_tipe(update: Update, context: ContextTypes.DEFAULT_TYPE) -> i
             "```",
             parse_mode="Markdown"
         )
+        # Simpan message_id form untuk dihapus setelah order selesai
+        context.user_data["quick_form_chat_id"] = msg.chat.id
+        context.user_data["quick_form_msg_id"]  = msg.message_id
         return TANYA_QUICK_ORDER
 
     elif query.data == "tipe_harian":
@@ -388,6 +391,19 @@ async def terima_quick_order(update: Update, context: ContextTypes.DEFAULT_TYPE)
 
     # Deteksi tipe device untuk filter akun
     device_type = _detect_device_type(device_text)
+
+    # Hapus pesan user (form yang di-paste) dan pesan bot berisi form kosong
+    try:
+        await update.message.delete()
+    except Exception:
+        pass
+    try:
+        form_chat_id = context.user_data.get("quick_form_chat_id")
+        form_msg_id  = context.user_data.get("quick_form_msg_id")
+        if form_chat_id and form_msg_id:
+            await context.bot.delete_message(chat_id=form_chat_id, message_id=form_msg_id)
+    except Exception:
+        pass
 
     pesan_loading = await update.message.reply_text("🔍 Sedang mencari slot kosong...")
 
