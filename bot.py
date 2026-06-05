@@ -5,7 +5,7 @@
 import logging
 import json
 import os
-from datetime import datetime
+from datetime import datetime, time as dt_time
 from telegram import Update, BotCommand, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import (
     Application,
@@ -37,6 +37,7 @@ from sheets_handler import (
     get_spreadsheet,
     rekap_pendapatan,
     closing_hari,
+    tulis_fee_admin,
     _order_lock,
 )
 
@@ -129,7 +130,8 @@ async def kirim_notif_admin(context: ContextTypes.DEFAULT_TYPE, data: dict):
 # State untuk ConversationHandler
 (TANYA_TIPE, TANYA_DURASI, TANYA_NOMOR, TANYA_DEVICE,
  TANYA_PAKET_BULANAN, TANYA_NOMOR_BULANAN, TANYA_DEVICE_BULANAN,
- TANYA_QUICK_ORDER) = range(8)
+ TANYA_QUICK_ORDER,
+ FEE_TANYA_TANGGAL, FEE_TANYA_NOMINAL, FEE_KONFIRMASI) = range(11)
 
 # Mapping device
 DEVICE_MAP = {
@@ -1081,6 +1083,11 @@ async def cmd_rekap(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text("⛔ Hanya admin utama.")
         return
 
+    # Hanya bisa dijalankan di group/supergroup
+    if update.effective_chat.type not in ("group", "supergroup"):
+        await update.message.reply_text("⛔ Command ini hanya bisa digunakan di dalam group.")
+        return
+
     keyboard = [
         [InlineKeyboardButton("📅 Hari Ini", callback_data="rekap_hari_ini")],
         [InlineKeyboardButton("📆 Minggu Ini", callback_data="rekap_minggu_ini")],
@@ -1148,6 +1155,11 @@ async def cmd_closing(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text("⛔ Hanya admin utama.")
         return
 
+    # Hanya bisa dijalankan di group/supergroup
+    if update.effective_chat.type not in ("group", "supergroup"):
+        await update.message.reply_text("⛔ Command ini hanya bisa digunakan di dalam group.")
+        return
+
     pesan = await update.message.reply_text("🔄 Proses closing hari ini...")
 
     try:
@@ -1187,6 +1199,250 @@ async def cmd_closing(update: Update, context: ContextTypes.DEFAULT_TYPE):
     except Exception as e:
         logger.error(f"Error closing: {e}", exc_info=True)
         await pesan.edit_text("⚠️ Gagal proses closing.")
+
+
+# ─── Auto Closing (scheduler jam 23:59) ────────────────────
+
+async def auto_closing(context: ContextTypes.DEFAULT_TYPE):
+    """
+    Job yang berjalan otomatis setiap hari jam 23:59.
+    Menjalankan closing_hari() dan kirim laporan ke admin.
+    """
+    logger.info("[AUTO CLOSING] Mulai proses closing otomatis jam 23:59...")
+
+    try:
+        result = closing_hari()
+
+        if result is None:
+            teks = (
+                "⚠️ *[AUTO CLOSING] Gagal*\n\n"
+                "Tanggal hari ini tidak ditemukan di spreadsheet REKAPAN MODAL.\n"
+                "Pastikan tanggal sudah ada di kolom A."
+            )
+        elif result["total"] == 0:
+            teks = (
+                "ℹ️ *[AUTO CLOSING] Selesai*\n\n"
+                "Belum ada pendapatan hari ini yang perlu di-closing."
+            )
+        else:
+            teks = (
+                f"🤖 *AUTO CLOSING JAM 23:59*\n"
+                f"━━━━━━━━━━━━━━━━\n"
+                f"📦 Total Order: *{result['total_order']}*\n"
+                f"💰 Total Pendapatan: Rp{result['total']:,}\n"
+                f"📉 Pajak Merchant (0.7%): -Rp{result['pajak']:,}\n"
+                f"✅ *Ditulis ke REKAPAN MODAL: Rp{result['setelah_pajak']:,}*\n"
+                f"━━━━━━━━━━━━━━━━"
+            )
+
+        # Kirim ke admin
+        await context.bot.send_message(
+            chat_id=ADMIN_ID,
+            text=teks,
+            parse_mode="Markdown"
+        )
+
+        # Kirim juga ke grup notif
+        for chat_id in NOTIF_ORDER_IDS:
+            try:
+                await context.bot.send_message(
+                    chat_id=chat_id,
+                    text=teks,
+                    parse_mode="Markdown"
+                )
+            except Exception as e:
+                logger.error(f"Gagal kirim notif auto closing ke {chat_id}: {e}")
+
+        logger.info(f"[AUTO CLOSING] Selesai. Result: {result}")
+
+    except Exception as e:
+        logger.error(f"[AUTO CLOSING] Error: {e}", exc_info=True)
+        try:
+            await context.bot.send_message(
+                chat_id=ADMIN_ID,
+                text=f"⚠️ *[AUTO CLOSING] Error*\n\n`{str(e)}`",
+                parse_mode="Markdown"
+            )
+        except Exception:
+            pass
+
+
+# ─── /feeadmin ─────────────────────────────────────────────
+
+async def cmd_feeadmin(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    """Mulai input fee admin. Hanya admin, hanya di group."""
+    if update.effective_user.id != ADMIN_ID:
+        await update.message.reply_text("⛔ Hanya admin utama.")
+        return ConversationHandler.END
+
+    if update.effective_chat.type not in ("group", "supergroup"):
+        await update.message.reply_text("⛔ Command ini hanya bisa digunakan di dalam group.")
+        return ConversationHandler.END
+
+    now = datetime.now()
+    tanggal_hari_ini = now.strftime("%d/%m/%Y")
+
+    keyboard = [
+        [InlineKeyboardButton(f"📅 Hari ini ({tanggal_hari_ini})", callback_data="fee_tgl_hari_ini")],
+        [InlineKeyboardButton("✏️ Masukkan tanggal lain", callback_data="fee_tgl_custom")],
+        [InlineKeyboardButton("❌ Batal", callback_data="fee_batal")],
+    ]
+    await update.message.reply_text(
+        "💼 *INPUT FEE ADMIN*\n\n"
+        "Pilih tanggal yang ingin diisi fee admin-nya:",
+        parse_mode="Markdown",
+        reply_markup=InlineKeyboardMarkup(keyboard)
+    )
+    return FEE_TANYA_TANGGAL
+
+
+async def callback_fee_pilih_tanggal(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    """Proses pilihan tanggal fee admin."""
+    query = update.callback_query
+    await query.answer()
+
+    if query.data == "fee_batal":
+        await query.edit_message_text("❌ Input fee admin dibatalkan.")
+        return ConversationHandler.END
+
+    if query.data == "fee_tgl_hari_ini":
+        tanggal = datetime.now().strftime("%d/%m/%Y")
+        context.user_data["fee_tanggal"] = tanggal
+        await query.edit_message_text(
+            f"💼 *INPUT FEE ADMIN*\n\n"
+            f"📅 Tanggal: `{tanggal}`\n\n"
+            f"Masukkan nominal fee admin (angka saja, contoh: `50000`):",
+            parse_mode="Markdown"
+        )
+        return FEE_TANYA_NOMINAL
+
+    elif query.data == "fee_tgl_custom":
+        await query.edit_message_text(
+            "💼 *INPUT FEE ADMIN*\n\n"
+            "Masukkan tanggal dengan format *DD/MM/YYYY*\n"
+            "Contoh: `05/06/2026`",
+            parse_mode="Markdown"
+        )
+        return FEE_TANYA_TANGGAL
+
+    return FEE_TANYA_TANGGAL
+
+
+async def terima_tanggal_fee(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    """Terima input tanggal custom untuk fee admin."""
+    teks = update.message.text.strip()
+
+    # Validasi format DD/MM/YYYY
+    try:
+        tgl = datetime.strptime(teks, "%d/%m/%Y")
+        tanggal_fmt = tgl.strftime("%d/%m/%Y")
+    except ValueError:
+        await update.message.reply_text(
+            "❌ Format tanggal tidak valid.\n\n"
+            "Gunakan format *DD/MM/YYYY*, contoh: `05/06/2026`\n\n"
+            "Atau ketik /cancel untuk membatalkan.",
+            parse_mode="Markdown"
+        )
+        return FEE_TANYA_TANGGAL
+
+    context.user_data["fee_tanggal"] = tanggal_fmt
+    await update.message.reply_text(
+        f"💼 *INPUT FEE ADMIN*\n\n"
+        f"📅 Tanggal: `{tanggal_fmt}`\n\n"
+        f"Masukkan nominal fee admin (angka saja, contoh: `50000`):",
+        parse_mode="Markdown"
+    )
+    return FEE_TANYA_NOMINAL
+
+
+async def terima_nominal_fee(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    """Terima nominal fee admin, minta konfirmasi."""
+    teks = update.message.text.strip()
+
+    # Bersihkan input: hapus Rp, titik, koma, spasi
+    bersih = "".join(c for c in teks if c.isdigit())
+    if not bersih or int(bersih) <= 0:
+        await update.message.reply_text(
+            "❌ Nominal tidak valid. Masukkan angka saja.\n"
+            "Contoh: `50000` atau `220000`",
+            parse_mode="Markdown"
+        )
+        return FEE_TANYA_NOMINAL
+
+    nominal = int(bersih)
+    tanggal = context.user_data.get("fee_tanggal", "?")
+    context.user_data["fee_nominal"] = nominal
+
+    keyboard = [
+        [
+            InlineKeyboardButton("✅ Ya, simpan", callback_data="fee_konfirm_ya"),
+            InlineKeyboardButton("❌ Batal", callback_data="fee_konfirm_tidak"),
+        ]
+    ]
+    await update.message.reply_text(
+        f"💼 *KONFIRMASI FEE ADMIN*\n"
+        f"━━━━━━━━━━━━━━━━\n"
+        f"📅 Tanggal : `{tanggal}`\n"
+        f"💰 Fee Admin : *Rp{nominal:,}*\n"
+        f"━━━━━━━━━━━━━━━━\n"
+        f"Simpan ke sheet REKAPAN MODAL?",
+        parse_mode="Markdown",
+        reply_markup=InlineKeyboardMarkup(keyboard)
+    )
+    return FEE_KONFIRMASI
+
+
+async def callback_konfirmasi_fee(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    """Proses konfirmasi dan tulis fee admin ke sheet."""
+    query = update.callback_query
+    await query.answer()
+
+    if query.data == "fee_konfirm_tidak":
+        await query.edit_message_text("❌ Input fee admin dibatalkan.")
+        context.user_data.clear()
+        return ConversationHandler.END
+
+    tanggal = context.user_data.get("fee_tanggal")
+    nominal = context.user_data.get("fee_nominal")
+
+    await query.edit_message_text("🔄 Menyimpan fee admin ke sheet...")
+
+    try:
+        result = tulis_fee_admin(tanggal, nominal)
+
+        if not result["ok"]:
+            await query.edit_message_text(
+                f"❌ *Gagal menyimpan fee admin*\n\n"
+                f"{result['reason']}",
+                parse_mode="Markdown"
+            )
+            return ConversationHandler.END
+
+        teks = (
+            f"✅ *FEE ADMIN TERSIMPAN*\n"
+            f"━━━━━━━━━━━━━━━━\n"
+            f"📅 Tanggal : `{tanggal}`\n"
+            f"💰 Fee Admin : *Rp{nominal:,}*\n"
+            f"📊 Ditulis ke kolom C baris {result['baris']}\n"
+            f"━━━━━━━━━━━━━━━━"
+        )
+        await query.edit_message_text(teks, parse_mode="Markdown")
+
+        logger.info(f"[FEE ADMIN] Tanggal: {tanggal} | Nominal: {nominal} | Baris: {result['baris']}")
+
+    except Exception as e:
+        logger.error(f"Error tulis fee admin: {e}", exc_info=True)
+        await query.edit_message_text("⚠️ Terjadi kesalahan saat menyimpan fee admin.")
+
+    context.user_data.clear()
+    return ConversationHandler.END
+
+
+async def cancel_fee(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    """Batalkan input fee admin."""
+    context.user_data.clear()
+    await update.message.reply_text("❌ Input fee admin dibatalkan.")
+    return ConversationHandler.END
 
 
 # ─── /cancel ───────────────────────────────────────────────
@@ -1265,6 +1521,7 @@ async def post_init(application):
                 BotCommand("gantihari", "Ganti hari & ubah warna besok"),
                 BotCommand("rekap", "Lihat rekap pendapatan"),
                 BotCommand("closing", "Closing hari & tulis ke REKAPAN MODAL"),
+                BotCommand("feeadmin", "Input fee admin ke REKAPAN MODAL"),
                 BotCommand("adduser", "Tambah user"),
                 BotCommand("removeuser", "Hapus user"),
                 BotCommand("listuser", "Lihat daftar user"),
@@ -1279,9 +1536,20 @@ async def post_init(application):
 def main():
     app = Application.builder().token(BOT_TOKEN).post_init(post_init).build()
 
+    # ─── Scheduler: Auto Closing jam 23:59 setiap hari ─────
+    job_queue = app.job_queue
+    job_queue.run_daily(
+        auto_closing,
+        time=dt_time(hour=23, minute=59, second=30),
+        name="auto_closing_harian",
+    )
+    logger.info("✅ Auto closing dijadwalkan setiap hari jam 23:59")
+    # ────────────────────────────────────────────────────────
+
     conv_handler = ConversationHandler(
         entry_points=[
-            CommandHandler("start", start),
+            # /start dan order flow: hanya di private chat
+            CommandHandler("start", start, filters=filters.ChatType.PRIVATE),
             CallbackQueryHandler(callback_order_lagi, pattern="^order_lagi$"),
         ],
         states={
@@ -1321,21 +1589,58 @@ def main():
             ],
         },
         fallbacks=[CommandHandler("cancel", cancel)],
-        conversation_timeout=300,  # 5 menit timeout
-        allow_reentry=True,        # /start bisa restart conversation
+        conversation_timeout=300,
+        allow_reentry=True,
     )
 
+    # ── Filter reusable ───────────────────────────────────────
+    # Private only: semua command operasional (order, stok, dll)
+    PRIVATE = filters.ChatType.PRIVATE
+    # Group only: rekap, closing, feeadmin (sudah ditangani di handler masing-masing)
+    GROUP = filters.ChatType.GROUPS
+
     app.add_handler(conv_handler)
-    app.add_handler(CommandHandler("stok", stok))
-    app.add_handler(CommandHandler("ceklogout", ceklogout))
-    app.add_handler(CommandHandler("gantihari", cmd_gantihari))
-    app.add_handler(CommandHandler("rekap", cmd_rekap))
-    app.add_handler(CommandHandler("closing", cmd_closing))
+
+    # Command khusus PRIVATE (tidak boleh dipakai di group)
+    app.add_handler(CommandHandler("stok", stok, filters=PRIVATE))
+    app.add_handler(CommandHandler("ceklogout", ceklogout, filters=PRIVATE))
+    app.add_handler(CommandHandler("gantihari", cmd_gantihari, filters=PRIVATE))
+    app.add_handler(CommandHandler("adduser", adduser, filters=PRIVATE))
+    app.add_handler(CommandHandler("removeuser", removeuser, filters=PRIVATE))
+    app.add_handler(CommandHandler("listuser", listuser, filters=PRIVATE))
+    app.add_handler(CommandHandler("cancel", cancel, filters=PRIVATE))
+
+    # Command khusus GROUP (rekap, closing, feeadmin)
+    # Handler masing-masing sudah cek group internally, filter ini sebagai layer pertama
+    app.add_handler(CommandHandler("rekap", cmd_rekap, filters=GROUP))
+    app.add_handler(CommandHandler("closing", cmd_closing, filters=GROUP))
+    app.add_handler(CommandHandler("stok", stok, filters=GROUP))
     app.add_handler(CallbackQueryHandler(callback_rekap, pattern="^rekap_"))
-    app.add_handler(CommandHandler("adduser", adduser))
-    app.add_handler(CommandHandler("removeuser", removeuser))
-    app.add_handler(CommandHandler("listuser", listuser))
-    app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, pesan_tidak_dikenal))
+
+    # ConversationHandler /feeadmin — group only
+    fee_conv_handler = ConversationHandler(
+        entry_points=[CommandHandler("feeadmin", cmd_feeadmin, filters=GROUP)],
+        states={
+            FEE_TANYA_TANGGAL: [
+                CallbackQueryHandler(callback_fee_pilih_tanggal, pattern="^fee_tgl_"),
+                CallbackQueryHandler(callback_fee_pilih_tanggal, pattern="^fee_batal$"),
+                MessageHandler(filters.TEXT & ~filters.COMMAND & GROUP, terima_tanggal_fee),
+            ],
+            FEE_TANYA_NOMINAL: [
+                MessageHandler(filters.TEXT & ~filters.COMMAND & GROUP, terima_nominal_fee),
+            ],
+            FEE_KONFIRMASI: [
+                CallbackQueryHandler(callback_konfirmasi_fee, pattern="^fee_konfirm_"),
+            ],
+        },
+        fallbacks=[CommandHandler("cancel", cancel_fee)],
+        conversation_timeout=120,
+        allow_reentry=True,
+    )
+    app.add_handler(fee_conv_handler)
+
+    # Handler pesan tidak dikenal — private only (jangan spam balas di group)
+    app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND & PRIVATE, pesan_tidak_dikenal))
 
     print("✅ Bot berjalan... Tekan Ctrl+C untuk berhenti.")
     app.run_polling(allowed_updates=Update.ALL_TYPES)

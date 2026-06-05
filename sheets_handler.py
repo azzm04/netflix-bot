@@ -816,6 +816,37 @@ def rekap_pendapatan(periode: str) -> dict:
     }
 
 
+def tulis_fee_admin(tanggal_str: str, nominal: int) -> dict:
+    """
+    Tulis fee admin ke kolom C di sheet REKAPAN MODAL.
+    tanggal_str: format DD/MM/YYYY (misal '05/06/2026')
+    nominal: integer (misal 50000)
+
+    Return:
+    - {'ok': True, 'baris': int}  → berhasil
+    - {'ok': False, 'reason': str} → gagal
+    """
+    client = get_client()
+    spreadsheet_modal = client.open_by_key(SPREADSHEET_MODAL_ID)
+    sheet_modal = spreadsheet_modal.worksheet(SHEET_MODAL)
+
+    semua_data = sheet_modal.get_all_values()
+
+    baris_target = None
+    for i, baris in enumerate(semua_data):
+        if len(baris) > 0 and baris[0].strip() == tanggal_str:
+            baris_target = i + 1  # gspread 1-indexed
+            break
+
+    if baris_target is None:
+        return {"ok": False, "reason": f"Tanggal `{tanggal_str}` tidak ditemukan di sheet REKAPAN MODAL."}
+
+    col_c = gspread.utils.rowcol_to_a1(baris_target, 3)
+    sheet_modal.update_acell(col_c, nominal)
+
+    return {"ok": True, "baris": baris_target}
+
+
 def closing_hari() -> dict:
     """
     Closing hari:
