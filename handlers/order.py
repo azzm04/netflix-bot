@@ -493,16 +493,19 @@ async def terima_quick_order(update: Update, context: ContextTypes.DEFAULT_TYPE)
             except Exception as e:
                 logger.warning(f"Gagal tulis rekapan: {e}")
 
-        # Kirim template, langsung sertakan tombol Order Lagi
+        # Template tetap utuh, tombol Order Lagi di pesan terpisah
         if durasi_info["mode"] == "bulanan":
             template = format_template_bulanan(slot, tanggal_logout, tipe)
         else:
             template = format_template(slot, tanggal_logout, nomor_pelanggan, durasi, device_type)
 
+        await pesan_loading.edit_text(template, parse_mode="Markdown")
+
+        # Kirim pesan terpisah untuk tombol Order Lagi
         keyboard = [[InlineKeyboardButton("🔄 Order Lagi", callback_data="order_lagi")]]
-        await pesan_loading.edit_text(
-            template,
-            parse_mode="Markdown",
+        await context.bot.send_message(
+            chat_id=update.effective_chat.id,
+            text="✅ Selesai!",
             reply_markup=InlineKeyboardMarkup(keyboard)
         )
 
@@ -630,12 +633,13 @@ async def callback_device(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
             except Exception as e:
                 logger.warning(f"Gagal tulis rekapan: {e}")
 
-        # Kirim template langsung dengan tombol Order Lagi
+        # Template tetap utuh, tombol Order Lagi di pesan terpisah
         template = format_template(slot, tanggal_logout, nomor_pelanggan, durasi, device)
+        await query.edit_message_text(template, parse_mode="Markdown")
+
         keyboard = [[InlineKeyboardButton("🔄 Order Lagi", callback_data="order_lagi")]]
-        await query.edit_message_text(
-            template,
-            parse_mode="Markdown",
+        await query.message.reply_text(
+            "✅ Selesai!",
             reply_markup=InlineKeyboardMarkup(keyboard)
         )
 
@@ -759,11 +763,13 @@ async def callback_device_bulanan(update: Update, context: ContextTypes.DEFAULT_
             except Exception as e:
                 logger.warning(f"Gagal tulis rekapan bulanan: {e}")
 
+        # Template tetap utuh, tombol Order Lagi di pesan terpisah
         template = format_template_bulanan(slot, tanggal_logout, tipe)
+        await query.edit_message_text(template, parse_mode="Markdown")
+
         keyboard = [[InlineKeyboardButton("🔄 Order Lagi", callback_data="order_lagi")]]
-        await query.edit_message_text(
-            template,
-            parse_mode="Markdown",
+        await query.message.reply_text(
+            "✅ Selesai!",
             reply_markup=InlineKeyboardMarkup(keyboard)
         )
 
@@ -798,7 +804,9 @@ async def callback_device_bulanan(update: Update, context: ContextTypes.DEFAULT_
 # ─── Order Lagi ────────────────────────────────────────────
 
 async def callback_order_lagi(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-    """Restart alur dari awal ketika tombol Order Lagi diklik."""
+    """Restart alur dari awal ketika tombol Order Lagi diklik.
+    Edit pesan '✅ Selesai!' jadi pilihan mode — template tidak disentuh.
+    """
     query = update.callback_query
     await query.answer()
 
@@ -808,8 +816,7 @@ async def callback_order_lagi(update: Update, context: ContextTypes.DEFAULT_TYPE
         [InlineKeyboardButton("📆 Bulanan", callback_data="tipe_bulanan")],
     ]
     await query.edit_message_text(
-        "🍿 *Bot Netflix Otomatis*\n\n"
-        "Pilih mode order:",
+        "🍿 *Bot Netflix Otomatis*\n\nPilih mode order:",
         parse_mode="Markdown",
         reply_markup=InlineKeyboardMarkup(keyboard)
     )
