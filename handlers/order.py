@@ -393,10 +393,10 @@ async def terima_quick_order(update: Update, context: ContextTypes.DEFAULT_TYPE)
     device_type = _detect_device_type(device_text)
 
     # Hapus pesan user (form yang di-paste) dan pesan bot berisi form kosong
-    try:
-        await update.message.delete()
-    except Exception:
-        pass
+    # try:
+    #     await update.message.delete()
+    # except Exception:
+    #     pass
     try:
         form_chat_id = context.user_data.get("quick_form_chat_id")
         form_msg_id  = context.user_data.get("quick_form_msg_id")
