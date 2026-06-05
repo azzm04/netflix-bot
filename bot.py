@@ -39,6 +39,7 @@ from sheets_handler import (
     closing_hari,
     tulis_fee_admin,
     tulis_gestun,
+    tulis_modal_netflix,
     _order_lock,
 )
 
@@ -135,7 +136,10 @@ async def kirim_notif_admin(context: ContextTypes.DEFAULT_TYPE, data: dict):
  FEE_TANYA_TANGGAL, FEE_TANYA_NOMINAL, FEE_KONFIRMASI,
  GESTUN_PILIH_MODE,
  GESTUN_TANYA_TANGGAL, GESTUN_TANYA_NOMINAL, GESTUN_TANYA_PERSEN, GESTUN_KONFIRMASI,
- GESTUN_QUICK) = range(17)
+ GESTUN_QUICK,
+ MODAL_PILIH_MODE,
+ MODAL_TANYA_TANGGAL, MODAL_TANYA_NOMINAL, MODAL_TANYA_KET, MODAL_KONFIRMASI,
+ MODAL_QUICK) = range(23)
 
 # Mapping device
 DEVICE_MAP = {
@@ -1598,6 +1602,366 @@ async def cancel_gestun(update: Update, context: ContextTypes.DEFAULT_TYPE) -> i
     return ConversationHandler.END
 
 
+# ─── /modal_netflix ────────────────────────────────────────
+
+def _parse_quick_modal(teks: str) -> dict:
+    """
+    Parse form quick modal netflix.
+    Format:
+    𖥻 Tanggal (dd/mm/yy) : 05/06/26
+    𖥻 Nominal : 1827000
+    𖥻 Total Akun & Maker : 10 ACC EXTEND MEET
+
+    Return: {'tanggal': str, 'nominal': int, 'keterangan': str} atau None jika gagal.
+    """
+    result = {"tanggal": None, "nominal": None, "keterangan": None}
+
+    for line in teks.strip().split("\n"):
+        line = line.strip()
+        if ":" not in line:
+            continue
+        value = line.split(":", 1)[1].strip()
+        lower = line.lower()
+
+        if "tanggal" in lower:
+            for fmt in ("%d/%m/%Y", "%d/%m/%y"):
+                try:
+                    tgl = datetime.strptime(value, fmt)
+                    result["tanggal"] = tgl.strftime("%d/%m/%Y")
+                    break
+                except ValueError:
+                    continue
+
+        elif "nominal" in lower:
+            bersih = "".join(c for c in value if c.isdigit())
+            if bersih:
+                result["nominal"] = int(bersih)
+
+        elif "total" in lower or "akun" in lower or "maker" in lower or "keterangan" in lower:
+            result["keterangan"] = value if value not in ("-", "") else ""
+
+    if result["tanggal"] is None or result["nominal"] is None:
+        return None
+    if not result["keterangan"]:
+        result["keterangan"] = ""
+    return result
+
+
+def _format_konfirmasi_modal(tanggal: str, nominal: int, keterangan: str) -> str:
+    ket_str = keterangan if keterangan else "-"
+    return (
+        f"🏦 *KONFIRMASI MODAL NETFLIX*\n"
+        f"━━━━━━━━━━━━━━━━\n"
+        f"📅 Tanggal          : `{tanggal}`\n"
+        f"💰 Nominal          : *Rp{nominal:,}*\n"
+        f"📝 Total Akun/Maker : *{ket_str}*\n"
+        f"━━━━━━━━━━━━━━━━\n"
+        f"Simpan ke sheet REKAPAN MODAL?"
+    )
+
+
+async def cmd_modal_netflix(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    """Mulai input modal netflix. Hanya admin, hanya di group."""
+    if update.effective_user.id != ADMIN_ID:
+        await update.message.reply_text("⛔ Hanya admin utama.")
+        return ConversationHandler.END
+
+    if update.effective_chat.type not in ("group", "supergroup"):
+        await update.message.reply_text("⛔ Command ini hanya bisa digunakan di dalam group.")
+        return ConversationHandler.END
+
+    keyboard = [
+        [InlineKeyboardButton("⚡ Quick (paste form)", callback_data="modal_mode_quick")],
+        [InlineKeyboardButton("📝 Step-by-step", callback_data="modal_mode_step")],
+        [InlineKeyboardButton("❌ Batal", callback_data="modal_batal")],
+    ]
+    await update.message.reply_text(
+        "🏦 *INPUT MODAL NETFLIX*\n\nPilih mode input:",
+        parse_mode="Markdown",
+        reply_markup=InlineKeyboardMarkup(keyboard)
+    )
+    return MODAL_PILIH_MODE
+
+
+async def callback_modal_pilih_mode(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    """Pilih mode quick atau step-by-step."""
+    query = update.callback_query
+    await query.answer()
+
+    if query.data == "modal_batal":
+        await query.edit_message_text("❌ Input modal dibatalkan.")
+        return ConversationHandler.END
+
+    if query.data == "modal_mode_quick":
+        await query.edit_message_text(
+            "🏦 *QUICK MODAL NETFLIX*\n\n"
+            "Paste form berikut (isi nilainya):\n\n"
+            "```\n"
+            "𖥻 Tanggal (dd/mm/yy) : \n"
+            "𖥻 Nominal : \n"
+            "𖥻 Total Akun & Maker : \n"
+            "```",
+            parse_mode="Markdown"
+        )
+        return MODAL_QUICK
+
+    elif query.data == "modal_mode_step":
+        now = datetime.now()
+        keyboard = [
+            [InlineKeyboardButton(f"📅 Hari ini ({now.strftime('%d/%m/%Y')})", callback_data="modal_tgl_hari_ini")],
+            [InlineKeyboardButton("✏️ Tanggal lain", callback_data="modal_tgl_custom")],
+            [InlineKeyboardButton("❌ Batal", callback_data="modal_batal_step")],
+        ]
+        await query.edit_message_text(
+            "🏦 *INPUT MODAL NETFLIX*\n\nPilih tanggal:",
+            parse_mode="Markdown",
+            reply_markup=InlineKeyboardMarkup(keyboard)
+        )
+        return MODAL_TANYA_TANGGAL
+
+    return MODAL_PILIH_MODE
+
+
+# ── Quick mode ──────────────────────────────────────────────
+
+async def terima_quick_modal(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    """Parse form quick modal dan tampilkan konfirmasi."""
+    teks = update.message.text
+
+    data = _parse_quick_modal(teks)
+    if data is None:
+        await update.message.reply_text(
+            "❌ Format tidak valid. Pastikan tanggal dan nominal terisi.\n\n"
+            "```\n"
+            "𖥻 Tanggal (dd/mm/yy) : 05/06/26\n"
+            "𖥻 Nominal : 1827000\n"
+            "𖥻 Total Akun & Maker : 10 ACC EXTEND MEET\n"
+            "```",
+            parse_mode="Markdown"
+        )
+        return MODAL_QUICK
+
+    context.user_data["modal_tanggal"] = data["tanggal"]
+    context.user_data["modal_nominal"] = data["nominal"]
+    context.user_data["modal_keterangan"] = data["keterangan"]
+
+    keyboard = [
+        [
+            InlineKeyboardButton("✅ Ya, simpan", callback_data="modal_konfirm_ya"),
+            InlineKeyboardButton("❌ Batal", callback_data="modal_konfirm_tidak"),
+        ]
+    ]
+    await update.message.reply_text(
+        _format_konfirmasi_modal(data["tanggal"], data["nominal"], data["keterangan"]),
+        parse_mode="Markdown",
+        reply_markup=InlineKeyboardMarkup(keyboard)
+    )
+    return MODAL_KONFIRMASI
+
+
+# ── Step-by-step mode ───────────────────────────────────────
+
+async def callback_modal_pilih_tanggal(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    """Proses pilihan tanggal modal (step mode)."""
+    query = update.callback_query
+    await query.answer()
+
+    if query.data in ("modal_batal", "modal_batal_step"):
+        await query.edit_message_text("❌ Input modal dibatalkan.")
+        context.user_data.clear()
+        return ConversationHandler.END
+
+    if query.data == "modal_tgl_hari_ini":
+        tanggal = datetime.now().strftime("%d/%m/%Y")
+        context.user_data["modal_tanggal"] = tanggal
+        await query.edit_message_text(
+            f"🏦 *INPUT MODAL NETFLIX*\n\n"
+            f"📅 Tanggal: `{tanggal}`\n\n"
+            f"Masukkan *nominal* modal (angka saja, contoh: `1827000`):",
+            parse_mode="Markdown"
+        )
+        return MODAL_TANYA_NOMINAL
+
+    elif query.data == "modal_tgl_custom":
+        await query.edit_message_text(
+            "🏦 *INPUT MODAL NETFLIX*\n\n"
+            "Masukkan tanggal format *DD/MM/YYYY* atau *DD/MM/YY*\n"
+            "Contoh: `05/06/26`",
+            parse_mode="Markdown"
+        )
+        return MODAL_TANYA_TANGGAL
+
+    return MODAL_TANYA_TANGGAL
+
+
+async def terima_tanggal_modal(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    """Terima input tanggal custom untuk modal."""
+    teks = update.message.text.strip()
+    tanggal_fmt = None
+    for fmt in ("%d/%m/%Y", "%d/%m/%y"):
+        try:
+            tgl = datetime.strptime(teks, fmt)
+            tanggal_fmt = tgl.strftime("%d/%m/%Y")
+            break
+        except ValueError:
+            continue
+
+    if tanggal_fmt is None:
+        await update.message.reply_text(
+            "❌ Format tanggal tidak valid.\n\n"
+            "Gunakan *DD/MM/YYYY* atau *DD/MM/YY*, contoh: `05/06/26`",
+            parse_mode="Markdown"
+        )
+        return MODAL_TANYA_TANGGAL
+
+    context.user_data["modal_tanggal"] = tanggal_fmt
+    await update.message.reply_text(
+        f"🏦 *INPUT MODAL NETFLIX*\n\n"
+        f"📅 Tanggal: `{tanggal_fmt}`\n\n"
+        f"Masukkan *nominal* modal (angka saja, contoh: `1827000`):",
+        parse_mode="Markdown"
+    )
+    return MODAL_TANYA_NOMINAL
+
+
+async def terima_nominal_modal(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    """Terima nominal modal, lalu tanya keterangan."""
+    teks = update.message.text.strip()
+    bersih = "".join(c for c in teks if c.isdigit())
+
+    if not bersih or int(bersih) <= 0:
+        await update.message.reply_text(
+            "❌ Nominal tidak valid. Masukkan angka saja.\n"
+            "Contoh: `1827000`",
+            parse_mode="Markdown"
+        )
+        return MODAL_TANYA_NOMINAL
+
+    context.user_data["modal_nominal"] = int(bersih)
+    tanggal = context.user_data.get("modal_tanggal", "?")
+
+    keyboard = [
+        [InlineKeyboardButton("⏭️ Lewati (kosongkan keterangan)", callback_data="modal_ket_skip")],
+        [InlineKeyboardButton("❌ Batal", callback_data="modal_ket_batal")],
+    ]
+    await update.message.reply_text(
+        f"🏦 *INPUT MODAL NETFLIX*\n\n"
+        f"📅 Tanggal : `{tanggal}`\n"
+        f"💰 Nominal : *Rp{int(bersih):,}*\n\n"
+        f"Masukkan *Total Akun & Maker*\n"
+        f"Contoh: `10 ACC EXTEND MEET`\n\n"
+        f"Atau tekan *Lewati* jika tidak ada:",
+        parse_mode="Markdown",
+        reply_markup=InlineKeyboardMarkup(keyboard)
+    )
+    return MODAL_TANYA_KET
+
+
+async def callback_modal_ket(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    """Proses pilihan skip/batal untuk keterangan modal."""
+    query = update.callback_query
+    await query.answer()
+
+    if query.data == "modal_ket_batal":
+        await query.edit_message_text("❌ Input modal dibatalkan.")
+        context.user_data.clear()
+        return ConversationHandler.END
+
+    context.user_data["modal_keterangan"] = ""
+    tanggal = context.user_data.get("modal_tanggal", "?")
+    nominal = context.user_data.get("modal_nominal", 0)
+
+    keyboard = [
+        [
+            InlineKeyboardButton("✅ Ya, simpan", callback_data="modal_konfirm_ya"),
+            InlineKeyboardButton("❌ Batal", callback_data="modal_konfirm_tidak"),
+        ]
+    ]
+    await query.edit_message_text(
+        _format_konfirmasi_modal(tanggal, nominal, ""),
+        parse_mode="Markdown",
+        reply_markup=InlineKeyboardMarkup(keyboard)
+    )
+    return MODAL_KONFIRMASI
+
+
+async def terima_ket_modal(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    """Terima keterangan modal, tampilkan konfirmasi."""
+    keterangan = update.message.text.strip()
+    context.user_data["modal_keterangan"] = keterangan
+    tanggal = context.user_data.get("modal_tanggal", "?")
+    nominal = context.user_data.get("modal_nominal", 0)
+
+    keyboard = [
+        [
+            InlineKeyboardButton("✅ Ya, simpan", callback_data="modal_konfirm_ya"),
+            InlineKeyboardButton("❌ Batal", callback_data="modal_konfirm_tidak"),
+        ]
+    ]
+    await update.message.reply_text(
+        _format_konfirmasi_modal(tanggal, nominal, keterangan),
+        parse_mode="Markdown",
+        reply_markup=InlineKeyboardMarkup(keyboard)
+    )
+    return MODAL_KONFIRMASI
+
+
+# ── Shared: konfirmasi & simpan ─────────────────────────────
+
+async def callback_konfirmasi_modal(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    """Proses konfirmasi dan tulis modal netflix ke sheet."""
+    query = update.callback_query
+    await query.answer()
+
+    if query.data == "modal_konfirm_tidak":
+        await query.edit_message_text("❌ Input modal dibatalkan.")
+        context.user_data.clear()
+        return ConversationHandler.END
+
+    tanggal    = context.user_data.get("modal_tanggal")
+    nominal    = context.user_data.get("modal_nominal")
+    keterangan = context.user_data.get("modal_keterangan", "")
+
+    await query.edit_message_text("🔄 Menyimpan data modal ke sheet...")
+
+    try:
+        result = tulis_modal_netflix(tanggal, nominal, keterangan)
+
+        if not result["ok"]:
+            await query.edit_message_text(
+                f"❌ *Gagal menyimpan modal*\n\n{result.get('reason', 'Unknown error')}",
+                parse_mode="Markdown"
+            )
+            return ConversationHandler.END
+
+        ket_str = keterangan if keterangan else "-"
+        teks = (
+            f"✅ *MODAL NETFLIX TERSIMPAN*\n"
+            f"━━━━━━━━━━━━━━━━\n"
+            f"📅 Tanggal          : `{tanggal}`\n"
+            f"💰 Nominal          : *Rp{nominal:,}*\n"
+            f"📝 Total Akun/Maker : *{ket_str}*\n"
+            f"📊 Baris            : {result['baris']}\n"
+            f"━━━━━━━━━━━━━━━━"
+        )
+        await query.edit_message_text(teks, parse_mode="Markdown")
+        logger.info(f"[MODAL] {tanggal} | Nominal: {nominal} | Ket: {keterangan} | Baris: {result['baris']}")
+
+    except Exception as e:
+        logger.error(f"Error tulis modal netflix: {e}", exc_info=True)
+        await query.edit_message_text("⚠️ Terjadi kesalahan saat menyimpan modal.")
+
+    context.user_data.clear()
+    return ConversationHandler.END
+
+
+async def cancel_modal(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    """Batalkan input modal."""
+    context.user_data.clear()
+    await update.message.reply_text("❌ Input modal dibatalkan.")
+    return ConversationHandler.END
+
+
 # ─── Auto Closing (scheduler jam 23:59) ────────────────────
 
 async def auto_closing(context: ContextTypes.DEFAULT_TYPE):
@@ -1915,6 +2279,7 @@ async def post_init(application):
             BotCommand("closing", "Closing hari & tulis ke REKAPAN MODAL"),
             BotCommand("feeadmin", "Input fee admin ke REKAPAN MODAL"),
             BotCommand("gestun", "Input data gestun ke REKAPAN MODAL"),
+            BotCommand("modal_netflix", "Input modal Netflix ke REKAPAN MODAL"),
         ],
         scope=BotCommandScopeAllGroupChats()
     )
@@ -2083,6 +2448,39 @@ def main():
         allow_reentry=True,
     )
     app.add_handler(gestun_conv_handler)
+
+    # ConversationHandler untuk /modal_netflix (input modal di group)
+    modal_conv_handler = ConversationHandler(
+        entry_points=[CommandHandler("modal_netflix", cmd_modal_netflix, filters=GROUP)],
+        states={
+            MODAL_PILIH_MODE: [
+                CallbackQueryHandler(callback_modal_pilih_mode, pattern="^modal_mode_"),
+                CallbackQueryHandler(callback_modal_pilih_mode, pattern="^modal_batal$"),
+            ],
+            MODAL_QUICK: [
+                MessageHandler(filters.TEXT & ~filters.COMMAND & GROUP, terima_quick_modal),
+            ],
+            MODAL_TANYA_TANGGAL: [
+                CallbackQueryHandler(callback_modal_pilih_tanggal, pattern="^modal_tgl_"),
+                CallbackQueryHandler(callback_modal_pilih_tanggal, pattern="^modal_batal_step$"),
+                MessageHandler(filters.TEXT & ~filters.COMMAND & GROUP, terima_tanggal_modal),
+            ],
+            MODAL_TANYA_NOMINAL: [
+                MessageHandler(filters.TEXT & ~filters.COMMAND & GROUP, terima_nominal_modal),
+            ],
+            MODAL_TANYA_KET: [
+                CallbackQueryHandler(callback_modal_ket, pattern="^modal_ket_"),
+                MessageHandler(filters.TEXT & ~filters.COMMAND & GROUP, terima_ket_modal),
+            ],
+            MODAL_KONFIRMASI: [
+                CallbackQueryHandler(callback_konfirmasi_modal, pattern="^modal_konfirm_"),
+            ],
+        },
+        fallbacks=[CommandHandler("cancel", cancel_modal)],
+        conversation_timeout=120,
+        allow_reentry=True,
+    )
+    app.add_handler(modal_conv_handler)
 
     # Handler pesan tidak dikenal — private only (jangan spam balas di group)
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND & PRIVATE, pesan_tidak_dikenal))

@@ -18,6 +18,13 @@ SPREADSHEET_MODAL_ID = "1-o6jOoE3rH2SOlH9975HODC7MpzDBg8zD8Z1RLnRK7g"
 SHEET_MODAL = "modal netflix"
 SHEET_GESTUN = "rekapan"   # Sheet PENDAPATAN GESTUN di spreadsheet REKAPAN MODAL
 
+# Kolom tabel MODAL NETFLIX (tabel kanan di sheet "modal netflix")
+# H=8, I=9, J=10, K=11 (1-indexed untuk gspread)
+COL_MODAL_TGL      = 8   # H - Tanggal
+COL_MODAL_KOMPONEN = 9   # I - Komponen (selalu "modal")
+COL_MODAL_BIAYA    = 10  # J - Biaya/Nominal
+COL_MODAL_KET      = 11  # K - Keterangan (Total Akun & Maker)
+
 # Pajak merchant (0.7%)
 PAJAK_MERCHANT = 0.007
 

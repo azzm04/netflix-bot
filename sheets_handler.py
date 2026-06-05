@@ -13,7 +13,8 @@ from config import (
     COL_EMAIL, COL_PASSWORD, COL_PROFILE, COL_PIN,
     COL_LOGOUT, COL_PHONE, DATA_START_ROW, JAM_LOGOUT,
     HARGA, HARGA_BULANAN, DURASI_BULANAN_HARI,
-    SPREADSHEET_MODAL_ID, SHEET_MODAL, SHEET_GESTUN, PAJAK_MERCHANT
+    SPREADSHEET_MODAL_ID, SHEET_MODAL, SHEET_GESTUN, PAJAK_MERCHANT,
+    COL_MODAL_TGL, COL_MODAL_KOMPONEN, COL_MODAL_BIAYA, COL_MODAL_KET
 )
 
 # Scope yang dibutuhkan untuk akses Google Sheets
@@ -890,6 +891,49 @@ def tulis_gestun(tanggal_str: str, nominal: int, persen: float = None) -> dict:
         batch.append({"range": col_c, "values": [[persen / 100]]})
 
     sheet_gestun.batch_update(batch)
+
+    return {"ok": True, "baris": baris_tulis}
+
+
+def tulis_modal_netflix(tanggal_str: str, nominal: int, keterangan: str) -> dict:
+    """
+    Tambah baris baru di tabel kanan sheet "modal netflix" (REKAPAN MODAL).
+    Kolom H: Tanggal, I: Komponen ("modal"), J: Biaya, K: Keterangan
+
+    tanggal_str : format DD/MM/YYYY
+    nominal     : integer
+    keterangan  : string, contoh "10 ACC EXTEND MEET"
+
+    Return: {'ok': True, 'baris': int} atau {'ok': False, 'reason': str}
+    """
+    client = get_client()
+    spreadsheet_modal = client.open_by_key(SPREADSHEET_MODAL_ID)
+    sheet = spreadsheet_modal.worksheet(SHEET_MODAL)
+
+    semua_data = sheet.get_all_values()
+
+    # Cari baris kosong pertama di kolom H (tabel kanan)
+    # Header tabel kanan ada di baris 1 (index 0), data mulai baris 2
+    baris_tulis = 2  # default jika tabel masih kosong
+    for i in range(len(semua_data) - 1, 0, -1):  # mundur dari bawah, skip baris 0 (header)
+        baris = semua_data[i]
+        # Kolom H = index 7 (0-indexed)
+        val_h = baris[7].strip() if len(baris) > 7 else ""
+        if val_h:  # baris terakhir yang kolom H-nya ada isinya
+            baris_tulis = i + 2  # baris berikutnya (gspread 1-indexed)
+            break
+
+    col_h = gspread.utils.rowcol_to_a1(baris_tulis, COL_MODAL_TGL)
+    col_i = gspread.utils.rowcol_to_a1(baris_tulis, COL_MODAL_KOMPONEN)
+    col_j = gspread.utils.rowcol_to_a1(baris_tulis, COL_MODAL_BIAYA)
+    col_k = gspread.utils.rowcol_to_a1(baris_tulis, COL_MODAL_KET)
+
+    sheet.batch_update([
+        {"range": col_h, "values": [[tanggal_str]]},
+        {"range": col_i, "values": [["modal"]]},
+        {"range": col_j, "values": [[nominal]]},
+        {"range": col_k, "values": [[keterangan]]},
+    ])
 
     return {"ok": True, "baris": baris_tulis}
 
