@@ -4,6 +4,7 @@
 
 import logging
 from datetime import time as dt_time
+from zoneinfo import ZoneInfo
 from telegram import Update, BotCommand
 from telegram.ext import (
     Application,
@@ -119,15 +120,16 @@ async def post_init(application):
 def main():
     app = Application.builder().token(BOT_TOKEN).post_init(post_init).build()
 
-    # ─── Scheduler: Auto Closing jam 23:59 setiap hari ─────
+    # ─── Scheduler: Auto Closing jam 23:59 WIB setiap hari ─────
     job_queue = app.job_queue
     if job_queue is not None:
+        WIB = ZoneInfo("Asia/Jakarta")
         job_queue.run_daily(
             auto_closing,
-            time=dt_time(hour=23, minute=59, second=30),
+            time=dt_time(hour=23, minute=59, second=0, tzinfo=WIB),
             name="auto_closing_harian",
         )
-        logger.info("✅ Auto closing dijadwalkan setiap hari jam 23:59")
+        logger.info("✅ Auto closing dijadwalkan setiap hari jam 23:59 WIB")
     else:
         logger.warning(
             "⚠️ JobQueue tidak tersedia (APScheduler belum ter-install). "
