@@ -13,7 +13,7 @@ from config import (
     COL_EMAIL, COL_PASSWORD, COL_PROFILE, COL_PIN,
     COL_LOGOUT, COL_PHONE, DATA_START_ROW, JAM_LOGOUT,
     HARGA, HARGA_BULANAN, DURASI_BULANAN_HARI,
-    SPREADSHEET_MODAL_ID, SHEET_MODAL, SHEET_GESTUN, PAJAK_MERCHANT,
+    SPREADSHEET_MODAL_ID, SHEET_GESTUN, PAJAK_MERCHANT,
     COL_MODAL_TGL, COL_MODAL_KOMPONEN, COL_MODAL_BIAYA, COL_MODAL_KET
 )
 
@@ -43,6 +43,25 @@ BULAN_REKAP = {
     7: "JULI", 8: "AGUSTUS", 9: "SEPTEMBER",
     10: "OKTOBER", 11: "NOVEMBER", 12: "DESEMBER"
 }
+
+# Nama bulan untuk sheet modal netflix (kapital awal)
+BULAN_MODAL = {
+    1: "Januari", 2: "Februari", 3: "Maret",
+    4: "April", 5: "Mei", 6: "Juni",
+    7: "Juli", 8: "Agustus", 9: "September",
+    10: "Oktober", 11: "November", 12: "Desember"
+}
+
+
+def get_sheet_modal_name(dt: datetime = None) -> str:
+    """
+    Return nama sheet modal netflix berdasarkan bulan.
+    Format: "modal netflix_Juni", "modal netflix_Juli", dst.
+    Jika dt tidak diisi, pakai waktu sekarang.
+    """
+    if dt is None:
+        dt = datetime.now()
+    return f"modal netflix_{BULAN_MODAL[dt.month]}"
 
 
 # ─── Cache koneksi & lock untuk async safety ──────────────
@@ -840,7 +859,7 @@ def tulis_fee_admin(tanggal_str: str, nominal: int) -> dict:
     """
     client = get_client()
     spreadsheet_modal = client.open_by_key(SPREADSHEET_MODAL_ID)
-    sheet_modal = spreadsheet_modal.worksheet(SHEET_MODAL)
+    sheet_modal = spreadsheet_modal.worksheet(get_sheet_modal_name())
 
     semua_data = sheet_modal.get_all_values()
 
@@ -924,7 +943,7 @@ def tulis_modal_netflix(tanggal_str: str, nominal: int, keterangan: str) -> dict
     """
     client = get_client()
     spreadsheet_modal = client.open_by_key(SPREADSHEET_MODAL_ID)
-    sheet = spreadsheet_modal.worksheet(SHEET_MODAL)
+    sheet = spreadsheet_modal.worksheet(get_sheet_modal_name())
 
     semua_data = sheet.get_all_values()
 
@@ -974,10 +993,10 @@ def closing_hari() -> dict:
     pajak = int(total * PAJAK_MERCHANT)
     setelah_pajak = total - pajak
 
-    # 2. Buka spreadsheet REKAPAN MODAL (pakai ID)
+    # 2. Buka spreadsheet REKAPAN MODAL (pakai ID), sheet dinamis per bulan
     client = get_client()
     spreadsheet_modal = client.open_by_key(SPREADSHEET_MODAL_ID)
-    sheet_modal = spreadsheet_modal.worksheet(SHEET_MODAL)
+    sheet_modal = spreadsheet_modal.worksheet(get_sheet_modal_name(now))
 
     # 3. Cari baris dengan tanggal hari ini (format DD/MM/YYYY)
     tanggal_hari_ini = now.strftime("%d/%m/%Y")
