@@ -611,7 +611,7 @@ def tulis_rekapan(nomor_pelanggan: str, durasi: int, email_akun: str):
     # Format data
     tanggal = f"{now.day} {BULAN_EN[now.month]} {now.year}"
     durasi_text = f"{durasi} hari"
-    harga = HARGA.get(durasi, "Rp0")
+    harga = _parse_harga(HARGA.get(durasi, "Rp0"))
 
     # Cari baris terakhir yang kolom A terisi
     kolom_a = sheet_rekap.col_values(1)
@@ -643,7 +643,7 @@ def tulis_rekapan_quick(nomor_pelanggan: str, durasi: int, email_akun: str, loka
 
     tanggal = f"{now.day} {BULAN_EN[now.month]} {now.year}"
     durasi_text = f"{durasi} hari"
-    harga = HARGA.get(durasi, "Rp0")
+    harga = _parse_harga(HARGA.get(durasi, "Rp0"))
     email_lokasi = f"{email_akun}, {lokasi}"
 
     kolom_a = sheet_rekap.col_values(1)
@@ -677,7 +677,7 @@ def tulis_rekapan_bulanan_quick(nomor_pelanggan: str, jumlah_bulan: int, tipe: s
     else:
         durasi_text = f"{jumlah_bulan} b 1 u"
     key = f"{jumlah_bulan}_{tipe}"
-    harga = HARGA_BULANAN.get(key, "Rp0")
+    harga = _parse_harga(HARGA_BULANAN.get(key, "Rp0"))
     email_lokasi = f"{email_akun}, {lokasi}"
 
     kolom_a = sheet_rekap.col_values(1)
@@ -736,7 +736,7 @@ def tulis_rekapan_bulanan(nomor_pelanggan: str, jumlah_bulan: int, tipe: str, em
 
     # Harga
     key = f"{jumlah_bulan}_{tipe}"
-    harga = HARGA_BULANAN.get(key, "Rp0")
+    harga = _parse_harga(HARGA_BULANAN.get(key, "Rp0"))
 
     # Cari baris terakhir
     kolom_a = sheet_rekap.col_values(1)
@@ -759,8 +759,19 @@ def tulis_rekapan_bulanan(nomor_pelanggan: str, jumlah_bulan: int, tipe: str, em
 # ─── Rekap & Closing ────────────────────────────────────────
 
 def _parse_harga(harga_str: str) -> int:
-    """Parse 'Rp5,000' atau 'Rp17,000' ke integer 5000 / 17000."""
-    digits = "".join(c for c in harga_str if c.isdigit())
+    """
+    Parse nilai harga ke integer.
+    Handle berbagai format:
+    - 'Rp8,000' → 8000
+    - 'Rp8.000' → 8000
+    - '8000'    → 8000  (angka murni)
+    - 8000      → 8000  (sudah integer)
+    """
+    if isinstance(harga_str, int):
+        return harga_str
+    if isinstance(harga_str, float):
+        return int(harga_str)
+    digits = "".join(c for c in str(harga_str) if c.isdigit())
     return int(digits) if digits else 0
 
 
@@ -819,8 +830,12 @@ def rekap_pendapatan(periode: str) -> dict:
             continue
 
         tanggal_baris = baris[1].strip() if len(baris) > 1 else ""
-        durasi_text = baris[2].strip() if len(baris) > 2 else ""
-        harga_text = baris[3].strip() if len(baris) > 3 else ""
+        durasi_text   = baris[2].strip() if len(baris) > 2 else ""
+        harga_text    = baris[3].strip() if len(baris) > 3 else ""
+
+        # Skip baris yang tidak ada harganya sama sekali
+        if not harga_text:
+            continue
 
         # Cek apakah tanggal masuk range
         match = False
@@ -829,15 +844,22 @@ def rekap_pendapatan(periode: str) -> dict:
         elif periode in ("minggu_ini", "bulan_ini"):
             match = tanggal_baris in tanggal_list
 
-        if match and durasi_text:
-            harga = _parse_harga(harga_text)
-            total_order += 1
-            total_pendapatan += harga
+        if not match:
+            continue
 
-            if durasi_text not in detail:
-                detail[durasi_text] = {"count": 0, "total": 0}
-            detail[durasi_text]["count"] += 1
-            detail[durasi_text]["total"] += harga
+        harga = _parse_harga(harga_text)
+        if harga <= 0:
+            continue
+
+        total_order += 1
+        total_pendapatan += harga
+
+        # Gunakan label "lainnya" jika kolom C kosong
+        label = durasi_text if durasi_text else "lainnya"
+        if label not in detail:
+            detail[label] = {"count": 0, "total": 0}
+        detail[label]["count"] += 1
+        detail[label]["total"] += harga
 
     return {
         "total_order": total_order,
