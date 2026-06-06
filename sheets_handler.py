@@ -478,6 +478,40 @@ def is_baris_data(baris):
 
 # ─── Cari slot kosong (RANDOM) ─────────────────────────────
 
+def _pilih_slot_terdistribusi(slot_tersedia: list) -> dict:
+    """
+    Pilih slot dari akun yang punya slot kosong TERBANYAK.
+    Tujuan: distribusi merata — akun dengan banyak slot kosong diisi dulu
+    sebelum akun yang sudah hampir penuh.
+
+    Cara kerja:
+    1. Hitung jumlah slot kosong per email
+    2. Kelompokkan email berdasarkan jumlah slot kosong (descending)
+    3. Dari kelompok terbanyak, pilih random salah satu slotnya
+    """
+    if not slot_tersedia:
+        return None
+
+    # Hitung slot kosong per email
+    kosong_per_email = {}
+    for slot in slot_tersedia:
+        email = slot["email"]
+        kosong_per_email[email] = kosong_per_email.get(email, 0) + 1
+
+    # Cari jumlah slot kosong terbanyak
+    maks_kosong = max(kosong_per_email.values())
+
+    # Filter hanya email yang punya slot kosong terbanyak
+    email_kandidat = [e for e, n in kosong_per_email.items() if n == maks_kosong]
+
+    # Pilih random salah satu email kandidat (agar tidak selalu email yang sama)
+    email_terpilih = random.choice(email_kandidat)
+
+    # Dari email terpilih, ambil semua slotnya lalu pilih random satu
+    slot_email = [s for s in slot_tersedia if s["email"] == email_terpilih]
+    return random.choice(slot_email)
+
+
 def _cari_slot_dari_sheet(sheet, device: str = ""):
     """
     Helper: kumpulkan semua slot kosong dari sheet, return list dict.
@@ -516,20 +550,20 @@ def _cari_slot_dari_sheet(sheet, device: str = ""):
 
 
 def cari_slot_kosong(durasi: int, device: str = ""):
-    """Cari slot kosong di sheet HARIAN/MINGGUAN, pilih random."""
+    """Cari slot kosong di sheet HARIAN/MINGGUAN, pilih dari akun terdistribusi."""
     spreadsheet = get_spreadsheet()
     nama_sheet = pilih_sheet(durasi)
     sheet = spreadsheet.worksheet(nama_sheet)
     slot_tersedia = _cari_slot_dari_sheet(sheet, device)
-    return random.choice(slot_tersedia) if slot_tersedia else None
+    return _pilih_slot_terdistribusi(slot_tersedia)
 
 
 def cari_slot_kosong_bulanan(device: str = ""):
-    """Cari slot kosong di sheet BULANAN, pilih random."""
+    """Cari slot kosong di sheet BULANAN, pilih dari akun terdistribusi."""
     spreadsheet = get_spreadsheet()
     sheet = cari_worksheet_bulanan(spreadsheet)
     slot_tersedia = _cari_slot_dari_sheet(sheet, device)
-    return random.choice(slot_tersedia) if slot_tersedia else None
+    return _pilih_slot_terdistribusi(slot_tersedia)
 
 
 def verifikasi_slot_masih_kosong(nama_sheet: str, nomor_baris: int) -> bool:
