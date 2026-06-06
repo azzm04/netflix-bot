@@ -56,12 +56,12 @@ BULAN_MODAL = {
 def get_sheet_modal_name(dt: datetime = None) -> str:
     """
     Return nama sheet modal netflix berdasarkan bulan.
-    Format: "modal netflix_Juni", "modal netflix_Juli", dst.
+    Format: "omset netflix_Juni", "omset netflix_Juli", dst.
     Jika dt tidak diisi, pakai waktu sekarang.
     """
     if dt is None:
         dt = datetime.now()
-    return f"modal netflix_{BULAN_MODAL[dt.month]}"
+    return f"omset netflix_{BULAN_MODAL[dt.month]}"
 
 
 # ─── Cache koneksi & lock untuk async safety ──────────────
