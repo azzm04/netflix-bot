@@ -880,16 +880,18 @@ def tulis_gestun(tanggal_str: str, nominal: int, persen: float = None) -> dict:
     spreadsheet_modal = client.open_by_key(SPREADSHEET_MODAL_ID)
     sheet_gestun = spreadsheet_modal.worksheet(SHEET_GESTUN)
 
-    # Cari baris kosong pertama mulai dari baris 3 (baris 1-2 = header)
-    semua_data = sheet_gestun.get_all_values()
-    baris_tulis = 3  # default: mulai dari baris 3 jika semua kosong
-    for i in range(2, len(semua_data)):  # index 2 = baris 3 (0-indexed)
-        if not any(cell.strip() for cell in semua_data[i]):
+    # Cari baris kosong pertama di KOLOM A mulai dari baris 3 (baris 1-2 = header)
+    # Hanya baca kolom A agar tidak terpengaruh kolom lain (misal kolom F-G PENGELUARAN)
+    kolom_a = sheet_gestun.col_values(1)  # list nilai kolom A, index 0 = baris 1
+    baris_tulis = 3  # default: mulai dari baris 3 jika kolom A kosong semua
+
+    for i in range(2, len(kolom_a)):  # index 2 = baris 3 (0-indexed)
+        if kolom_a[i].strip() == "":
             baris_tulis = i + 1  # gspread 1-indexed
             break
     else:
-        # Semua baris terisi, append setelah baris terakhir
-        baris_tulis = len(semua_data) + 1
+        # Semua baris kolom A terisi, append setelah baris terakhir
+        baris_tulis = len(kolom_a) + 1
 
     col_a = gspread.utils.rowcol_to_a1(baris_tulis, 1)
     col_b = gspread.utils.rowcol_to_a1(baris_tulis, 2)
