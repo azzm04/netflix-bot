@@ -301,29 +301,38 @@ def cek_logout():
 
 # ─── Ganti Hari ────────────────────────────────────────────
 
-def _cek_masih_ada_hari_ini(sheet, tanggal_str: str):
+def _cek_masih_ada_hari_ini(sheet, tanggal_str: str, is_crack: bool = False):
     """
     Cek apakah masih ada akun dengan tanggal hari ini di kolom E yang belum expired.
     tanggal_str: misal "5 Juni" atau "27 Mei"
+    is_crack: True jika sheet CRACK (email di kolom B, bukan A)
     Return: list of dict akun yang masih aktif hari ini.
     """
     semua_data = sheet.get_all_values()
     masih_aktif = []
 
-    # Pecah tanggal_str jadi hari dan bulan untuk exact match
-    # misal "5 Juni" → hari="5", bulan="juni"
     parts_target = tanggal_str.strip().split()
     if len(parts_target) < 2:
         return masih_aktif
-    hari_target  = parts_target[0]   # "5"
-    bulan_target = parts_target[1].lower()  # "juni"
+    hari_target  = parts_target[0]
+    bulan_target = parts_target[1].lower()
 
     for i, baris in enumerate(semua_data):
         nomor_baris = i + 1
         if nomor_baris < DATA_START_ROW:
             continue
-        if not is_baris_data(baris):
-            continue
+
+        # Validasi baris: CRACK cek @ di kolom A atau B, lainnya kolom A saja
+        if is_crack:
+            has_email = (
+                (len(baris) > 0 and "@" in baris[0]) or
+                (len(baris) > 1 and "@" in baris[1])
+            )
+            if not has_email:
+                continue
+        else:
+            if not is_baris_data(baris):
+                continue
 
         logout_text = baris[COL_LOGOUT].strip() if len(baris) > COL_LOGOUT else ""
         if not logout_text or logout_text.upper() == "EXPIRED":
@@ -352,29 +361,38 @@ def _cek_masih_ada_hari_ini(sheet, tanggal_str: str):
     return masih_aktif
 
 
-def _ubah_warna_biru_besok(sheet, tanggal_besok_str: str):
+def _ubah_warna_biru_besok(sheet, tanggal_besok_str: str, is_crack: bool = False):
     """
     Cari semua cell di kolom E yang mengandung tanggal besok,
     lalu ubah format: font Netflix Sans, size 12, bold, warna biru.
     Pakai batch format (1 API call) untuk hindari rate limit.
+    is_crack: True jika sheet CRACK (email di kolom A atau B)
     """
     semua_data = sheet.get_all_values()
     ranges_to_format = []
 
-    # Buat pattern yang strict: "1 Juni" harus match exact (bukan "11 Juni" atau "21 Juni")
-    # Cek: teks dimulai dengan angka tanggal + spasi + bulan
     parts = tanggal_besok_str.split()
     if len(parts) < 2:
         return 0
-    hari_besok = parts[0]  # misal "1"
-    bulan_besok = parts[1]  # misal "Juni"
+    hari_besok = parts[0]
+    bulan_besok = parts[1]
 
     for i, baris in enumerate(semua_data):
         nomor_baris = i + 1
         if nomor_baris < DATA_START_ROW:
             continue
-        if not is_baris_data(baris):
-            continue
+
+        # Validasi baris sesuai tipe sheet
+        if is_crack:
+            has_email = (
+                (len(baris) > 0 and "@" in baris[0]) or
+                (len(baris) > 1 and "@" in baris[1])
+            )
+            if not has_email:
+                continue
+        else:
+            if not is_baris_data(baris):
+                continue
 
         logout_text = baris[COL_LOGOUT].strip() if len(baris) > COL_LOGOUT else ""
         if not logout_text or logout_text.upper() == "EXPIRED":
@@ -437,11 +455,20 @@ def gantihari():
         sheets_to_check.append(("BULANAN", sheet_bulanan))
     except Exception:
         pass
+    # CRACK sheets — ikut dicek dan diubah warna
+    for nama_sheet in ["CRACK_1-160_PREMIUM", "CRACK_161-320_PREMIUM", "CRACK_1-250"]:
+        try:
+            sheets_to_check.append((nama_sheet, spreadsheet.worksheet(nama_sheet)))
+        except Exception:
+            pass
+
+    CRACK_SHEETS = {"CRACK_1-160_PREMIUM", "CRACK_161-320_PREMIUM", "CRACK_1-250"}
 
     # Step 1: Cek apakah masih ada akun hari ini yang belum lewat
     semua_masih_aktif = []
     for nama_sheet, sheet in sheets_to_check:
-        aktif = _cek_masih_ada_hari_ini(sheet, tanggal_hari_ini)
+        is_crack = nama_sheet in CRACK_SHEETS
+        aktif = _cek_masih_ada_hari_ini(sheet, tanggal_hari_ini, is_crack)
         for item in aktif:
             item["sheet"] = nama_sheet
         semua_masih_aktif.extend(aktif)
@@ -452,7 +479,8 @@ def gantihari():
     # Step 2: Semua sudah logout, ubah warna biru untuk besok
     total_diubah = 0
     for nama_sheet, sheet in sheets_to_check:
-        jumlah = _ubah_warna_biru_besok(sheet, tanggal_besok)
+        is_crack = nama_sheet in CRACK_SHEETS
+        jumlah = _ubah_warna_biru_besok(sheet, tanggal_besok, is_crack)
         total_diubah += jumlah
 
     return ("berhasil", total_diubah)
