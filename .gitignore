@@ -3,3 +3,4 @@ __pycache__/
 .env
 credentials.json
 pin_invest.json
+pin_admin.json

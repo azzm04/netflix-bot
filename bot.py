@@ -30,6 +30,8 @@ from handlers.states import (
     MODAL_QUICK,
     PIN_REKAP_INVEST, PIN_REKAP_INVEST_ULANG,
     GANTI_PIN_LAMA, GANTI_PIN_BARU,
+    PIN_REKAP, PIN_CLOSING,
+    GANTI_PIN_ADMIN_LAMA, GANTI_PIN_ADMIN_BARU,
 )
 from handlers.auth import adduser, removeuser, listuser
 from handlers.order import (
@@ -42,11 +44,12 @@ from handlers.order import (
 )
 from handlers.admin import (
     stok, ceklogout, cmd_gantihari,
-    cmd_rekap, callback_rekap,
-    cmd_closing,
+    cmd_rekap, terima_pin_rekap, callback_rekap,
+    cmd_closing, terima_pin_closing,
     cmd_rekap_invest, terima_pin_rekap_invest,
     cmd_rekap_invest_ulang, terima_pin_rekap_invest_ulang,
     cmd_ganti_pin, terima_pin_lama, terima_pin_baru,
+    cmd_ganti_pin_admin, terima_pin_admin_lama, terima_pin_admin_baru,
     cancel, timeout_handler, pesan_tidak_dikenal,
 )
 from handlers.group import (
@@ -112,6 +115,7 @@ async def post_init(application):
                 BotCommand("rekap_invest", "Tulis rekap invest hari ini ke invest_netflix"),
                 BotCommand("rekap_invest_ulang", "Rekap ulang seluruh bulan ini ke invest_netflix"),
                 BotCommand("ganti_pin", "Ganti PIN verifikasi rekap invest"),
+                BotCommand("ganti_pin_admin", "Ganti PIN verifikasi rekap & closing"),
                 BotCommand("adduser", "Tambah user"),
                 BotCommand("removeuser", "Hapus user"),
                 BotCommand("listuser", "Lihat daftar user"),
@@ -238,6 +242,23 @@ def main():
     )
     app.add_handler(rekap_invest_ulang_conv)
 
+    # ConversationHandler: /ganti_pin_admin
+    ganti_pin_admin_conv = ConversationHandler(
+        entry_points=[CommandHandler("ganti_pin_admin", cmd_ganti_pin_admin, filters=PRIVATE)],
+        states={
+            GANTI_PIN_ADMIN_LAMA: [
+                MessageHandler(filters.TEXT & ~filters.COMMAND & PRIVATE, terima_pin_admin_lama)
+            ],
+            GANTI_PIN_ADMIN_BARU: [
+                MessageHandler(filters.TEXT & ~filters.COMMAND & PRIVATE, terima_pin_admin_baru)
+            ],
+        },
+        fallbacks=[CommandHandler("cancel", cancel)],
+        conversation_timeout=60,
+        allow_reentry=True,
+    )
+    app.add_handler(ganti_pin_admin_conv)
+
     # ConversationHandler: /ganti_pin
     ganti_pin_conv = ConversationHandler(
         entry_points=[CommandHandler("ganti_pin", cmd_ganti_pin, filters=PRIVATE)],
@@ -261,10 +282,36 @@ def main():
     app.add_handler(CommandHandler("cancel", cancel, filters=PRIVATE))
 
     # Command khusus GROUP (rekap, closing, feeadmin)
-    app.add_handler(CommandHandler("rekap", cmd_rekap, filters=GROUP))
-    app.add_handler(CommandHandler("closing", cmd_closing, filters=GROUP))
     app.add_handler(CommandHandler("stok", stok, filters=GROUP))
-    app.add_handler(CallbackQueryHandler(callback_rekap, pattern="^rekap_"))
+    app.add_handler(CallbackQueryHandler(callback_rekap, pattern="^rekap_", block=False))
+
+    # ConversationHandler: /rekap (dengan PIN admin) — group only
+    rekap_conv = ConversationHandler(
+        entry_points=[CommandHandler("rekap", cmd_rekap, filters=GROUP)],
+        states={
+            PIN_REKAP: [
+                MessageHandler(filters.TEXT & ~filters.COMMAND & GROUP, terima_pin_rekap)
+            ],
+        },
+        fallbacks=[CommandHandler("cancel", cancel)],
+        conversation_timeout=60,
+        allow_reentry=True,
+    )
+    app.add_handler(rekap_conv)
+
+    # ConversationHandler: /closing (dengan PIN admin) — group only
+    closing_conv = ConversationHandler(
+        entry_points=[CommandHandler("closing", cmd_closing, filters=GROUP)],
+        states={
+            PIN_CLOSING: [
+                MessageHandler(filters.TEXT & ~filters.COMMAND & GROUP, terima_pin_closing)
+            ],
+        },
+        fallbacks=[CommandHandler("cancel", cancel)],
+        conversation_timeout=60,
+        allow_reentry=True,
+    )
+    app.add_handler(closing_conv)
 
     # ConversationHandler /feeadmin — group only
     fee_conv_handler = ConversationHandler(

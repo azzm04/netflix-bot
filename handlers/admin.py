@@ -9,7 +9,7 @@ from telegram.ext import ContextTypes, ConversationHandler
 from config import ADMIN_ID, NOTIF_ORDER_IDS
 from sheets_handler import cek_stok, cek_logout, gantihari, rekap_pendapatan, closing_hari, rekap_invest_harian, rekap_invest_ulang, rekap_invest_range_custom
 from handlers.auth import is_allowed
-from utils.pin_manager import verifikasi_pin, ganti_pin as _ganti_pin
+from utils.pin_manager import verifikasi_pin, ganti_pin as _ganti_pin, verifikasi_pin_admin, ganti_pin_admin as _ganti_pin_admin
 
 logger = logging.getLogger(__name__)
 
@@ -130,15 +130,34 @@ async def cmd_gantihari(update: Update, context: ContextTypes.DEFAULT_TYPE):
 # ─── /rekap ────────────────────────────────────────────────
 
 async def cmd_rekap(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Lihat rekap pendapatan."""
+    """Entry point: minta PIN admin sebelum tampilkan rekap."""
     if update.effective_user.id != ADMIN_ID:
         await update.message.reply_text("⛔ Hanya admin utama.")
-        return
+        return ConversationHandler.END
 
-    # Hanya bisa dijalankan di group/supergroup
     if update.effective_chat.type not in ("group", "supergroup"):
         await update.message.reply_text("⛔ Command ini hanya bisa digunakan di dalam group.")
-        return
+        return ConversationHandler.END
+
+    await update.message.reply_text(
+        "🔐 *Verifikasi diperlukan*\n\nMasukkan PIN admin:",
+        parse_mode="Markdown"
+    )
+    from handlers.states import PIN_REKAP
+    return PIN_REKAP
+
+
+async def terima_pin_rekap(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Terima PIN untuk /rekap, tampilkan pilihan periode jika benar."""
+    pin_input = update.message.text.strip()
+    try:
+        await update.message.delete()
+    except Exception:
+        pass
+
+    if not verifikasi_pin_admin(pin_input):
+        await update.message.reply_text("❌ PIN salah. Akses ditolak.")
+        return ConversationHandler.END
 
     keyboard = [
         [InlineKeyboardButton("📅 Hari Ini", callback_data="rekap_hari_ini")],
@@ -150,6 +169,7 @@ async def cmd_rekap(update: Update, context: ContextTypes.DEFAULT_TYPE):
         parse_mode="Markdown",
         reply_markup=InlineKeyboardMarkup(keyboard)
     )
+    return ConversationHandler.END
 
 
 async def callback_rekap(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -202,15 +222,34 @@ async def callback_rekap(update: Update, context: ContextTypes.DEFAULT_TYPE):
 # ─── /closing ──────────────────────────────────────────────
 
 async def cmd_closing(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Closing hari: hitung pendapatan, potong pajak 0.7%, tulis ke REKAPAN MODAL."""
+    """Entry point: minta PIN admin sebelum closing."""
     if update.effective_user.id != ADMIN_ID:
         await update.message.reply_text("⛔ Hanya admin utama.")
-        return
+        return ConversationHandler.END
 
-    # Hanya bisa dijalankan di group/supergroup
     if update.effective_chat.type not in ("group", "supergroup"):
         await update.message.reply_text("⛔ Command ini hanya bisa digunakan di dalam group.")
-        return
+        return ConversationHandler.END
+
+    await update.message.reply_text(
+        "🔐 *Verifikasi diperlukan*\n\nMasukkan PIN admin:",
+        parse_mode="Markdown"
+    )
+    from handlers.states import PIN_CLOSING
+    return PIN_CLOSING
+
+
+async def terima_pin_closing(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Terima PIN untuk /closing, eksekusi jika benar."""
+    pin_input = update.message.text.strip()
+    try:
+        await update.message.delete()
+    except Exception:
+        pass
+
+    if not verifikasi_pin_admin(pin_input):
+        await update.message.reply_text("❌ PIN salah. Akses ditolak.")
+        return ConversationHandler.END
 
     pesan = await update.message.reply_text("🔄 Proses closing hari ini...")
 
@@ -222,11 +261,11 @@ async def cmd_closing(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 "❌ Tanggal hari ini tidak ditemukan di spreadsheet REKAPAN MODAL.\n"
                 "Pastikan tanggal sudah ada di kolom A."
             )
-            return
+            return ConversationHandler.END
 
         if result["total"] == 0:
             await pesan.edit_text("ℹ️ Belum ada pendapatan hari ini.")
-            return
+            return ConversationHandler.END
 
         teks = (
             f"✅ *CLOSING HARI INI BERHASIL*\n"
@@ -239,7 +278,6 @@ async def cmd_closing(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
         await pesan.edit_text(teks, parse_mode="Markdown")
 
-        # Kirim juga ke grup
         for chat_id in NOTIF_ORDER_IDS:
             try:
                 await context.bot.send_message(
@@ -251,6 +289,8 @@ async def cmd_closing(update: Update, context: ContextTypes.DEFAULT_TYPE):
     except Exception as e:
         logger.error(f"Error closing: {e}", exc_info=True)
         await pesan.edit_text("⚠️ Gagal proses closing.")
+
+    return ConversationHandler.END
 
 
 # ─── /rekap_invest_ulang ───────────────────────────────────
@@ -435,6 +475,62 @@ async def terima_pin_rekap_invest(update: Update, context: ContextTypes.DEFAULT_
         logger.error(f"Error rekap_invest: {e}", exc_info=True)
         await pesan.edit_text(f"⚠️ Gagal proses rekap invest.\n\n`{str(e)}`", parse_mode="Markdown")
 
+    return ConversationHandler.END
+
+
+# ─── /ganti_pin_admin ──────────────────────────────────────
+
+async def cmd_ganti_pin_admin(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Entry point: minta PIN admin lama untuk ganti PIN admin."""
+    if update.effective_user.id != ADMIN_ID:
+        await update.message.reply_text("⛔ Hanya admin utama.")
+        return ConversationHandler.END
+
+    await update.message.reply_text(
+        "🔐 *Ganti PIN Admin (/rekap & /closing)*\n\nMasukkan PIN lama:",
+        parse_mode="Markdown"
+    )
+    from handlers.states import GANTI_PIN_ADMIN_LAMA
+    return GANTI_PIN_ADMIN_LAMA
+
+
+async def terima_pin_admin_lama(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Terima PIN admin lama, minta PIN baru."""
+    from handlers.states import GANTI_PIN_ADMIN_BARU
+
+    pin_lama = update.message.text.strip()
+    try:
+        await update.message.delete()
+    except Exception:
+        pass
+
+    if not verifikasi_pin_admin(pin_lama):
+        await update.message.reply_text("❌ PIN lama salah. Proses dibatalkan.")
+        return ConversationHandler.END
+
+    context.user_data["pin_admin_lama"] = pin_lama
+    await update.message.reply_text("✅ PIN lama benar.\n\nMasukkan PIN baru (minimal 6 karakter):")
+    return GANTI_PIN_ADMIN_BARU
+
+
+async def terima_pin_admin_baru(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Terima PIN admin baru dan simpan."""
+    pin_baru = update.message.text.strip()
+    pin_lama = context.user_data.pop("pin_admin_lama", "")
+    try:
+        await update.message.delete()
+    except Exception:
+        pass
+
+    result = _ganti_pin_admin(pin_lama, pin_baru)
+    if result["ok"]:
+        await update.message.reply_text(
+            "✅ *PIN Admin berhasil diganti.*\n\n"
+            "PIN baru sudah aktif untuk `/rekap` dan `/closing`.",
+            parse_mode="Markdown"
+        )
+    else:
+        await update.message.reply_text(f"❌ Gagal: {result['reason']}")
     return ConversationHandler.END
 
 
