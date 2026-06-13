@@ -1506,13 +1506,12 @@ def rekap_invest_harian() -> dict:
     Tulis rekapan hari ini ke spreadsheet invest_netflix.
     Dijalankan otomatis jam 23:59 (sama seperti auto_closing).
 
-    Alur:
-    1. Ambil semua order hari ini dari REKAPAN JUNI/dst yang emailnya cocok
-    2. Untuk tiap sheet (rekapan_ena / rekapan_umi):
-       a. Tulis header tanggal jika belum ada
-       b. Tulis baris per order (skip duplikat)
-       c. Tulis baris subtotal per tanggal dengan background hijau
-    3. Return ringkasan hasil
+    Format visual (mengikuti sheet manual):
+    - Header tanggal : merge A:E, bg ungu (0.835,0.651,0.741), bold, center
+    - Baris data     : kolom A  = bg ungu (sama header)
+                       kolom B,D,E = bg pink muda (0.957,0.8,0.8), center
+                       kolom C  = putih (no fill), center
+    - Baris subtotal : hanya kolom D, bg hijau (0.416,0.659,0.310), bold, center
 
     Return: {
         'rekapan_ena': {'ditulis': int, 'total': int, 'skip_duplikat': int},
@@ -1520,16 +1519,21 @@ def rekap_invest_harian() -> dict:
     }
     """
     now = datetime.now()
-    tanggal_str = f"{now.day} {BULAN_EN[now.month]} {now.year}"
 
     # 1. Ambil data hari ini yang relevan
     data_per_sheet = _ambil_data_rekap_hari_ini()
 
     if not data_per_sheet:
-        return {}  # Tidak ada data untuk invest hari ini
+        return {}
 
     client = get_client()
     spreadsheet_invest = client.open_by_key(SPREADSHEET_INVEST_ID)
+
+    # Warna (dari pembacaan sheet asli)
+    BG_UNGU      = {"red": 0.835, "green": 0.651, "blue": 0.741}   # header & kolom A data
+    BG_PINK      = {"red": 0.957, "green": 0.800, "blue": 0.800}   # kolom B,D,E data
+    BG_PUTIH     = {"red": 1.0,   "green": 1.0,   "blue": 1.0}     # kolom C data
+    BG_HIJAU     = {"red": 0.416, "green": 0.659, "blue": 0.310}   # subtotal
 
     hasil = {}
 
@@ -1544,7 +1548,7 @@ def rekap_invest_harian() -> dict:
         skip_duplikat = 0
         total_harga = 0
 
-        # Kumpulkan baris yang belum ada (anti-duplikat)
+        # Anti-duplikat
         baris_baru = []
         for entry in baris_list:
             if _sudah_ada_di_invest(sheet, entry["tanggal"], entry["nomor"], entry["email_raw"]):
@@ -1553,58 +1557,86 @@ def rekap_invest_harian() -> dict:
             baris_baru.append(entry)
 
         if not baris_baru:
-            hasil[nama_sheet] = {
-                "ditulis": 0,
-                "total": 0,
-                "skip_duplikat": skip_duplikat,
-            }
+            hasil[nama_sheet] = {"ditulis": 0, "total": 0, "skip_duplikat": skip_duplikat}
             continue
 
-        # Cari baris tulis (setelah data terakhir)
-        baris_tulis = _cari_baris_terakhir_invest(sheet)
+        sheet_id = sheet._properties["sheetId"]
+        baris_tulis = _cari_baris_terakhir_invest(sheet)  # 1-indexed
 
-        # Format tanggal header: "7 Juni 2026" → "7 Juni 2026" (pakai spasi penuh)
-        # Tulis header tanggal di kolom D (center, bold, warna lembut — format via batch_format)
-        # Header: row berisi tanggal di kolom D (kolom 4), kolom lain kosong
-        header_row = baris_tulis
+        # ── 1. Header tanggal (merge A:E, bg ungu, bold, center) ──────────
+        header_row = baris_tulis  # 1-indexed
+        header_row_idx = header_row - 1  # 0-indexed untuk Sheets API
+
+        tanggal_str = baris_baru[0]["tanggal"]
+
+        # Tulis teks header di kolom A (anchor merge)
         sheet.batch_update([{
-            "range": gspread.utils.rowcol_to_a1(header_row, 4),
+            "range": gspread.utils.rowcol_to_a1(header_row, 1),
             "values": [[tanggal_str]],
         }])
-        # Format header tanggal: bold, center, background ungu muda (sesuai gambar)
+
+        # Merge A:E pada baris header
+        sheet.spreadsheet.batch_update({
+            "requests": [{
+                "mergeCells": {
+                    "range": {
+                        "sheetId": sheet_id,
+                        "startRowIndex": header_row_idx,
+                        "endRowIndex":   header_row_idx + 1,
+                        "startColumnIndex": 0,
+                        "endColumnIndex":   5,
+                    },
+                    "mergeType": "MERGE_ALL",
+                }
+            }]
+        })
+
+        # Format header: bg ungu, bold, center
         sheet.batch_format([{
-            "range": gspread.utils.rowcol_to_a1(header_row, 4),
+            "range": f"A{header_row}:E{header_row}",
             "format": {
+                "backgroundColor": BG_UNGU,
                 "textFormat": {"bold": True},
                 "horizontalAlignment": "CENTER",
-                "backgroundColor": {"red": 0.851, "green": 0.824, "blue": 0.902},
             }
         }])
+
         baris_tulis += 1
 
-        # Tulis setiap order
-        batch_data = []
-        for entry in baris_baru:
-            col_a = gspread.utils.rowcol_to_a1(baris_tulis, 1)
-            col_b = gspread.utils.rowcol_to_a1(baris_tulis, 2)
-            col_c = gspread.utils.rowcol_to_a1(baris_tulis, 3)
-            col_d = gspread.utils.rowcol_to_a1(baris_tulis, 4)
-            col_e = gspread.utils.rowcol_to_a1(baris_tulis, 5)
+        # ── 2. Baris data ──────────────────────────────────────────────────
+        batch_values = []
+        batch_formats = []
 
-            batch_data.extend([
-                {"range": col_a, "values": [[entry["nomor"]]]},
-                {"range": col_b, "values": [[entry["tanggal"]]]},
-                {"range": col_c, "values": [[entry["durasi"]]]},
-                {"range": col_d, "values": [[entry["harga"]]]},
-                {"range": col_e, "values": [[entry["email_raw"]]]},
+        for entry in baris_baru:
+            r = baris_tulis  # 1-indexed
+
+            # Tulis nilai
+            batch_values.extend([
+                {"range": gspread.utils.rowcol_to_a1(r, 1), "values": [[entry["nomor"]]]},
+                {"range": gspread.utils.rowcol_to_a1(r, 2), "values": [[entry["tanggal"]]]},
+                {"range": gspread.utils.rowcol_to_a1(r, 3), "values": [[entry["durasi"]]]},
+                {"range": gspread.utils.rowcol_to_a1(r, 4), "values": [[entry["harga"]]]},
+                {"range": gspread.utils.rowcol_to_a1(r, 5), "values": [[entry["email_raw"]]]},
             ])
+
+            # Format per kolom: A=ungu, B=pink, C=putih, D=pink, E=pink
+            for col_idx, bg in [(1, BG_UNGU), (2, BG_PINK), (3, BG_PUTIH), (4, BG_PINK), (5, BG_PINK)]:
+                batch_formats.append({
+                    "range": gspread.utils.rowcol_to_a1(r, col_idx),
+                    "format": {
+                        "backgroundColor": bg,
+                        "horizontalAlignment": "CENTER",
+                    }
+                })
+
             total_harga += entry["harga"]
             ditulis += 1
             baris_tulis += 1
 
-        sheet.batch_update(batch_data)
+        sheet.batch_update(batch_values)
+        sheet.batch_format(batch_formats)
 
-        # Tulis baris subtotal (kolom D, background hijau)
+        # ── 3. Baris subtotal (hanya kolom D, bg hijau, bold, center) ──────
         subtotal_row = baris_tulis
         sheet.batch_update([{
             "range": gspread.utils.rowcol_to_a1(subtotal_row, 4),
@@ -1613,8 +1645,8 @@ def rekap_invest_harian() -> dict:
         sheet.batch_format([{
             "range": gspread.utils.rowcol_to_a1(subtotal_row, 4),
             "format": {
+                "backgroundColor": BG_HIJAU,
                 "textFormat": {"bold": True},
-                "backgroundColor": {"red": 0.416, "green": 0.659, "blue": 0.310},
                 "horizontalAlignment": "CENTER",
             }
         }])
