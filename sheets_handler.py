@@ -1474,14 +1474,26 @@ def _ambil_data_rekap_hari_ini() -> dict:
 
 def _cari_baris_terakhir_invest(sheet) -> int:
     """
-    Cari nomor baris terakhir berisi data di sheet invest_netflix.
-    Return: baris berikutnya yang kosong (1-indexed).
+    Cari baris kosong pertama setelah data terakhir di sheet invest_netflix.
+    Cek kolom A DAN kolom D (karena subtotal ada di kolom D, kolom A-nya kosong).
+    Tambah 1 baris jarak (spacer) agar tidak mepet dengan blok sebelumnya.
+    Return: nomor baris target (1-indexed).
     """
-    kolom_a = sheet.col_values(1)
-    for i in range(len(kolom_a) - 1, -1, -1):
-        if kolom_a[i].strip() != "":
-            return i + 2  # baris berikutnya setelah data terakhir
-    return 2  # sheet kosong, mulai dari baris 2 (baris 1 = header jika ada)
+    # Ambil semua nilai kolom A dan D sekaligus
+    semua = sheet.get_all_values()
+    baris_terakhir_berisi = 0
+
+    for i, baris in enumerate(semua):
+        col_a = baris[0].strip() if len(baris) > 0 else ""
+        col_d = baris[3].strip() if len(baris) > 3 else ""
+        if col_a or col_d:
+            baris_terakhir_berisi = i + 1  # 1-indexed
+
+    if baris_terakhir_berisi == 0:
+        return 2  # sheet kosong, mulai baris 2
+
+    # +2: 1 untuk baris setelah data terakhir, 1 lagi untuk baris jarak (spacer)
+    return baris_terakhir_berisi + 2
 
 
 def _sudah_ada_di_invest(sheet, tanggal_str: str, nomor: str, email_raw: str) -> bool:
