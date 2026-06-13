@@ -28,6 +28,8 @@ from handlers.states import (
     MODAL_PILIH_MODE,
     MODAL_TANYA_TANGGAL, MODAL_TANYA_NOMINAL, MODAL_TANYA_KET, MODAL_KONFIRMASI,
     MODAL_QUICK,
+    PIN_REKAP_INVEST, PIN_REKAP_INVEST_ULANG,
+    GANTI_PIN_LAMA, GANTI_PIN_BARU,
 )
 from handlers.auth import adduser, removeuser, listuser
 from handlers.order import (
@@ -42,8 +44,9 @@ from handlers.admin import (
     stok, ceklogout, cmd_gantihari,
     cmd_rekap, callback_rekap,
     cmd_closing,
-    cmd_rekap_invest,
-    cmd_rekap_invest_ulang,
+    cmd_rekap_invest, terima_pin_rekap_invest,
+    cmd_rekap_invest_ulang, terima_pin_rekap_invest_ulang,
+    cmd_ganti_pin, terima_pin_lama, terima_pin_baru,
     cancel, timeout_handler, pesan_tidak_dikenal,
 )
 from handlers.group import (
@@ -108,6 +111,7 @@ async def post_init(application):
                 BotCommand("gantihari", "Ganti hari & ubah warna besok"),
                 BotCommand("rekap_invest", "Tulis rekap invest hari ini ke invest_netflix"),
                 BotCommand("rekap_invest_ulang", "Rekap ulang seluruh bulan ini ke invest_netflix"),
+                BotCommand("ganti_pin", "Ganti PIN verifikasi rekap invest"),
                 BotCommand("adduser", "Tambah user"),
                 BotCommand("removeuser", "Hapus user"),
                 BotCommand("listuser", "Lihat daftar user"),
@@ -205,8 +209,52 @@ def main():
     app.add_handler(CommandHandler("stok", stok, filters=PRIVATE))
     app.add_handler(CommandHandler("ceklogout", ceklogout, filters=PRIVATE))
     app.add_handler(CommandHandler("gantihari", cmd_gantihari, filters=PRIVATE))
-    app.add_handler(CommandHandler("rekap_invest", cmd_rekap_invest, filters=PRIVATE))
-    app.add_handler(CommandHandler("rekap_invest_ulang", cmd_rekap_invest_ulang, filters=PRIVATE))
+
+    # ConversationHandler: /rekap_invest (dengan PIN verifikasi)
+    rekap_invest_conv = ConversationHandler(
+        entry_points=[CommandHandler("rekap_invest", cmd_rekap_invest, filters=PRIVATE)],
+        states={
+            PIN_REKAP_INVEST: [
+                MessageHandler(filters.TEXT & ~filters.COMMAND & PRIVATE, terima_pin_rekap_invest)
+            ],
+        },
+        fallbacks=[CommandHandler("cancel", cancel)],
+        conversation_timeout=60,
+        allow_reentry=True,
+    )
+    app.add_handler(rekap_invest_conv)
+
+    # ConversationHandler: /rekap_invest_ulang (dengan PIN)
+    rekap_invest_ulang_conv = ConversationHandler(
+        entry_points=[CommandHandler("rekap_invest_ulang", cmd_rekap_invest_ulang, filters=PRIVATE)],
+        states={
+            PIN_REKAP_INVEST_ULANG: [
+                MessageHandler(filters.TEXT & ~filters.COMMAND & PRIVATE, terima_pin_rekap_invest_ulang)
+            ],
+        },
+        fallbacks=[CommandHandler("cancel", cancel)],
+        conversation_timeout=60,
+        allow_reentry=True,
+    )
+    app.add_handler(rekap_invest_ulang_conv)
+
+    # ConversationHandler: /ganti_pin
+    ganti_pin_conv = ConversationHandler(
+        entry_points=[CommandHandler("ganti_pin", cmd_ganti_pin, filters=PRIVATE)],
+        states={
+            GANTI_PIN_LAMA: [
+                MessageHandler(filters.TEXT & ~filters.COMMAND & PRIVATE, terima_pin_lama)
+            ],
+            GANTI_PIN_BARU: [
+                MessageHandler(filters.TEXT & ~filters.COMMAND & PRIVATE, terima_pin_baru)
+            ],
+        },
+        fallbacks=[CommandHandler("cancel", cancel)],
+        conversation_timeout=60,
+        allow_reentry=True,
+    )
+    app.add_handler(ganti_pin_conv)
+
     app.add_handler(CommandHandler("adduser", adduser, filters=PRIVATE))
     app.add_handler(CommandHandler("removeuser", removeuser, filters=PRIVATE))
     app.add_handler(CommandHandler("listuser", listuser, filters=PRIVATE))

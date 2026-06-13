@@ -9,6 +9,7 @@ from telegram.ext import ContextTypes, ConversationHandler
 from config import ADMIN_ID, NOTIF_ORDER_IDS
 from sheets_handler import cek_stok, cek_logout, gantihari, rekap_pendapatan, closing_hari, rekap_invest_harian, rekap_invest_ulang, rekap_invest_range_custom
 from handlers.auth import is_allowed
+from utils.pin_manager import verifikasi_pin, ganti_pin as _ganti_pin
 
 logger = logging.getLogger(__name__)
 
@@ -256,67 +257,81 @@ async def cmd_closing(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def cmd_rekap_invest_ulang(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """
-    Rekap ulang data ke invest_netflix. Admin only, private.
-
-    Usage:
-      /rekap_invest_ulang
-          → rekap ulang seluruh bulan ini (Juni 2026)
-
-      /rekap_invest_ulang 31 Mei - 30 Juni
-          → rekap ulang dengan rentang tanggal custom (lintas bulan)
-
-    Format argumen: DD BULAN - DD BULAN  (tahun otomatis = sekarang)
-    Contoh: /rekap_invest_ulang 31 Mei - 30 Juni
+    Entry point: minta PIN verifikasi sebelum rekap ulang.
+    Simpan argumen (range tanggal) di user_data untuk dipakai setelah PIN benar.
     """
     if update.effective_user.id != ADMIN_ID:
         await update.message.reply_text("⛔ Hanya admin utama.")
-        return
+        from telegram.ext import ConversationHandler
+        return ConversationHandler.END
 
-    from datetime import datetime as _dt
-    from sheets_handler import BULAN_REKAP as _BR, BULAN_ID_REVERSE as _BIR
-
-    now = _dt.now()
+    # Simpan argumen untuk dipakai setelah PIN dikonfirmasi
     args_text = " ".join(context.args).strip() if context.args else ""
+    context.user_data["rekap_ulang_args"] = args_text
 
-    # ── Parse argumen range jika ada ─────────────────────────
-    rentang_info = ""
+    await update.message.reply_text(
+        "🔐 *Verifikasi diperlukan*\n\nMasukkan PIN rekap invest:",
+        parse_mode="Markdown"
+    )
+    from handlers.states import PIN_REKAP_INVEST_ULANG
+    return PIN_REKAP_INVEST_ULANG
+
+
+async def terima_pin_rekap_invest_ulang(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Terima PIN untuk /rekap_invest_ulang, eksekusi jika benar."""
+    from telegram.ext import ConversationHandler
+    from handlers.states import PIN_REKAP_INVEST_ULANG
+    from sheets_handler import BULAN_REKAP as _BR, BULAN_ID_REVERSE as _BIR
+    from datetime import datetime as _dt
+
+    pin_input = update.message.text.strip()
+
+    # Hapus pesan PIN agar tidak terlihat di chat
+    try:
+        await update.message.delete()
+    except Exception:
+        pass
+
+    if not verifikasi_pin(pin_input):
+        await update.message.reply_text("❌ PIN salah. Akses ditolak.")
+        return ConversationHandler.END
+
+    # PIN benar — ambil argumen yang disimpan
+    args_text = context.user_data.pop("rekap_ulang_args", "")
+    now = _dt.now()
+
     use_custom_range = False
+    rentang_info = ""
 
     if args_text and "-" in args_text:
         try:
             bagian = [b.strip() for b in args_text.split("-", 1)]
-            if len(bagian) == 2:
-                def _parse_tgl(s):
-                    parts = s.strip().split()
-                    hari = int(parts[0])
-                    bulan_nama = parts[1].lower().strip()
-                    bulan_num = _BIR.get(bulan_nama)
-                    if bulan_num is None:
-                        raise ValueError(f"Bulan tidak dikenal: {parts[1]}")
-                    tahun = now.year
-                    # Jika bulan sudah lewat, kemungkinan tahun sama; jika bulan > bulan sekarang, anggap tahun lalu
-                    return hari, bulan_num, tahun
+            def _parse_tgl(s):
+                parts = s.strip().split()
+                hari = int(parts[0])
+                bulan_nama = parts[1].lower().strip()
+                bulan_num = _BIR.get(bulan_nama)
+                if bulan_num is None:
+                    raise ValueError(f"Bulan tidak dikenal: {parts[1]}")
+                return hari, bulan_num, now.year
 
-                tgl_m_hari, tgl_m_bln, tgl_m_thn = _parse_tgl(bagian[0])
-                tgl_a_hari, tgl_a_bln, tgl_a_thn = _parse_tgl(bagian[1])
-                use_custom_range = True
-                rentang_info = f"{bagian[0].title()} – {bagian[1].title()} {now.year}"
-        except Exception as parse_err:
+            tgl_m_hari, tgl_m_bln, tgl_m_thn = _parse_tgl(bagian[0])
+            tgl_a_hari, tgl_a_bln, tgl_a_thn = _parse_tgl(bagian[1])
+            use_custom_range = True
+            rentang_info = f"{bagian[0].title()} – {bagian[1].title()} {now.year}"
+        except Exception:
             await update.message.reply_text(
-                f"❌ Format salah: `{args_text}`\n\n"
-                f"Contoh yang benar:\n"
-                f"`/rekap_invest_ulang 31 Mei - 30 Juni`",
+                "❌ Format range salah.\nContoh: `/rekap_invest_ulang 31 Mei - 30 Juni`",
                 parse_mode="Markdown"
             )
-            return
+            return ConversationHandler.END
 
     if not use_custom_range:
         nama_bulan = _BR.get(now.month, str(now.month))
         rentang_info = f"1 – {now.day} {nama_bulan} {now.year}"
 
     pesan = await update.message.reply_text(
-        f"🔄 Rekap ulang *{rentang_info}* sedang diproses...\n"
-        f"_(Ini mungkin butuh beberapa detik)_",
+        f"✅ PIN benar. Rekap ulang *{rentang_info}* diproses...",
         parse_mode="Markdown"
     )
 
@@ -331,10 +346,10 @@ async def cmd_rekap_invest_ulang(update: Update, context: ContextTypes.DEFAULT_T
 
         if not hasil:
             await pesan.edit_text(
-                f"ℹ️ Tidak ada data untuk rentang *{rentang_info}* yang cocok untuk rekap invest.",
+                f"ℹ️ Tidak ada data untuk rentang *{rentang_info}* yang cocok.",
                 parse_mode="Markdown"
             )
-            return
+            return ConversationHandler.END
 
         teks = f"✅ *REKAP ULANG {rentang_info.upper()} SELESAI*\n━━━━━━━━━━━━━━━━\n"
         for nama_sheet, info in hasil.items():
@@ -353,26 +368,53 @@ async def cmd_rekap_invest_ulang(update: Update, context: ContextTypes.DEFAULT_T
         logger.error(f"Error rekap_invest_ulang: {e}", exc_info=True)
         await pesan.edit_text(f"⚠️ Gagal rekap ulang.\n\n`{str(e)}`", parse_mode="Markdown")
 
+    return ConversationHandler.END
+
 
 # ─── /rekap_invest ─────────────────────────────────────────
 
 async def cmd_rekap_invest(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Tulis rekapan invest hari ini ke spreadsheet invest_netflix. Admin only, private."""
+    """Entry point: minta PIN verifikasi sebelum rekap invest hari ini."""
     if update.effective_user.id != ADMIN_ID:
         await update.message.reply_text("⛔ Hanya admin utama.")
-        return
+        from telegram.ext import ConversationHandler
+        return ConversationHandler.END
 
-    pesan = await update.message.reply_text("🔄 Proses rekap invest hari ini...")
+    await update.message.reply_text(
+        "🔐 *Verifikasi diperlukan*\n\nMasukkan PIN rekap invest:",
+        parse_mode="Markdown"
+    )
+    from handlers.states import PIN_REKAP_INVEST
+    return PIN_REKAP_INVEST
+
+
+async def terima_pin_rekap_invest(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Terima PIN untuk /rekap_invest, eksekusi jika benar."""
+    from telegram.ext import ConversationHandler
+
+    pin_input = update.message.text.strip()
+
+    # Hapus pesan PIN agar tidak terlihat di chat
+    try:
+        await update.message.delete()
+    except Exception:
+        pass
+
+    if not verifikasi_pin(pin_input):
+        await update.message.reply_text("❌ PIN salah. Akses ditolak.")
+        return ConversationHandler.END
+
+    pesan = await update.message.reply_text("✅ PIN benar. Proses rekap invest hari ini...")
 
     try:
         hasil = rekap_invest_harian()
 
         if not hasil:
             await pesan.edit_text(
-                "ℹ️ Tidak ada transaksi hari ini yang masuk rekap invest.\n"
-                "(Tidak ada email ena/umi yang cocok di REKAPAN hari ini.)"
+                "ℹ️ Tidak ada transaksi hari ini yang masuk ke rekap invest\n"
+                "(tidak ada email ena/umi yang cocok)."
             )
-            return
+            return ConversationHandler.END
 
         teks = "✅ *REKAP INVEST BERHASIL*\n━━━━━━━━━━━━━━━━\n"
         for nama_sheet, info in hasil.items():
@@ -384,15 +426,78 @@ async def cmd_rekap_invest(update: Update, context: ContextTypes.DEFAULT_TYPE):
                     f"  • Ditulis: *{info['ditulis']} baris*\n"
                     f"  • Total: *Rp{info['total']:,}*\n"
                 )
-                if info["skip_duplikat"] > 0:
+                if info.get("skip_duplikat", 0) > 0:
                     teks += f"  • Skip duplikat: {info['skip_duplikat']}\n"
-
         teks += "━━━━━━━━━━━━━━━━"
         await pesan.edit_text(teks, parse_mode="Markdown")
 
     except Exception as e:
         logger.error(f"Error rekap_invest: {e}", exc_info=True)
         await pesan.edit_text(f"⚠️ Gagal proses rekap invest.\n\n`{str(e)}`", parse_mode="Markdown")
+
+    return ConversationHandler.END
+
+
+# ─── /ganti_pin ────────────────────────────────────────────
+
+async def cmd_ganti_pin(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Entry point: minta PIN lama untuk ganti PIN rekap invest."""
+    if update.effective_user.id != ADMIN_ID:
+        await update.message.reply_text("⛔ Hanya admin utama.")
+        from telegram.ext import ConversationHandler
+        return ConversationHandler.END
+
+    await update.message.reply_text(
+        "🔐 *Ganti PIN Rekap Invest*\n\nMasukkan PIN lama:",
+        parse_mode="Markdown"
+    )
+    from handlers.states import GANTI_PIN_LAMA
+    return GANTI_PIN_LAMA
+
+
+async def terima_pin_lama(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Terima PIN lama, minta PIN baru."""
+    from telegram.ext import ConversationHandler
+    from handlers.states import GANTI_PIN_BARU
+
+    pin_lama = update.message.text.strip()
+    try:
+        await update.message.delete()
+    except Exception:
+        pass
+
+    if not verifikasi_pin(pin_lama):
+        await update.message.reply_text("❌ PIN lama salah. Proses dibatalkan.")
+        return ConversationHandler.END
+
+    context.user_data["pin_lama"] = pin_lama
+    await update.message.reply_text("✅ PIN lama benar.\n\nMasukkan PIN baru (minimal 6 karakter):")
+    return GANTI_PIN_BARU
+
+
+async def terima_pin_baru(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Terima PIN baru dan simpan."""
+    from telegram.ext import ConversationHandler
+
+    pin_baru = update.message.text.strip()
+    pin_lama = context.user_data.pop("pin_lama", "")
+
+    try:
+        await update.message.delete()
+    except Exception:
+        pass
+
+    result = _ganti_pin(pin_lama, pin_baru)
+    if result["ok"]:
+        await update.message.reply_text(
+            "✅ *PIN berhasil diganti.*\n\n"
+            "PIN baru sudah aktif untuk `/rekap_invest` dan `/rekap_invest_ulang`.",
+            parse_mode="Markdown"
+        )
+    else:
+        await update.message.reply_text(f"❌ Gagal: {result['reason']}")
+
+    return ConversationHandler.END
 
 
 # ─── /cancel, timeout, pesan tidak dikenal ─────────────────

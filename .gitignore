@@ -2,3 +2,4 @@ __pycache__/
 *.pyc
 .env
 credentials.json
+pin_invest.json
