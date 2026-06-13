@@ -7,7 +7,7 @@ import logging
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import ContextTypes, ConversationHandler
 from config import ADMIN_ID, NOTIF_ORDER_IDS
-from sheets_handler import cek_stok, cek_logout, gantihari, rekap_pendapatan, closing_hari
+from sheets_handler import cek_stok, cek_logout, gantihari, rekap_pendapatan, closing_hari, rekap_invest_harian
 from handlers.auth import is_allowed
 
 logger = logging.getLogger(__name__)
@@ -250,6 +250,47 @@ async def cmd_closing(update: Update, context: ContextTypes.DEFAULT_TYPE):
     except Exception as e:
         logger.error(f"Error closing: {e}", exc_info=True)
         await pesan.edit_text("⚠️ Gagal proses closing.")
+
+
+# ─── /rekap_invest ─────────────────────────────────────────
+
+async def cmd_rekap_invest(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Tulis rekapan invest hari ini ke spreadsheet invest_netflix. Admin only, private."""
+    if update.effective_user.id != ADMIN_ID:
+        await update.message.reply_text("⛔ Hanya admin utama.")
+        return
+
+    pesan = await update.message.reply_text("🔄 Proses rekap invest hari ini...")
+
+    try:
+        hasil = rekap_invest_harian()
+
+        if not hasil:
+            await pesan.edit_text(
+                "ℹ️ Tidak ada transaksi hari ini yang masuk rekap invest.\n"
+                "(Tidak ada email ena/umi yang cocok di REKAPAN hari ini.)"
+            )
+            return
+
+        teks = "✅ *REKAP INVEST BERHASIL*\n━━━━━━━━━━━━━━━━\n"
+        for nama_sheet, info in hasil.items():
+            if "error" in info:
+                teks += f"\n❌ `{nama_sheet}`: gagal — {info['error']}\n"
+            else:
+                teks += (
+                    f"\n📋 `{nama_sheet}`\n"
+                    f"  • Ditulis: *{info['ditulis']} baris*\n"
+                    f"  • Total: *Rp{info['total']:,}*\n"
+                )
+                if info["skip_duplikat"] > 0:
+                    teks += f"  • Skip duplikat: {info['skip_duplikat']}\n"
+
+        teks += "━━━━━━━━━━━━━━━━"
+        await pesan.edit_text(teks, parse_mode="Markdown")
+
+    except Exception as e:
+        logger.error(f"Error rekap_invest: {e}", exc_info=True)
+        await pesan.edit_text(f"⚠️ Gagal proses rekap invest.\n\n`{str(e)}`", parse_mode="Markdown")
 
 
 # ─── /cancel, timeout, pesan tidak dikenal ─────────────────

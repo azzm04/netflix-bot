@@ -14,7 +14,8 @@ from config import (
     COL_LOGOUT, COL_PHONE, DATA_START_ROW, JAM_LOGOUT,
     HARGA, HARGA_BULANAN, DURASI_BULANAN_HARI,
     SPREADSHEET_MODAL_ID, SHEET_GESTUN, PAJAK_MERCHANT,
-    COL_MODAL_TGL, COL_MODAL_KOMPONEN, COL_MODAL_BIAYA, COL_MODAL_KET
+    COL_MODAL_TGL, COL_MODAL_KOMPONEN, COL_MODAL_BIAYA, COL_MODAL_KET,
+    SPREADSHEET_INVEST_ID, INVEST_EMAIL_SHEET_MAP,
 )
 
 # Scope yang dibutuhkan untuk akses Google Sheets
@@ -1403,3 +1404,225 @@ def format_template_plain(data: dict, tanggal_logout: str, nomor_pelanggan: str,
         )
 
     return pesan
+
+
+# ─── Rekap Invest Netflix ───────────────────────────────────
+
+def _cocokkan_email_invest(email_kolom_e: str) -> str | None:
+    """
+    Cocokkan email dari kolom E REKAPAN ke INVEST_EMAIL_SHEET_MAP.
+    Kolom E bisa berisi 'email@domain.com' atau 'email@domain.com, Jakarta'.
+    Return: nama sheet ('rekapan_ena' / 'rekapan_umi') atau None jika tidak cocok.
+    """
+    # Ambil bagian email saja (sebelum koma), lalu lowercase untuk case-insensitive
+    email_bersih = email_kolom_e.split(",")[0].strip().lower()
+    return INVEST_EMAIL_SHEET_MAP.get(email_bersih)
+
+
+def _ambil_data_rekap_hari_ini() -> dict:
+    """
+    Ambil semua baris dari REKAPAN JUNI/JULI/dst hari ini.
+    Return: dict {nama_sheet: [list baris]} — sudah dipisah per sheet invest.
+    Setiap baris adalah dict: {nomor, tanggal, durasi, harga, email_raw}
+    """
+    now = datetime.now()
+    tanggal_target = f"{now.day} {BULAN_EN[now.month]} {now.year}"
+    nama_sheet_rekap = f"REKAPAN {BULAN_REKAP[now.month]} {now.year}"
+
+    spreadsheet = get_spreadsheet()
+    try:
+        sheet_rekap = spreadsheet.worksheet(nama_sheet_rekap)
+    except Exception as e:
+        raise RuntimeError(f"Sheet '{nama_sheet_rekap}' tidak ditemukan: {e}")
+
+    semua_data = sheet_rekap.get_all_values()
+    hasil: dict[str, list] = {}
+
+    for i, baris in enumerate(semua_data):
+        if i == 0:  # skip header
+            continue
+        if len(baris) < 5:
+            continue
+
+        tanggal_baris = baris[1].strip() if len(baris) > 1 else ""
+        if tanggal_baris != tanggal_target:
+            continue
+
+        nomor   = baris[0].strip() if len(baris) > 0 else ""
+        durasi  = baris[2].strip() if len(baris) > 2 else ""
+        harga   = _parse_harga(baris[3]) if len(baris) > 3 else 0
+        email_e = baris[4].strip() if len(baris) > 4 else ""
+
+        if not email_e or harga <= 0:
+            continue
+
+        nama_sheet_invest = _cocokkan_email_invest(email_e)
+        if nama_sheet_invest is None:
+            continue  # email ini bukan milik ena/umi, skip
+
+        entry = {
+            "nomor":     nomor,
+            "tanggal":   tanggal_baris,
+            "durasi":    durasi,
+            "harga":     harga,
+            "email_raw": email_e,
+        }
+        hasil.setdefault(nama_sheet_invest, []).append(entry)
+
+    return hasil
+
+
+def _cari_baris_terakhir_invest(sheet) -> int:
+    """
+    Cari nomor baris terakhir berisi data di sheet invest_netflix.
+    Return: baris berikutnya yang kosong (1-indexed).
+    """
+    kolom_a = sheet.col_values(1)
+    for i in range(len(kolom_a) - 1, -1, -1):
+        if kolom_a[i].strip() != "":
+            return i + 2  # baris berikutnya setelah data terakhir
+    return 2  # sheet kosong, mulai dari baris 2 (baris 1 = header jika ada)
+
+
+def _sudah_ada_di_invest(sheet, tanggal_str: str, nomor: str, email_raw: str) -> bool:
+    """
+    Anti-duplikat: cek apakah kombinasi tanggal+nomor+email sudah ada di sheet.
+    Cek kolom B (tanggal), A (nomor), E (email).
+    """
+    semua_data = sheet.get_all_values()
+    for baris in semua_data:
+        if len(baris) < 5:
+            continue
+        tgl_ada   = baris[1].strip()
+        nomor_ada = baris[0].strip()
+        email_ada = baris[4].strip()
+        if tgl_ada == tanggal_str and nomor_ada == nomor and email_ada == email_raw:
+            return True
+    return False
+
+
+def rekap_invest_harian() -> dict:
+    """
+    Tulis rekapan hari ini ke spreadsheet invest_netflix.
+    Dijalankan otomatis jam 23:59 (sama seperti auto_closing).
+
+    Alur:
+    1. Ambil semua order hari ini dari REKAPAN JUNI/dst yang emailnya cocok
+    2. Untuk tiap sheet (rekapan_ena / rekapan_umi):
+       a. Tulis header tanggal jika belum ada
+       b. Tulis baris per order (skip duplikat)
+       c. Tulis baris subtotal per tanggal dengan background hijau
+    3. Return ringkasan hasil
+
+    Return: {
+        'rekapan_ena': {'ditulis': int, 'total': int, 'skip_duplikat': int},
+        'rekapan_umi': {'ditulis': int, 'total': int, 'skip_duplikat': int},
+    }
+    """
+    now = datetime.now()
+    tanggal_str = f"{now.day} {BULAN_EN[now.month]} {now.year}"
+
+    # 1. Ambil data hari ini yang relevan
+    data_per_sheet = _ambil_data_rekap_hari_ini()
+
+    if not data_per_sheet:
+        return {}  # Tidak ada data untuk invest hari ini
+
+    client = get_client()
+    spreadsheet_invest = client.open_by_key(SPREADSHEET_INVEST_ID)
+
+    hasil = {}
+
+    for nama_sheet, baris_list in data_per_sheet.items():
+        try:
+            sheet = spreadsheet_invest.worksheet(nama_sheet)
+        except Exception as e:
+            hasil[nama_sheet] = {"error": str(e)}
+            continue
+
+        ditulis = 0
+        skip_duplikat = 0
+        total_harga = 0
+
+        # Kumpulkan baris yang belum ada (anti-duplikat)
+        baris_baru = []
+        for entry in baris_list:
+            if _sudah_ada_di_invest(sheet, entry["tanggal"], entry["nomor"], entry["email_raw"]):
+                skip_duplikat += 1
+                continue
+            baris_baru.append(entry)
+
+        if not baris_baru:
+            hasil[nama_sheet] = {
+                "ditulis": 0,
+                "total": 0,
+                "skip_duplikat": skip_duplikat,
+            }
+            continue
+
+        # Cari baris tulis (setelah data terakhir)
+        baris_tulis = _cari_baris_terakhir_invest(sheet)
+
+        # Format tanggal header: "7 Juni 2026" → "7 Juni 2026" (pakai spasi penuh)
+        # Tulis header tanggal di kolom D (center, bold, warna lembut — format via batch_format)
+        # Header: row berisi tanggal di kolom D (kolom 4), kolom lain kosong
+        header_row = baris_tulis
+        sheet.batch_update([{
+            "range": gspread.utils.rowcol_to_a1(header_row, 4),
+            "values": [[tanggal_str]],
+        }])
+        # Format header tanggal: bold, center, background ungu muda (sesuai gambar)
+        sheet.batch_format([{
+            "range": gspread.utils.rowcol_to_a1(header_row, 4),
+            "format": {
+                "textFormat": {"bold": True},
+                "horizontalAlignment": "CENTER",
+                "backgroundColor": {"red": 0.851, "green": 0.824, "blue": 0.902},
+            }
+        }])
+        baris_tulis += 1
+
+        # Tulis setiap order
+        batch_data = []
+        for entry in baris_baru:
+            col_a = gspread.utils.rowcol_to_a1(baris_tulis, 1)
+            col_b = gspread.utils.rowcol_to_a1(baris_tulis, 2)
+            col_c = gspread.utils.rowcol_to_a1(baris_tulis, 3)
+            col_d = gspread.utils.rowcol_to_a1(baris_tulis, 4)
+            col_e = gspread.utils.rowcol_to_a1(baris_tulis, 5)
+
+            batch_data.extend([
+                {"range": col_a, "values": [[entry["nomor"]]]},
+                {"range": col_b, "values": [[entry["tanggal"]]]},
+                {"range": col_c, "values": [[entry["durasi"]]]},
+                {"range": col_d, "values": [[entry["harga"]]]},
+                {"range": col_e, "values": [[entry["email_raw"]]]},
+            ])
+            total_harga += entry["harga"]
+            ditulis += 1
+            baris_tulis += 1
+
+        sheet.batch_update(batch_data)
+
+        # Tulis baris subtotal (kolom D, background hijau)
+        subtotal_row = baris_tulis
+        sheet.batch_update([{
+            "range": gspread.utils.rowcol_to_a1(subtotal_row, 4),
+            "values": [[total_harga]],
+        }])
+        sheet.batch_format([{
+            "range": gspread.utils.rowcol_to_a1(subtotal_row, 4),
+            "format": {
+                "textFormat": {"bold": True},
+                "backgroundColor": {"red": 0.416, "green": 0.659, "blue": 0.310},
+                "horizontalAlignment": "CENTER",
+            }
+        }])
+
+        hasil[nama_sheet] = {
+            "ditulis": ditulis,
+            "total": total_harga,
+            "skip_duplikat": skip_duplikat,
+        }
+
+    return hasil

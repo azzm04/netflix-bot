@@ -42,6 +42,7 @@ from handlers.admin import (
     stok, ceklogout, cmd_gantihari,
     cmd_rekap, callback_rekap,
     cmd_closing,
+    cmd_rekap_invest,
     cancel, timeout_handler, pesan_tidak_dikenal,
 )
 from handlers.group import (
@@ -56,7 +57,7 @@ from handlers.group import (
     callback_modal_ket, terima_ket_modal, callback_konfirmasi_modal,
     cancel_modal,
 )
-from utils.notify import auto_closing
+from utils.notify import auto_closing, auto_rekap_invest
 
 # Setup logging
 logging.basicConfig(
@@ -104,6 +105,7 @@ async def post_init(application):
                 BotCommand("stok", "Cek stok slot kosong"),
                 BotCommand("ceklogout", "Cek akun yang perlu di-logout"),
                 BotCommand("gantihari", "Ganti hari & ubah warna besok"),
+                BotCommand("rekap_invest", "Tulis rekap invest hari ini ke invest_netflix"),
                 BotCommand("adduser", "Tambah user"),
                 BotCommand("removeuser", "Hapus user"),
                 BotCommand("listuser", "Lihat daftar user"),
@@ -129,7 +131,13 @@ def main():
             time=dt_time(hour=23, minute=59, second=0, tzinfo=WIB),
             name="auto_closing_harian",
         )
+        job_queue.run_daily(
+            auto_rekap_invest,
+            time=dt_time(hour=23, minute=59, second=30, tzinfo=WIB),
+            name="auto_rekap_invest_harian",
+        )
         logger.info("✅ Auto closing dijadwalkan setiap hari jam 23:59 WIB")
+        logger.info("✅ Auto rekap invest dijadwalkan setiap hari jam 23:59:30 WIB")
     else:
         logger.warning(
             "⚠️ JobQueue tidak tersedia (APScheduler belum ter-install). "
@@ -195,6 +203,7 @@ def main():
     app.add_handler(CommandHandler("stok", stok, filters=PRIVATE))
     app.add_handler(CommandHandler("ceklogout", ceklogout, filters=PRIVATE))
     app.add_handler(CommandHandler("gantihari", cmd_gantihari, filters=PRIVATE))
+    app.add_handler(CommandHandler("rekap_invest", cmd_rekap_invest, filters=PRIVATE))
     app.add_handler(CommandHandler("adduser", adduser, filters=PRIVATE))
     app.add_handler(CommandHandler("removeuser", removeuser, filters=PRIVATE))
     app.add_handler(CommandHandler("listuser", listuser, filters=PRIVATE))

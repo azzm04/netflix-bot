@@ -6,7 +6,7 @@ import logging
 from datetime import datetime
 from telegram.ext import ContextTypes
 from config import ADMIN_ID, NOTIF_ORDER_IDS
-from sheets_handler import closing_hari
+from sheets_handler import closing_hari, rekap_invest_harian
 
 logger = logging.getLogger(__name__)
 
@@ -99,6 +99,63 @@ async def auto_closing(context: ContextTypes.DEFAULT_TYPE):
             await context.bot.send_message(
                 chat_id=ADMIN_ID,
                 text=f"⚠️ *[AUTO CLOSING] Error*\n\n`{str(e)}`",
+                parse_mode="Markdown"
+            )
+        except Exception:
+            pass
+
+
+async def auto_rekap_invest(context: ContextTypes.DEFAULT_TYPE):
+    """
+    Job otomatis jam 23:59 — tulis rekapan hari ini ke invest_netflix.
+    Berjalan bersamaan dengan auto_closing (dijadwalkan di bot.py).
+    """
+    logger.info("[AUTO REKAP INVEST] Mulai proses rekap invest otomatis jam 23:59...")
+
+    try:
+        hasil = rekap_invest_harian()
+
+        if not hasil:
+            teks = (
+                "ℹ️ *[AUTO REKAP INVEST] Selesai*\n\n"
+                "Tidak ada transaksi hari ini yang masuk ke rekap invest\n"
+                "(tidak ada email ena/umi yang cocok)."
+            )
+        else:
+            baris_detail = ""
+            for nama_sheet, info in hasil.items():
+                if "error" in info:
+                    baris_detail += f"\n❌ `{nama_sheet}`: error — {info['error']}"
+                else:
+                    baris_detail += (
+                        f"\n✅ `{nama_sheet}`: "
+                        f"{info['ditulis']} baris ditulis"
+                        f" | Total: Rp{info['total']:,}"
+                    )
+                    if info["skip_duplikat"] > 0:
+                        baris_detail += f" | Skip duplikat: {info['skip_duplikat']}"
+
+            teks = (
+                f"📊 *AUTO REKAP INVEST JAM 23:59*\n"
+                f"━━━━━━━━━━━━━━━━"
+                f"{baris_detail}\n"
+                f"━━━━━━━━━━━━━━━━"
+            )
+
+        await context.bot.send_message(
+            chat_id=ADMIN_ID,
+            text=teks,
+            parse_mode="Markdown"
+        )
+
+        logger.info(f"[AUTO REKAP INVEST] Selesai. Hasil: {hasil}")
+
+    except Exception as e:
+        logger.error(f"[AUTO REKAP INVEST] Error: {e}", exc_info=True)
+        try:
+            await context.bot.send_message(
+                chat_id=ADMIN_ID,
+                text=f"⚠️ *[AUTO REKAP INVEST] Error*\n\n`{str(e)}`",
                 parse_mode="Markdown"
             )
         except Exception:

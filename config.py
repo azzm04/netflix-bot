@@ -15,6 +15,24 @@ SPREADSHEET_NAME = "netflix account jaeminies's"
 
 # Spreadsheet REKAPAN MODAL (untuk /closing)
 SPREADSHEET_MODAL_ID = "1-o6jOoE3rH2SOlH9975HODC7MpzDBg8zD8Z1RLnRK7g"
+
+# Spreadsheet invest_netflix (rekapan terpisah per pemilik akun)
+SPREADSHEET_INVEST_ID = "1NU1sqWyxzJ4c_FjaNTBAxVN0d0J-v0cxw5EwIMJkAJw"
+
+# Mapping: email akun Netflix → nama sheet di invest_netflix
+# Cocokkan dengan contains (email di kolom E bisa ada ", lokasi" di belakangnya)
+INVEST_EMAIL_SHEET_MAP = {
+    # Sheet rekapan_ena
+    "cresser.gb@mahesh.co":           "rekapan_ena",
+    "kylieanndodds2010.uk@mahesh.co": "rekapan_ena",
+    "rvisa25@maheshpro.com":          "rekapan_ena",   # case-insensitive
+    # Sheet rekapan_umi
+    "mixdue@stayhome.li":             "rekapan_umi",
+    "ivotunaska@gmail.com":           "rekapan_umi",
+    "ribdogash@stayhome.li":          "rekapan_umi",
+    "aptputoak@fanclub.pm":           "rekapan_umi",
+    "jasminecurdos@gmail.com":        "rekapan_umi",
+}
 # SHEET_MODAL dibuat dinamis per bulan di sheets_handler: "modal netflix_Juni", dst.
 SHEET_GESTUN = "rekapan"   # Sheet PENDAPATAN GESTUN di spreadsheet REKAPAN MODAL
 
