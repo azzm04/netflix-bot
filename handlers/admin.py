@@ -7,7 +7,7 @@ import logging
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import ContextTypes, ConversationHandler
 from config import ADMIN_ID, NOTIF_ORDER_IDS
-from sheets_handler import cek_stok, cek_logout, gantihari, rekap_pendapatan, closing_hari, rekap_invest_harian
+from sheets_handler import cek_stok, cek_logout, gantihari, rekap_pendapatan, closing_hari, rekap_invest_harian, rekap_invest_ulang, rekap_invest_range_custom
 from handlers.auth import is_allowed
 
 logger = logging.getLogger(__name__)
@@ -250,6 +250,108 @@ async def cmd_closing(update: Update, context: ContextTypes.DEFAULT_TYPE):
     except Exception as e:
         logger.error(f"Error closing: {e}", exc_info=True)
         await pesan.edit_text("⚠️ Gagal proses closing.")
+
+
+# ─── /rekap_invest_ulang ───────────────────────────────────
+
+async def cmd_rekap_invest_ulang(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """
+    Rekap ulang data ke invest_netflix. Admin only, private.
+
+    Usage:
+      /rekap_invest_ulang
+          → rekap ulang seluruh bulan ini (Juni 2026)
+
+      /rekap_invest_ulang 31 Mei - 30 Juni
+          → rekap ulang dengan rentang tanggal custom (lintas bulan)
+
+    Format argumen: DD BULAN - DD BULAN  (tahun otomatis = sekarang)
+    Contoh: /rekap_invest_ulang 31 Mei - 30 Juni
+    """
+    if update.effective_user.id != ADMIN_ID:
+        await update.message.reply_text("⛔ Hanya admin utama.")
+        return
+
+    from datetime import datetime as _dt
+    from sheets_handler import BULAN_REKAP as _BR, BULAN_ID_REVERSE as _BIR
+
+    now = _dt.now()
+    args_text = " ".join(context.args).strip() if context.args else ""
+
+    # ── Parse argumen range jika ada ─────────────────────────
+    rentang_info = ""
+    use_custom_range = False
+
+    if args_text and "-" in args_text:
+        try:
+            bagian = [b.strip() for b in args_text.split("-", 1)]
+            if len(bagian) == 2:
+                def _parse_tgl(s):
+                    parts = s.strip().split()
+                    hari = int(parts[0])
+                    bulan_nama = parts[1].lower().strip()
+                    bulan_num = _BIR.get(bulan_nama)
+                    if bulan_num is None:
+                        raise ValueError(f"Bulan tidak dikenal: {parts[1]}")
+                    tahun = now.year
+                    # Jika bulan sudah lewat, kemungkinan tahun sama; jika bulan > bulan sekarang, anggap tahun lalu
+                    return hari, bulan_num, tahun
+
+                tgl_m_hari, tgl_m_bln, tgl_m_thn = _parse_tgl(bagian[0])
+                tgl_a_hari, tgl_a_bln, tgl_a_thn = _parse_tgl(bagian[1])
+                use_custom_range = True
+                rentang_info = f"{bagian[0].title()} – {bagian[1].title()} {now.year}"
+        except Exception as parse_err:
+            await update.message.reply_text(
+                f"❌ Format salah: `{args_text}`\n\n"
+                f"Contoh yang benar:\n"
+                f"`/rekap_invest_ulang 31 Mei - 30 Juni`",
+                parse_mode="Markdown"
+            )
+            return
+
+    if not use_custom_range:
+        nama_bulan = _BR.get(now.month, str(now.month))
+        rentang_info = f"1 – {now.day} {nama_bulan} {now.year}"
+
+    pesan = await update.message.reply_text(
+        f"🔄 Rekap ulang *{rentang_info}* sedang diproses...\n"
+        f"_(Ini mungkin butuh beberapa detik)_",
+        parse_mode="Markdown"
+    )
+
+    try:
+        if use_custom_range:
+            hasil = rekap_invest_range_custom(
+                tgl_m_hari, tgl_m_bln, tgl_m_thn,
+                tgl_a_hari, tgl_a_bln, tgl_a_thn,
+            )
+        else:
+            hasil = rekap_invest_ulang()
+
+        if not hasil:
+            await pesan.edit_text(
+                f"ℹ️ Tidak ada data untuk rentang *{rentang_info}* yang cocok untuk rekap invest.",
+                parse_mode="Markdown"
+            )
+            return
+
+        teks = f"✅ *REKAP ULANG {rentang_info.upper()} SELESAI*\n━━━━━━━━━━━━━━━━\n"
+        for nama_sheet, info in hasil.items():
+            if "error" in info:
+                teks += f"\n❌ `{nama_sheet}`: gagal — {info['error']}\n"
+            else:
+                teks += (
+                    f"\n📋 `{nama_sheet}`\n"
+                    f"  • Ditulis: *{info['ditulis']} baris*\n"
+                    f"  • Total: *Rp{info['total']:,}*\n"
+                )
+        teks += "━━━━━━━━━━━━━━━━"
+        await pesan.edit_text(teks, parse_mode="Markdown")
+
+    except Exception as e:
+        logger.error(f"Error rekap_invest_ulang: {e}", exc_info=True)
+        await pesan.edit_text(f"⚠️ Gagal rekap ulang.\n\n`{str(e)}`", parse_mode="Markdown")
 
 
 # ─── /rekap_invest ─────────────────────────────────────────

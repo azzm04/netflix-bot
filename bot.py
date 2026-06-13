@@ -43,6 +43,7 @@ from handlers.admin import (
     cmd_rekap, callback_rekap,
     cmd_closing,
     cmd_rekap_invest,
+    cmd_rekap_invest_ulang,
     cancel, timeout_handler, pesan_tidak_dikenal,
 )
 from handlers.group import (
@@ -106,6 +107,7 @@ async def post_init(application):
                 BotCommand("ceklogout", "Cek akun yang perlu di-logout"),
                 BotCommand("gantihari", "Ganti hari & ubah warna besok"),
                 BotCommand("rekap_invest", "Tulis rekap invest hari ini ke invest_netflix"),
+                BotCommand("rekap_invest_ulang", "Rekap ulang seluruh bulan ini ke invest_netflix"),
                 BotCommand("adduser", "Tambah user"),
                 BotCommand("removeuser", "Hapus user"),
                 BotCommand("listuser", "Lihat daftar user"),
@@ -204,6 +206,7 @@ def main():
     app.add_handler(CommandHandler("ceklogout", ceklogout, filters=PRIVATE))
     app.add_handler(CommandHandler("gantihari", cmd_gantihari, filters=PRIVATE))
     app.add_handler(CommandHandler("rekap_invest", cmd_rekap_invest, filters=PRIVATE))
+    app.add_handler(CommandHandler("rekap_invest_ulang", cmd_rekap_invest_ulang, filters=PRIVATE))
     app.add_handler(CommandHandler("adduser", adduser, filters=PRIVATE))
     app.add_handler(CommandHandler("removeuser", removeuser, filters=PRIVATE))
     app.add_handler(CommandHandler("listuser", listuser, filters=PRIVATE))

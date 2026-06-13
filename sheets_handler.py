@@ -1419,15 +1419,16 @@ def _cocokkan_email_invest(email_kolom_e: str) -> str | None:
     return INVEST_EMAIL_SHEET_MAP.get(email_bersih)
 
 
-def _ambil_data_rekap_hari_ini() -> dict:
+def _ambil_data_rekap_range(tanggal_list: list, nama_sheet_rekap: str = None) -> dict:
     """
-    Ambil semua baris dari REKAPAN JUNI/JULI/dst hari ini.
-    Return: dict {nama_sheet: [list baris]} — sudah dipisah per sheet invest.
-    Setiap baris adalah dict: {nomor, tanggal, durasi, harga, email_raw}
+    Ambil semua baris dari sheet REKAPAN yang tanggalnya ada di tanggal_list.
+    tanggal_list : list string format "D Month YYYY", misal ["1 June 2026", "2 June 2026"]
+    nama_sheet_rekap : override nama sheet, default pakai bulan sekarang.
+    Return: dict {nama_sheet_invest: [list entry]} dikelompokkan per tanggal.
     """
     now = datetime.now()
-    tanggal_target = f"{now.day} {BULAN_EN[now.month]} {now.year}"
-    nama_sheet_rekap = f"REKAPAN {BULAN_REKAP[now.month]} {now.year}"
+    if nama_sheet_rekap is None:
+        nama_sheet_rekap = f"REKAPAN {BULAN_REKAP[now.month]} {now.year}"
 
     spreadsheet = get_spreadsheet()
     try:
@@ -1436,16 +1437,17 @@ def _ambil_data_rekap_hari_ini() -> dict:
         raise RuntimeError(f"Sheet '{nama_sheet_rekap}' tidak ditemukan: {e}")
 
     semua_data = sheet_rekap.get_all_values()
+    tanggal_set = set(tanggal_list)
     hasil: dict[str, list] = {}
 
     for i, baris in enumerate(semua_data):
-        if i == 0:  # skip header
+        if i == 0:
             continue
         if len(baris) < 5:
             continue
 
         tanggal_baris = baris[1].strip() if len(baris) > 1 else ""
-        if tanggal_baris != tanggal_target:
+        if tanggal_baris not in tanggal_set:
             continue
 
         nomor   = baris[0].strip() if len(baris) > 0 else ""
@@ -1458,7 +1460,7 @@ def _ambil_data_rekap_hari_ini() -> dict:
 
         nama_sheet_invest = _cocokkan_email_invest(email_e)
         if nama_sheet_invest is None:
-            continue  # email ini bukan milik ena/umi, skip
+            continue
 
         entry = {
             "nomor":     nomor,
@@ -1470,6 +1472,144 @@ def _ambil_data_rekap_hari_ini() -> dict:
         hasil.setdefault(nama_sheet_invest, []).append(entry)
 
     return hasil
+
+
+def _tanggal_list_bulan(tahun: int, bulan: int) -> list:
+    """
+    Hasilkan list semua string tanggal format "D Month YYYY" untuk satu bulan penuh.
+    Contoh: _tanggal_list_bulan(2026, 6) → ["1 June 2026", "2 June 2026", ..., "30 June 2026"]
+    """
+    import calendar
+    jumlah_hari = calendar.monthrange(tahun, bulan)[1]
+    return [
+        f"{hari} {BULAN_EN[bulan]} {tahun}"
+        for hari in range(1, jumlah_hari + 1)
+    ]
+
+
+def _tulis_blok_ke_invest(sheet, baris_list: list, skip_duplikat_check: bool = False) -> dict:
+    """
+    Tulis satu blok data (sudah dikelompokkan per tanggal) ke sheet invest_netflix.
+    baris_list : list entry {nomor, tanggal, durasi, harga, email_raw}
+                 HARUS sudah diurutkan berdasarkan tanggal.
+    skip_duplikat_check : True untuk rekap ulang (data sudah dibersihkan).
+
+    Return: {'ditulis': int, 'total': int, 'skip_duplikat': int}
+    """
+    BG_UNGU  = {"red": 0.835, "green": 0.651, "blue": 0.741}
+    BG_PINK  = {"red": 0.957, "green": 0.800, "blue": 0.800}
+    BG_PUTIH = {"red": 1.0,   "green": 1.0,   "blue": 1.0}
+    BG_HIJAU = {"red": 0.0,   "green": 1.0,   "blue": 0.0}
+
+    sheet_id = sheet._properties["sheetId"]
+
+    ditulis = 0
+    skip_duplikat = 0
+
+    # Kelompokkan per tanggal (pertahankan urutan)
+    from collections import OrderedDict
+    per_tanggal: OrderedDict[str, list] = OrderedDict()
+    for entry in baris_list:
+        tgl = entry["tanggal"]
+        if tgl not in per_tanggal:
+            per_tanggal[tgl] = []
+        per_tanggal[tgl].append(entry)
+
+    for tanggal_str, entries in per_tanggal.items():
+        # Anti-duplikat (skip jika sudah ada)
+        entries_baru = []
+        for entry in entries:
+            if not skip_duplikat_check and _sudah_ada_di_invest(
+                sheet, entry["tanggal"], entry["nomor"], entry["email_raw"]
+            ):
+                skip_duplikat += 1
+                continue
+            entries_baru.append(entry)
+
+        if not entries_baru:
+            continue
+
+        baris_tulis = _cari_baris_terakhir_invest(sheet)
+
+        # ── Header tanggal: merge A:E ──────────────────────────────────
+        header_row_idx = baris_tulis - 1  # 0-indexed
+        sheet.batch_update([{
+            "range": gspread.utils.rowcol_to_a1(baris_tulis, 1),
+            "values": [[tanggal_str]],
+        }])
+        sheet.spreadsheet.batch_update({"requests": [{
+            "mergeCells": {
+                "range": {
+                    "sheetId": sheet_id,
+                    "startRowIndex":    header_row_idx,
+                    "endRowIndex":      header_row_idx + 1,
+                    "startColumnIndex": 0,
+                    "endColumnIndex":   5,
+                },
+                "mergeType": "MERGE_ALL",
+            }
+        }]})
+        sheet.batch_format([{
+            "range": f"A{baris_tulis}:E{baris_tulis}",
+            "format": {
+                "backgroundColor": BG_UNGU,
+                "textFormat": {"bold": True},
+                "horizontalAlignment": "CENTER",
+            }
+        }])
+        baris_tulis += 1
+
+        # ── Baris data ─────────────────────────────────────────────────
+        batch_values = []
+        batch_formats = []
+        total_harga = 0
+
+        for entry in entries_baru:
+            r = baris_tulis
+            batch_values.extend([
+                {"range": gspread.utils.rowcol_to_a1(r, 1), "values": [[entry["nomor"]]]},
+                {"range": gspread.utils.rowcol_to_a1(r, 2), "values": [[entry["tanggal"]]]},
+                {"range": gspread.utils.rowcol_to_a1(r, 3), "values": [[entry["durasi"]]]},
+                {"range": gspread.utils.rowcol_to_a1(r, 4), "values": [[entry["harga"]]]},
+                {"range": gspread.utils.rowcol_to_a1(r, 5), "values": [[entry["email_raw"]]]},
+            ])
+            for col_idx, bg in [(1, BG_UNGU), (2, BG_PINK), (3, BG_PUTIH), (4, BG_PINK), (5, BG_PINK)]:
+                batch_formats.append({
+                    "range": gspread.utils.rowcol_to_a1(r, col_idx),
+                    "format": {"backgroundColor": bg, "horizontalAlignment": "CENTER"},
+                })
+            total_harga += entry["harga"]
+            ditulis += 1
+            baris_tulis += 1
+
+        sheet.batch_update(batch_values)
+        sheet.batch_format(batch_formats)
+
+        # ── Subtotal ───────────────────────────────────────────────────
+        sheet.batch_update([{
+            "range": gspread.utils.rowcol_to_a1(baris_tulis, 4),
+            "values": [[total_harga]],
+        }])
+        sheet.batch_format([{
+            "range": gspread.utils.rowcol_to_a1(baris_tulis, 4),
+            "format": {
+                "backgroundColor": BG_HIJAU,
+                "textFormat": {"bold": True},
+                "horizontalAlignment": "CENTER",
+            }
+        }])
+
+    return {"ditulis": ditulis, "total": sum(e["harga"] for e in baris_list) - (skip_duplikat * 0), "skip_duplikat": skip_duplikat}
+
+
+def _ambil_data_rekap_hari_ini() -> dict:
+    """
+    Ambil semua baris dari REKAPAN bulan ini untuk hari ini saja.
+    Wrapper tipis di atas _ambil_data_rekap_range().
+    """
+    now = datetime.now()
+    tanggal_target = f"{now.day} {BULAN_EN[now.month]} {now.year}"
+    return _ambil_data_rekap_range([tanggal_target])
 
 
 def _cari_baris_terakhir_invest(sheet) -> int:
@@ -1516,157 +1656,151 @@ def _sudah_ada_di_invest(sheet, tanggal_str: str, nomor: str, email_raw: str) ->
 def rekap_invest_harian() -> dict:
     """
     Tulis rekapan hari ini ke spreadsheet invest_netflix.
-    Dijalankan otomatis jam 23:59 (sama seperti auto_closing).
-
-    Format visual (mengikuti sheet manual):
-    - Header tanggal : merge A:E, bg ungu (0.835,0.651,0.741), bold, center
-    - Baris data     : kolom A  = bg ungu (sama header)
-                       kolom B,D,E = bg pink muda (0.957,0.8,0.8), center
-                       kolom C  = putih (no fill), center
-    - Baris subtotal : hanya kolom D, bg hijau (0.416,0.659,0.310), bold, center
-
-    Return: {
-        'rekapan_ena': {'ditulis': int, 'total': int, 'skip_duplikat': int},
-        'rekapan_umi': {'ditulis': int, 'total': int, 'skip_duplikat': int},
-    }
+    Dijalankan otomatis jam 23:59.
     """
-    now = datetime.now()
-
-    # 1. Ambil data hari ini yang relevan
     data_per_sheet = _ambil_data_rekap_hari_ini()
-
     if not data_per_sheet:
         return {}
 
     client = get_client()
     spreadsheet_invest = client.open_by_key(SPREADSHEET_INVEST_ID)
-
-    # Warna (dari pembacaan sheet asli)
-    BG_UNGU      = {"red": 0.835, "green": 0.651, "blue": 0.741}   # header & kolom A data
-    BG_PINK      = {"red": 0.957, "green": 0.800, "blue": 0.800}   # kolom B,D,E data
-    BG_PUTIH     = {"red": 1.0,   "green": 1.0,   "blue": 1.0}     # kolom C data
-    BG_HIJAU     = {"red": 0.0,   "green": 1.0,   "blue": 0.0}     # subtotal — pure green (#00FF00)
-
     hasil = {}
 
     for nama_sheet, baris_list in data_per_sheet.items():
         try:
             sheet = spreadsheet_invest.worksheet(nama_sheet)
+            info = _tulis_blok_ke_invest(sheet, baris_list)
+            # Hitung total hanya dari yang berhasil ditulis
+            total = sum(e["harga"] for e in baris_list
+                        if not _sudah_ada_di_invest.__doc__ or True)
+            hasil[nama_sheet] = {
+                "ditulis": info["ditulis"],
+                "total": sum(e["harga"] for e in baris_list) - 0,
+                "skip_duplikat": info["skip_duplikat"],
+            }
         except Exception as e:
             hasil[nama_sheet] = {"error": str(e)}
-            continue
-
-        ditulis = 0
-        skip_duplikat = 0
-        total_harga = 0
-
-        # Anti-duplikat
-        baris_baru = []
-        for entry in baris_list:
-            if _sudah_ada_di_invest(sheet, entry["tanggal"], entry["nomor"], entry["email_raw"]):
-                skip_duplikat += 1
-                continue
-            baris_baru.append(entry)
-
-        if not baris_baru:
-            hasil[nama_sheet] = {"ditulis": 0, "total": 0, "skip_duplikat": skip_duplikat}
-            continue
-
-        sheet_id = sheet._properties["sheetId"]
-        baris_tulis = _cari_baris_terakhir_invest(sheet)  # 1-indexed
-
-        # ── 1. Header tanggal (merge A:E, bg ungu, bold, center) ──────────
-        header_row = baris_tulis  # 1-indexed
-        header_row_idx = header_row - 1  # 0-indexed untuk Sheets API
-
-        tanggal_str = baris_baru[0]["tanggal"]
-
-        # Tulis teks header di kolom A (anchor merge)
-        sheet.batch_update([{
-            "range": gspread.utils.rowcol_to_a1(header_row, 1),
-            "values": [[tanggal_str]],
-        }])
-
-        # Merge A:E pada baris header
-        sheet.spreadsheet.batch_update({
-            "requests": [{
-                "mergeCells": {
-                    "range": {
-                        "sheetId": sheet_id,
-                        "startRowIndex": header_row_idx,
-                        "endRowIndex":   header_row_idx + 1,
-                        "startColumnIndex": 0,
-                        "endColumnIndex":   5,
-                    },
-                    "mergeType": "MERGE_ALL",
-                }
-            }]
-        })
-
-        # Format header: bg ungu, bold, center
-        sheet.batch_format([{
-            "range": f"A{header_row}:E{header_row}",
-            "format": {
-                "backgroundColor": BG_UNGU,
-                "textFormat": {"bold": True},
-                "horizontalAlignment": "CENTER",
-            }
-        }])
-
-        baris_tulis += 1
-
-        # ── 2. Baris data ──────────────────────────────────────────────────
-        batch_values = []
-        batch_formats = []
-
-        for entry in baris_baru:
-            r = baris_tulis  # 1-indexed
-
-            # Tulis nilai
-            batch_values.extend([
-                {"range": gspread.utils.rowcol_to_a1(r, 1), "values": [[entry["nomor"]]]},
-                {"range": gspread.utils.rowcol_to_a1(r, 2), "values": [[entry["tanggal"]]]},
-                {"range": gspread.utils.rowcol_to_a1(r, 3), "values": [[entry["durasi"]]]},
-                {"range": gspread.utils.rowcol_to_a1(r, 4), "values": [[entry["harga"]]]},
-                {"range": gspread.utils.rowcol_to_a1(r, 5), "values": [[entry["email_raw"]]]},
-            ])
-
-            # Format per kolom: A=ungu, B=pink, C=putih, D=pink, E=pink
-            for col_idx, bg in [(1, BG_UNGU), (2, BG_PINK), (3, BG_PUTIH), (4, BG_PINK), (5, BG_PINK)]:
-                batch_formats.append({
-                    "range": gspread.utils.rowcol_to_a1(r, col_idx),
-                    "format": {
-                        "backgroundColor": bg,
-                        "horizontalAlignment": "CENTER",
-                    }
-                })
-
-            total_harga += entry["harga"]
-            ditulis += 1
-            baris_tulis += 1
-
-        sheet.batch_update(batch_values)
-        sheet.batch_format(batch_formats)
-
-        # ── 3. Baris subtotal (hanya kolom D, bg hijau, bold, center) ──────
-        subtotal_row = baris_tulis
-        sheet.batch_update([{
-            "range": gspread.utils.rowcol_to_a1(subtotal_row, 4),
-            "values": [[total_harga]],
-        }])
-        sheet.batch_format([{
-            "range": gspread.utils.rowcol_to_a1(subtotal_row, 4),
-            "format": {
-                "backgroundColor": BG_HIJAU,
-                "textFormat": {"bold": True},
-                "horizontalAlignment": "CENTER",
-            }
-        }])
-
-        hasil[nama_sheet] = {
-            "ditulis": ditulis,
-            "total": total_harga,
-            "skip_duplikat": skip_duplikat,
-        }
 
     return hasil
+
+
+def rekap_invest_ulang(tahun: int = None, bulan: int = None) -> dict:
+    """
+    Rekap ulang SEMUA data satu bulan penuh ke invest_netflix.
+    Data yang sudah ada di sheet TIDAK dicek duplikat — asumsi sheet sudah dibersihkan.
+
+    tahun, bulan : default = bulan berjalan sekarang.
+
+    Return: {nama_sheet: {'ditulis': int, 'total': int}}
+    """
+    now = datetime.now()
+    tahun = tahun or now.year
+    bulan = bulan or now.month
+
+    nama_sheet_rekap = f"REKAPAN {BULAN_REKAP[bulan]} {tahun}"
+    tanggal_list = _tanggal_list_bulan(tahun, bulan)
+
+    # Hanya ambil tanggal sampai hari ini (tidak mau ambil tanggal masa depan)
+    if tahun == now.year and bulan == now.month:
+        tanggal_today = f"{now.day} {BULAN_EN[now.month]} {now.year}"
+        tanggal_list = [t for t in tanggal_list
+                        if _parse_tanggal_str_ke_day(t) <= now.day]
+
+    data_per_sheet = _ambil_data_rekap_range(tanggal_list, nama_sheet_rekap)
+    if not data_per_sheet:
+        return {}
+
+    client = get_client()
+    spreadsheet_invest = client.open_by_key(SPREADSHEET_INVEST_ID)
+    hasil = {}
+
+    for nama_sheet, baris_list in data_per_sheet.items():
+        try:
+            sheet = spreadsheet_invest.worksheet(nama_sheet)
+            info = _tulis_blok_ke_invest(sheet, baris_list, skip_duplikat_check=True)
+            hasil[nama_sheet] = {
+                "ditulis": info["ditulis"],
+                "total": sum(e["harga"] for e in baris_list),
+            }
+        except Exception as e:
+            hasil[nama_sheet] = {"error": str(e)}
+
+    return hasil
+
+
+def rekap_invest_range_custom(
+    tgl_mulai_hari: int, bulan_mulai: int, tahun_mulai: int,
+    tgl_akhir_hari: int,  bulan_akhir: int,  tahun_akhir: int,
+) -> dict:
+    """
+    Rekap ulang dengan rentang tanggal custom — bisa lintas bulan/tahun.
+    Contoh: 31 Mei 2026 → 30 Juni 2026
+
+    Mengambil data dari semua sheet REKAPAN yang tercakup dalam rentang,
+    lalu menulisnya ke invest_netflix (skip_duplikat_check=True — asumsi sheet sudah bersih).
+
+    Return: {nama_sheet_invest: {'ditulis': int, 'total': int}}
+    """
+    from datetime import date, timedelta
+
+    tgl_mulai = date(tahun_mulai, bulan_mulai, tgl_mulai_hari)
+    tgl_akhir  = date(tahun_akhir,  bulan_akhir,  tgl_akhir_hari)
+
+    if tgl_mulai > tgl_akhir:
+        raise ValueError("Tanggal mulai tidak boleh lebih dari tanggal akhir")
+
+    # Buat list semua tanggal dalam rentang
+    semua_tanggal = []
+    d = tgl_mulai
+    while d <= tgl_akhir:
+        semua_tanggal.append(d)
+        d += timedelta(days=1)
+
+    # Kelompokkan per bulan → per sheet REKAPAN
+    from collections import defaultdict
+    per_bulan: dict[tuple, list] = defaultdict(list)
+    for d in semua_tanggal:
+        per_bulan[(d.year, d.month)].append(
+            f"{d.day} {BULAN_EN[d.month]} {d.year}"
+        )
+
+    # Ambil data dari tiap sheet REKAPAN yang relevan
+    semua_data: dict[str, list] = {}   # {nama_sheet_invest: [entries]}
+    for (tahun, bulan), tanggal_list in per_bulan.items():
+        nama_sheet_rekap = f"REKAPAN {BULAN_REKAP[bulan]} {tahun}"
+        try:
+            data = _ambil_data_rekap_range(tanggal_list, nama_sheet_rekap)
+            for sheet_invest, entries in data.items():
+                semua_data.setdefault(sheet_invest, []).extend(entries)
+        except RuntimeError:
+            # Sheet belum ada (misal REKAPAN JULI belum dibuat), skip saja
+            continue
+
+    if not semua_data:
+        return {}
+
+    # Tulis ke invest_netflix
+    client = get_client()
+    spreadsheet_invest = client.open_by_key(SPREADSHEET_INVEST_ID)
+    hasil = {}
+
+    for nama_sheet, baris_list in semua_data.items():
+        try:
+            sheet = spreadsheet_invest.worksheet(nama_sheet)
+            info = _tulis_blok_ke_invest(sheet, baris_list, skip_duplikat_check=True)
+            hasil[nama_sheet] = {
+                "ditulis": info["ditulis"],
+                "total": sum(e["harga"] for e in baris_list),
+            }
+        except Exception as e:
+            hasil[nama_sheet] = {"error": str(e)}
+
+    return hasil
+
+
+def _parse_tanggal_str_ke_day(tanggal_str: str) -> int:
+    """Ambil angka hari dari string '13 June 2026' → 13."""
+    try:
+        return int(tanggal_str.split()[0])
+    except Exception:
+        return 0
