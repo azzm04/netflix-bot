@@ -1494,8 +1494,17 @@ def _tulis_blok_ke_invest(sheet, baris_list: list, skip_duplikat_check: bool = F
                  HARUS sudah diurutkan berdasarkan tanggal.
     skip_duplikat_check : True untuk rekap ulang (data sudah dibersihkan).
 
+    Strategi API calls (hemat quota):
+    - Semua VALUES dikumpul → 1x batch_update di akhir
+    - Semua FORMATS dikumpul → 1x batch_format di akhir
+    - MERGE: 1x batch_update (batchUpdateSpreadsheet) dengan semua merge sekaligus
+    - Jika ada retry 429: tunggu 65 detik lalu coba lagi (max 3x)
+
     Return: {'ditulis': int, 'total': int, 'skip_duplikat': int}
     """
+    import time
+    from collections import OrderedDict
+
     BG_UNGU  = {"red": 0.835, "green": 0.651, "blue": 0.741}
     BG_PINK  = {"red": 0.957, "green": 0.800, "blue": 0.800}
     BG_PUTIH = {"red": 1.0,   "green": 1.0,   "blue": 1.0}
@@ -1507,7 +1516,6 @@ def _tulis_blok_ke_invest(sheet, baris_list: list, skip_duplikat_check: bool = F
     skip_duplikat = 0
 
     # Kelompokkan per tanggal (pertahankan urutan)
-    from collections import OrderedDict
     per_tanggal: OrderedDict[str, list] = OrderedDict()
     for entry in baris_list:
         tgl = entry["tanggal"]
@@ -1515,8 +1523,14 @@ def _tulis_blok_ke_invest(sheet, baris_list: list, skip_duplikat_check: bool = F
             per_tanggal[tgl] = []
         per_tanggal[tgl].append(entry)
 
+    # ── Kumpulkan semua operasi dulu, baru eksekusi ────────────────────
+    all_values  = []   # untuk 1x batch_update
+    all_formats = []   # untuk 1x batch_format
+    all_merges  = []   # untuk 1x batchUpdateSpreadsheet
+    baris_tulis = _cari_baris_terakhir_invest(sheet)
+
     for tanggal_str, entries in per_tanggal.items():
-        # Anti-duplikat (skip jika sudah ada)
+        # Anti-duplikat
         entries_baru = []
         for entry in entries:
             if not skip_duplikat_check and _sudah_ada_di_invest(
@@ -1529,18 +1543,18 @@ def _tulis_blok_ke_invest(sheet, baris_list: list, skip_duplikat_check: bool = F
         if not entries_baru:
             continue
 
-        baris_tulis = _cari_baris_terakhir_invest(sheet)
+        # ── Header tanggal ─────────────────────────────────────────────
+        header_row     = baris_tulis
+        header_row_idx = header_row - 1  # 0-indexed
 
-        # ── Header tanggal: merge A:E ──────────────────────────────────
-        header_row_idx = baris_tulis - 1  # 0-indexed
-        sheet.batch_update([{
-            "range": gspread.utils.rowcol_to_a1(baris_tulis, 1),
+        all_values.append({
+            "range": gspread.utils.rowcol_to_a1(header_row, 1),
             "values": [[tanggal_str]],
-        }])
-        sheet.spreadsheet.batch_update({"requests": [{
+        })
+        all_merges.append({
             "mergeCells": {
                 "range": {
-                    "sheetId": sheet_id,
+                    "sheetId":          sheet_id,
                     "startRowIndex":    header_row_idx,
                     "endRowIndex":      header_row_idx + 1,
                     "startColumnIndex": 0,
@@ -1548,25 +1562,22 @@ def _tulis_blok_ke_invest(sheet, baris_list: list, skip_duplikat_check: bool = F
                 },
                 "mergeType": "MERGE_ALL",
             }
-        }]})
-        sheet.batch_format([{
-            "range": f"A{baris_tulis}:E{baris_tulis}",
+        })
+        all_formats.append({
+            "range": f"A{header_row}:E{header_row}",
             "format": {
                 "backgroundColor": BG_UNGU,
                 "textFormat": {"bold": True},
                 "horizontalAlignment": "CENTER",
             }
-        }])
+        })
         baris_tulis += 1
 
         # ── Baris data ─────────────────────────────────────────────────
-        batch_values = []
-        batch_formats = []
         total_harga = 0
-
         for entry in entries_baru:
             r = baris_tulis
-            batch_values.extend([
+            all_values.extend([
                 {"range": gspread.utils.rowcol_to_a1(r, 1), "values": [[entry["nomor"]]]},
                 {"range": gspread.utils.rowcol_to_a1(r, 2), "values": [[entry["tanggal"]]]},
                 {"range": gspread.utils.rowcol_to_a1(r, 3), "values": [[entry["durasi"]]]},
@@ -1574,7 +1585,7 @@ def _tulis_blok_ke_invest(sheet, baris_list: list, skip_duplikat_check: bool = F
                 {"range": gspread.utils.rowcol_to_a1(r, 5), "values": [[entry["email_raw"]]]},
             ])
             for col_idx, bg in [(1, BG_UNGU), (2, BG_PINK), (3, BG_PUTIH), (4, BG_PINK), (5, BG_PINK)]:
-                batch_formats.append({
+                all_formats.append({
                     "range": gspread.utils.rowcol_to_a1(r, col_idx),
                     "format": {"backgroundColor": bg, "horizontalAlignment": "CENTER"},
                 })
@@ -1582,24 +1593,57 @@ def _tulis_blok_ke_invest(sheet, baris_list: list, skip_duplikat_check: bool = F
             ditulis += 1
             baris_tulis += 1
 
-        sheet.batch_update(batch_values)
-        sheet.batch_format(batch_formats)
-
         # ── Subtotal ───────────────────────────────────────────────────
-        sheet.batch_update([{
+        all_values.append({
             "range": gspread.utils.rowcol_to_a1(baris_tulis, 4),
             "values": [[total_harga]],
-        }])
-        sheet.batch_format([{
+        })
+        all_formats.append({
             "range": gspread.utils.rowcol_to_a1(baris_tulis, 4),
             "format": {
                 "backgroundColor": BG_HIJAU,
                 "textFormat": {"bold": True},
                 "horizontalAlignment": "CENTER",
             }
-        }])
+        })
+        baris_tulis += 1  # baris kosong spacer sudah ditangani _cari_baris_terakhir_invest
 
-    return {"ditulis": ditulis, "total": sum(e["harga"] for e in baris_list) - (skip_duplikat * 0), "skip_duplikat": skip_duplikat}
+    if ditulis == 0:
+        return {"ditulis": 0, "total": 0, "skip_duplikat": skip_duplikat}
+
+    # ── Eksekusi semua dalam minimal API calls, dengan retry 429 ──────
+    def _with_retry(fn, *args, **kwargs):
+        """Jalankan fn(*args), retry max 3x jika kena 429."""
+        for attempt in range(3):
+            try:
+                return fn(*args, **kwargs)
+            except gspread.exceptions.APIError as e:
+                if e.response.status_code == 429:
+                    wait = 65 * (attempt + 1)
+                    import logging as _log
+                    _log.getLogger(__name__).warning(
+                        f"[REKAP INVEST] Rate limit 429, tunggu {wait}s (attempt {attempt+1}/3)..."
+                    )
+                    time.sleep(wait)
+                else:
+                    raise
+        # Attempt terakhir tanpa try/except
+        return fn(*args, **kwargs)
+
+    # 1. Merge semua header (1 batchUpdate ke Sheets API)
+    if all_merges:
+        _with_retry(sheet.spreadsheet.batch_update, {"requests": all_merges})
+
+    # 2. Tulis semua values (1 batch_update)
+    if all_values:
+        _with_retry(sheet.batch_update, all_values)
+
+    # 3. Format semua (1 batch_format)
+    if all_formats:
+        _with_retry(sheet.batch_format, all_formats)
+
+    total_semua = sum(e["harga"] for e in baris_list if e not in [])
+    return {"ditulis": ditulis, "total": total_semua, "skip_duplikat": skip_duplikat}
 
 
 def _ambil_data_rekap_hari_ini() -> dict:
