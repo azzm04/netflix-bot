@@ -1545,7 +1545,7 @@ def rekap_invest_harian() -> dict:
     BG_UNGU      = {"red": 0.835, "green": 0.651, "blue": 0.741}   # header & kolom A data
     BG_PINK      = {"red": 0.957, "green": 0.800, "blue": 0.800}   # kolom B,D,E data
     BG_PUTIH     = {"red": 1.0,   "green": 1.0,   "blue": 1.0}     # kolom C data
-    BG_HIJAU     = {"red": 0.416, "green": 0.659, "blue": 0.310}   # subtotal
+    BG_HIJAU     = {"red": 0.0,   "green": 1.0,   "blue": 0.0}     # subtotal — pure green (#00FF00)
 
     hasil = {}
 
