@@ -221,6 +221,9 @@ def main():
             PIN_REKAP_INVEST: [
                 MessageHandler(filters.TEXT & ~filters.COMMAND & PRIVATE, terima_pin_rekap_invest)
             ],
+            ConversationHandler.TIMEOUT: [
+                MessageHandler(filters.ALL, timeout_handler)
+            ],
         },
         fallbacks=[CommandHandler("cancel", cancel)],
         conversation_timeout=60,
@@ -234,6 +237,9 @@ def main():
         states={
             PIN_REKAP_INVEST_ULANG: [
                 MessageHandler(filters.TEXT & ~filters.COMMAND & PRIVATE, terima_pin_rekap_invest_ulang)
+            ],
+            ConversationHandler.TIMEOUT: [
+                MessageHandler(filters.ALL, timeout_handler)
             ],
         },
         fallbacks=[CommandHandler("cancel", cancel)],
@@ -252,6 +258,9 @@ def main():
             GANTI_PIN_ADMIN_BARU: [
                 MessageHandler(filters.TEXT & ~filters.COMMAND & PRIVATE, terima_pin_admin_baru)
             ],
+            ConversationHandler.TIMEOUT: [
+                MessageHandler(filters.ALL, timeout_handler)
+            ],
         },
         fallbacks=[CommandHandler("cancel", cancel)],
         conversation_timeout=60,
@@ -268,6 +277,9 @@ def main():
             ],
             GANTI_PIN_BARU: [
                 MessageHandler(filters.TEXT & ~filters.COMMAND & PRIVATE, terima_pin_baru)
+            ],
+            ConversationHandler.TIMEOUT: [
+                MessageHandler(filters.ALL, timeout_handler)
             ],
         },
         fallbacks=[CommandHandler("cancel", cancel)],
@@ -292,6 +304,9 @@ def main():
             PIN_REKAP: [
                 MessageHandler(filters.TEXT & ~filters.COMMAND & GROUP, terima_pin_rekap)
             ],
+            ConversationHandler.TIMEOUT: [
+                MessageHandler(filters.ALL, timeout_handler)
+            ],
         },
         fallbacks=[CommandHandler("cancel", cancel)],
         conversation_timeout=60,
@@ -305,6 +320,9 @@ def main():
         states={
             PIN_CLOSING: [
                 MessageHandler(filters.TEXT & ~filters.COMMAND & GROUP, terima_pin_closing)
+            ],
+            ConversationHandler.TIMEOUT: [
+                MessageHandler(filters.ALL, timeout_handler)
             ],
         },
         fallbacks=[CommandHandler("cancel", cancel)],
@@ -327,6 +345,9 @@ def main():
             ],
             FEE_KONFIRMASI: [
                 CallbackQueryHandler(callback_konfirmasi_fee, pattern="^fee_konfirm_"),
+            ],
+            ConversationHandler.TIMEOUT: [
+                MessageHandler(filters.ALL, timeout_handler)
             ],
         },
         fallbacks=[CommandHandler("cancel", cancel_fee)],
@@ -361,6 +382,9 @@ def main():
             GESTUN_KONFIRMASI: [
                 CallbackQueryHandler(callback_konfirmasi_gestun, pattern="^gestun_konfirm_"),
             ],
+            ConversationHandler.TIMEOUT: [
+                MessageHandler(filters.ALL, timeout_handler)
+            ],
         },
         fallbacks=[CommandHandler("cancel", cancel_gestun)],
         conversation_timeout=120,
@@ -393,6 +417,9 @@ def main():
             ],
             MODAL_KONFIRMASI: [
                 CallbackQueryHandler(callback_konfirmasi_modal, pattern="^modal_konfirm_"),
+            ],
+            ConversationHandler.TIMEOUT: [
+                MessageHandler(filters.ALL, timeout_handler)
             ],
         },
         fallbacks=[CommandHandler("cancel", cancel_modal)],

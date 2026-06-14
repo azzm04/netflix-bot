@@ -149,6 +149,7 @@ async def cmd_rekap(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def terima_pin_rekap(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Terima PIN untuk /rekap, tampilkan pilihan periode jika benar."""
+    chat_id = update.effective_chat.id
     pin_input = update.message.text.strip()
     try:
         await update.message.delete()
@@ -156,7 +157,7 @@ async def terima_pin_rekap(update: Update, context: ContextTypes.DEFAULT_TYPE):
         pass
 
     if not verifikasi_pin_admin(pin_input):
-        await update.message.reply_text("❌ PIN salah. Akses ditolak.")
+        await context.bot.send_message(chat_id=chat_id, text="❌ PIN salah. Akses ditolak.")
         return ConversationHandler.END
 
     keyboard = [
@@ -164,8 +165,9 @@ async def terima_pin_rekap(update: Update, context: ContextTypes.DEFAULT_TYPE):
         [InlineKeyboardButton("📆 Minggu Ini", callback_data="rekap_minggu_ini")],
         [InlineKeyboardButton("📊 Bulan Ini", callback_data="rekap_bulan_ini")],
     ]
-    await update.message.reply_text(
-        "📊 *REKAP PENDAPATAN*\n\nPilih periode:",
+    await context.bot.send_message(
+        chat_id=chat_id,
+        text="📊 *REKAP PENDAPATAN*\n\nPilih periode:",
         parse_mode="Markdown",
         reply_markup=InlineKeyboardMarkup(keyboard)
     )
@@ -241,6 +243,7 @@ async def cmd_closing(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def terima_pin_closing(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Terima PIN untuk /closing, eksekusi jika benar."""
+    chat_id = update.effective_chat.id
     pin_input = update.message.text.strip()
     try:
         await update.message.delete()
@@ -248,10 +251,10 @@ async def terima_pin_closing(update: Update, context: ContextTypes.DEFAULT_TYPE)
         pass
 
     if not verifikasi_pin_admin(pin_input):
-        await update.message.reply_text("❌ PIN salah. Akses ditolak.")
+        await context.bot.send_message(chat_id=chat_id, text="❌ PIN salah. Akses ditolak.")
         return ConversationHandler.END
 
-    pesan = await update.message.reply_text("🔄 Proses closing hari ini...")
+    pesan = await context.bot.send_message(chat_id=chat_id, text="🔄 Proses closing hari ini...")
 
     try:
         result = closing_hari()
@@ -320,20 +323,19 @@ async def cmd_rekap_invest_ulang(update: Update, context: ContextTypes.DEFAULT_T
 async def terima_pin_rekap_invest_ulang(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Terima PIN untuk /rekap_invest_ulang, eksekusi jika benar."""
     from telegram.ext import ConversationHandler
-    from handlers.states import PIN_REKAP_INVEST_ULANG
     from sheets_handler import BULAN_REKAP as _BR, BULAN_ID_REVERSE as _BIR
     from datetime import datetime as _dt
 
+    chat_id = update.effective_chat.id
     pin_input = update.message.text.strip()
 
-    # Hapus pesan PIN agar tidak terlihat di chat
     try:
         await update.message.delete()
     except Exception:
         pass
 
     if not verifikasi_pin(pin_input):
-        await update.message.reply_text("❌ PIN salah. Akses ditolak.")
+        await context.bot.send_message(chat_id=chat_id, text="❌ PIN salah. Akses ditolak.")
         return ConversationHandler.END
 
     # PIN benar — ambil argumen yang disimpan
@@ -360,8 +362,9 @@ async def terima_pin_rekap_invest_ulang(update: Update, context: ContextTypes.DE
             use_custom_range = True
             rentang_info = f"{bagian[0].title()} – {bagian[1].title()} {now.year}"
         except Exception:
-            await update.message.reply_text(
-                "❌ Format range salah.\nContoh: `/rekap_invest_ulang 31 Mei - 30 Juni`",
+            await context.bot.send_message(
+                chat_id=chat_id,
+                text="❌ Format range salah.\nContoh: `/rekap_invest_ulang 31 Mei - 30 Juni`",
                 parse_mode="Markdown"
             )
             return ConversationHandler.END
@@ -370,8 +373,9 @@ async def terima_pin_rekap_invest_ulang(update: Update, context: ContextTypes.DE
         nama_bulan = _BR.get(now.month, str(now.month))
         rentang_info = f"1 – {now.day} {nama_bulan} {now.year}"
 
-    pesan = await update.message.reply_text(
-        f"✅ PIN benar. Rekap ulang *{rentang_info}* diproses...",
+    pesan = await context.bot.send_message(
+        chat_id=chat_id,
+        text=f"✅ PIN benar. Rekap ulang *{rentang_info}* diproses...",
         parse_mode="Markdown"
     )
 
@@ -432,19 +436,19 @@ async def terima_pin_rekap_invest(update: Update, context: ContextTypes.DEFAULT_
     """Terima PIN untuk /rekap_invest, eksekusi jika benar."""
     from telegram.ext import ConversationHandler
 
+    chat_id = update.effective_chat.id
     pin_input = update.message.text.strip()
 
-    # Hapus pesan PIN agar tidak terlihat di chat
     try:
         await update.message.delete()
     except Exception:
         pass
 
     if not verifikasi_pin(pin_input):
-        await update.message.reply_text("❌ PIN salah. Akses ditolak.")
+        await context.bot.send_message(chat_id=chat_id, text="❌ PIN salah. Akses ditolak.")
         return ConversationHandler.END
 
-    pesan = await update.message.reply_text("✅ PIN benar. Proses rekap invest hari ini...")
+    pesan = await context.bot.send_message(chat_id=chat_id, text="✅ PIN benar. Proses rekap invest hari ini...")
 
     try:
         hasil = rekap_invest_harian()
@@ -498,6 +502,7 @@ async def terima_pin_admin_lama(update: Update, context: ContextTypes.DEFAULT_TY
     """Terima PIN admin lama, minta PIN baru."""
     from handlers.states import GANTI_PIN_ADMIN_BARU
 
+    chat_id = update.effective_chat.id
     pin_lama = update.message.text.strip()
     try:
         await update.message.delete()
@@ -505,16 +510,17 @@ async def terima_pin_admin_lama(update: Update, context: ContextTypes.DEFAULT_TY
         pass
 
     if not verifikasi_pin_admin(pin_lama):
-        await update.message.reply_text("❌ PIN lama salah. Proses dibatalkan.")
+        await context.bot.send_message(chat_id=chat_id, text="❌ PIN lama salah. Proses dibatalkan.")
         return ConversationHandler.END
 
     context.user_data["pin_admin_lama"] = pin_lama
-    await update.message.reply_text("✅ PIN lama benar.\n\nMasukkan PIN baru (minimal 6 karakter):")
+    await context.bot.send_message(chat_id=chat_id, text="✅ PIN lama benar.\n\nMasukkan PIN baru (minimal 6 karakter):")
     return GANTI_PIN_ADMIN_BARU
 
 
 async def terima_pin_admin_baru(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Terima PIN admin baru dan simpan."""
+    chat_id = update.effective_chat.id
     pin_baru = update.message.text.strip()
     pin_lama = context.user_data.pop("pin_admin_lama", "")
     try:
@@ -524,13 +530,13 @@ async def terima_pin_admin_baru(update: Update, context: ContextTypes.DEFAULT_TY
 
     result = _ganti_pin_admin(pin_lama, pin_baru)
     if result["ok"]:
-        await update.message.reply_text(
-            "✅ *PIN Admin berhasil diganti.*\n\n"
-            "PIN baru sudah aktif untuk `/rekap` dan `/closing`.",
+        await context.bot.send_message(
+            chat_id=chat_id,
+            text="✅ *PIN Admin berhasil diganti.*\n\nPIN baru sudah aktif untuk `/rekap` dan `/closing`.",
             parse_mode="Markdown"
         )
     else:
-        await update.message.reply_text(f"❌ Gagal: {result['reason']}")
+        await context.bot.send_message(chat_id=chat_id, text=f"❌ Gagal: {result['reason']}")
     return ConversationHandler.END
 
 
@@ -556,6 +562,7 @@ async def terima_pin_lama(update: Update, context: ContextTypes.DEFAULT_TYPE):
     from telegram.ext import ConversationHandler
     from handlers.states import GANTI_PIN_BARU
 
+    chat_id = update.effective_chat.id
     pin_lama = update.message.text.strip()
     try:
         await update.message.delete()
@@ -563,11 +570,11 @@ async def terima_pin_lama(update: Update, context: ContextTypes.DEFAULT_TYPE):
         pass
 
     if not verifikasi_pin(pin_lama):
-        await update.message.reply_text("❌ PIN lama salah. Proses dibatalkan.")
+        await context.bot.send_message(chat_id=chat_id, text="❌ PIN lama salah. Proses dibatalkan.")
         return ConversationHandler.END
 
     context.user_data["pin_lama"] = pin_lama
-    await update.message.reply_text("✅ PIN lama benar.\n\nMasukkan PIN baru (minimal 6 karakter):")
+    await context.bot.send_message(chat_id=chat_id, text="✅ PIN lama benar.\n\nMasukkan PIN baru (minimal 6 karakter):")
     return GANTI_PIN_BARU
 
 
@@ -575,6 +582,7 @@ async def terima_pin_baru(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Terima PIN baru dan simpan."""
     from telegram.ext import ConversationHandler
 
+    chat_id = update.effective_chat.id
     pin_baru = update.message.text.strip()
     pin_lama = context.user_data.pop("pin_lama", "")
 
@@ -585,13 +593,13 @@ async def terima_pin_baru(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     result = _ganti_pin(pin_lama, pin_baru)
     if result["ok"]:
-        await update.message.reply_text(
-            "✅ *PIN berhasil diganti.*\n\n"
-            "PIN baru sudah aktif untuk `/rekap_invest` dan `/rekap_invest_ulang`.",
+        await context.bot.send_message(
+            chat_id=chat_id,
+            text="✅ *PIN berhasil diganti.*\n\nPIN baru sudah aktif untuk `/rekap_invest` dan `/rekap_invest_ulang`.",
             parse_mode="Markdown"
         )
     else:
-        await update.message.reply_text(f"❌ Gagal: {result['reason']}")
+        await context.bot.send_message(chat_id=chat_id, text=f"❌ Gagal: {result['reason']}")
 
     return ConversationHandler.END
 
@@ -607,11 +615,16 @@ async def cancel(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
 
 
 async def timeout_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-    """Handle timeout — conversation otomatis berakhir setelah 5 menit idle."""
-    if update.message:
-        await update.message.reply_text(
-            "⏰ Sesi habis karena tidak ada aktivitas. Ketik /start untuk mulai lagi."
-        )
+    """Handle timeout — conversation otomatis berakhir setelah idle."""
+    try:
+        chat_id = update.effective_chat.id if update.effective_chat else None
+        if chat_id:
+            await context.bot.send_message(
+                chat_id=chat_id,
+                text="⏰ Sesi habis karena tidak ada aktivitas. Silakan mulai ulang."
+            )
+    except Exception:
+        pass
     return ConversationHandler.END
 
 
