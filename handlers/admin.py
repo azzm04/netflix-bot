@@ -343,33 +343,57 @@ async def terima_pin_rekap_invest_ulang(update: Update, context: ContextTypes.DE
     now = _dt.now()
 
     use_custom_range = False
+    use_tgl_mulai = False
     rentang_info = ""
+    tgl_mulai_hari = 1
 
-    if args_text and "-" in args_text:
-        try:
-            bagian = [b.strip() for b in args_text.split("-", 1)]
-            def _parse_tgl(s):
-                parts = s.strip().split()
-                hari = int(parts[0])
-                bulan_nama = parts[1].lower().strip()
+    if args_text:
+        # Cek apakah format range: "31 Mei - 30 Juni"
+        if "-" in args_text:
+            try:
+                bagian = [b.strip() for b in args_text.split("-", 1)]
+                def _parse_tgl(s):
+                    parts = s.strip().split()
+                    hari = int(parts[0])
+                    bulan_nama = parts[1].lower().strip()
+                    bulan_num = _BIR.get(bulan_nama)
+                    if bulan_num is None:
+                        raise ValueError(f"Bulan tidak dikenal: {parts[1]}")
+                    return hari, bulan_num, now.year
+
+                tgl_m_hari, tgl_m_bln, tgl_m_thn = _parse_tgl(bagian[0])
+                tgl_a_hari, tgl_a_bln, tgl_a_thn = _parse_tgl(bagian[1])
+                use_custom_range = True
+                rentang_info = f"{bagian[0].title()} – {bagian[1].title()} {now.year}"
+            except Exception:
+                await context.bot.send_message(
+                    chat_id=chat_id,
+                    text="❌ Format salah.\nContoh range: `/rekap_invest_ulang 31 Mei - 30 Juni`\nContoh mulai: `/rekap_invest_ulang 14 Juni`",
+                    parse_mode="Markdown"
+                )
+                return ConversationHandler.END
+
+        # Cek apakah format tanggal mulai saja: "14 Juni"
+        else:
+            try:
+                parts = args_text.strip().split()
+                tgl_mulai_hari = int(parts[0])
+                bulan_nama = parts[1].lower().strip() if len(parts) > 1 else _BR.get(now.month, "").lower()
                 bulan_num = _BIR.get(bulan_nama)
                 if bulan_num is None:
                     raise ValueError(f"Bulan tidak dikenal: {parts[1]}")
-                return hari, bulan_num, now.year
+                use_tgl_mulai = True
+                nama_bulan = _BR.get(bulan_num, str(bulan_num))
+                rentang_info = f"{tgl_mulai_hari} – {now.day} {nama_bulan} {now.year}"
+            except Exception:
+                await context.bot.send_message(
+                    chat_id=chat_id,
+                    text="❌ Format salah.\nContoh mulai: `/rekap_invest_ulang 14 Juni`",
+                    parse_mode="Markdown"
+                )
+                return ConversationHandler.END
 
-            tgl_m_hari, tgl_m_bln, tgl_m_thn = _parse_tgl(bagian[0])
-            tgl_a_hari, tgl_a_bln, tgl_a_thn = _parse_tgl(bagian[1])
-            use_custom_range = True
-            rentang_info = f"{bagian[0].title()} – {bagian[1].title()} {now.year}"
-        except Exception:
-            await context.bot.send_message(
-                chat_id=chat_id,
-                text="❌ Format range salah.\nContoh: `/rekap_invest_ulang 31 Mei - 30 Juni`",
-                parse_mode="Markdown"
-            )
-            return ConversationHandler.END
-
-    if not use_custom_range:
+    if not use_custom_range and not use_tgl_mulai:
         nama_bulan = _BR.get(now.month, str(now.month))
         rentang_info = f"1 – {now.day} {nama_bulan} {now.year}"
 
@@ -385,6 +409,8 @@ async def terima_pin_rekap_invest_ulang(update: Update, context: ContextTypes.DE
                 tgl_m_hari, tgl_m_bln, tgl_m_thn,
                 tgl_a_hari, tgl_a_bln, tgl_a_thn,
             )
+        elif use_tgl_mulai:
+            hasil = rekap_invest_ulang(tgl_mulai=tgl_mulai_hari)
         else:
             hasil = rekap_invest_ulang()
 

@@ -1728,12 +1728,14 @@ def rekap_invest_harian() -> dict:
     return hasil
 
 
-def rekap_invest_ulang(tahun: int = None, bulan: int = None) -> dict:
+def rekap_invest_ulang(tahun: int = None, bulan: int = None, tgl_mulai: int = 1) -> dict:
     """
-    Rekap ulang SEMUA data satu bulan penuh ke invest_netflix.
+    Rekap ulang data satu bulan ke invest_netflix.
     Data yang sudah ada di sheet TIDAK dicek duplikat — asumsi sheet sudah dibersihkan.
 
-    tahun, bulan : default = bulan berjalan sekarang.
+    tahun, bulan  : default = bulan berjalan sekarang.
+    tgl_mulai     : hari pertama yang direkap (default 1 = awal bulan).
+                    Berguna untuk email baru yang mulai di tengah bulan.
 
     Return: {nama_sheet: {'ditulis': int, 'total': int}}
     """
@@ -1744,11 +1746,10 @@ def rekap_invest_ulang(tahun: int = None, bulan: int = None) -> dict:
     nama_sheet_rekap = f"REKAPAN {BULAN_REKAP[bulan]} {tahun}"
     tanggal_list = _tanggal_list_bulan(tahun, bulan)
 
-    # Hanya ambil tanggal sampai hari ini (tidak mau ambil tanggal masa depan)
-    if tahun == now.year and bulan == now.month:
-        tanggal_today = f"{now.day} {BULAN_EN[now.month]} {now.year}"
-        tanggal_list = [t for t in tanggal_list
-                        if _parse_tanggal_str_ke_day(t) <= now.day]
+    # Filter dari tgl_mulai sampai hari ini
+    batas_akhir = now.day if (tahun == now.year and bulan == now.month) else 31
+    tanggal_list = [t for t in tanggal_list
+                    if tgl_mulai <= _parse_tanggal_str_ke_day(t) <= batas_akhir]
 
     data_per_sheet = _ambil_data_rekap_range(tanggal_list, nama_sheet_rekap)
     if not data_per_sheet:
@@ -1757,7 +1758,6 @@ def rekap_invest_ulang(tahun: int = None, bulan: int = None) -> dict:
     client = get_client()
     spreadsheet_invest = client.open_by_key(SPREADSHEET_INVEST_ID)
     hasil = {}
-
     for nama_sheet, baris_list in data_per_sheet.items():
         try:
             sheet = spreadsheet_invest.worksheet(nama_sheet)
