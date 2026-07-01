@@ -35,6 +35,10 @@ INVEST_EMAIL_SHEET_MAP = {
     # Sheet rekapan_ena_2 (mulai 14 Juni 2026)
     "humpadhis@stayhome.li":          "rekapan_ena_2",
     "fitwhovex@fuwari.be":            "rekapan_ena_2",
+    # Sheet rekapan_ena_rose (mulai 1 Juni 2026)
+    "ournapapt@stayhome.li":          "rekapan_ena_rose",
+    "wagmug733@fuwari.be":            "rekapan_ena_rose",
+    "pielidlid@stayhome.li":          "rekapan_ena_rose",
 }
 # SHEET_MODAL dibuat dinamis per bulan di sheets_handler: "modal netflix_Juni", dst.
 SHEET_GESTUN = "rekapan"   # Sheet PENDAPATAN GESTUN di spreadsheet REKAPAN MODAL
