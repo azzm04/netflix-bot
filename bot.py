@@ -432,7 +432,14 @@ def main():
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND & PRIVATE, pesan_tidak_dikenal))
 
     print("✅ Bot berjalan... Tekan Ctrl+C untuk berhenti.")
-    app.run_polling(allowed_updates=Update.ALL_TYPES)
+    app.run_polling(
+        allowed_updates=Update.ALL_TYPES,
+        drop_pending_updates=True,
+        timeout=30,
+        read_timeout=30,
+        write_timeout=30,
+        connect_timeout=30,
+    )
 
 
 if __name__ == "__main__":
