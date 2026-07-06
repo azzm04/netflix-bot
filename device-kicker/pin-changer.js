@@ -1,393 +1,272 @@
 /**
  * pin-changer.js — Ganti PIN profil Netflix untuk akun MAHESH / ROSE
- *
- * Digunakan karena akun MAHESH/ROSE tidak bisa mendapatkan 6-digit
- * kode verifikasi untuk /manageaccountaccess.
- * Solusi alternatif: ganti PIN profil → customer tidak bisa akses profil.
- *
- * Flow:
- *   1. Login (ROSE: password | MAHESH: 4-digit kode, input manual)
- *   2. Buka https://www.netflix.com/settings/migration
- *   3. Isi password akun → klik Lanjut
- *   4. Tampil semua profil beserta PIN kotak
- *   5. Untuk profil yang expired (ada di targetProfiles):
- *      - Baca PIN lama
- *      - Generate PIN baru random (berbeda dari lama)
- *      - Isi PIN baru ke input
- *   6. Klik "Terapkan"
- *   7. Return map { profileName → newPin } untuk update spreadsheet
+ * Menggunakan Playwright (bukan Puppeteer) + proxy support
  */
 
 "use strict";
 
 require("dotenv").config();
-const puppeteer  = require("puppeteer");
-const readline   = require("readline");
+const { chromium } = require("playwright");
+const readline = require("readline");
 const { fetchNetflixCode } = require("./nfpro");
-const { isPakeKode } = require("./kicker");
+const { isPakeKode, RateLimitError } = require("./kicker");
+const { requestCodeFromTelegram } = require("./tg-bridge");
 
 const HEADLESS    = process.env.HEADLESS !== "false";
 const TIMEOUT_NAV = 45_000;
-const TIMEOUT_SEL = 20_000;
-const DELAY_TYPE  = 80;
-
-const URL_CLEARCOOKIES = "https://www.netflix.com/clearcookies";
+const CODE_INPUT_MODE = process.env.CODE_INPUT_MODE ?? "terminal";
 const URL_PIN_SETTINGS = "https://www.netflix.com/settings/migration";
 
-const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+const sleep = (ms) => new Promise(r => setTimeout(r, ms));
 
-// ─── Helper: minta input terminal ────────────────────────
-function askUser(question) {
-  const rl = readline.createInterface({ input: process.stdin, output: process.stdout });
-  return new Promise((resolve) => {
-    rl.question(question, (answer) => { rl.close(); resolve(answer.trim()); });
-  });
-}
-
-// ─── Helper: isi OTP boxes ───────────────────────────────
-async function fillOtpBoxes(page, code) {
-  const digits = code.replace(/\D/g, "").split("");
-  const sels = [
-    'input[data-uia*="otp"]', 'input[autocomplete="one-time-code"]',
-    'input[inputmode="numeric"]', 'input[type="tel"]', 'input[maxlength="1"]',
-  ];
-  let inputs = [];
-  for (const sel of sels) {
-    inputs = await page.$$(sel);
-    if (inputs.length >= digits.length) break;
-  }
-  if (inputs.length === 0) {
-    const single = await page.$('input[type="text"], input[type="number"]');
-    if (single) { await single.click({ clickCount: 3 }); await single.type(code, { delay: DELAY_TYPE }); return; }
-    throw new Error("Input OTP tidak ditemukan.");
-  }
-  for (let i = 0; i < digits.length && i < inputs.length; i++) {
-    await inputs[i].click(); await sleep(100);
-    await inputs[i].type(digits[i], { delay: 80 }); await sleep(150);
-  }
-}
-
-async function submitOtp(page) {
-  const sels = ['button[data-uia="continue-btn"]', 'button[type="submit"]', 'button[data-uia*="submit"]'];
-  for (const sel of sels) {
-    const btn = await page.$(sel);
-    if (btn) { await btn.click(); return; }
-  }
-  await page.keyboard.press("Enter");
-}
-
-// ─── Generate PIN 4 digit random, berbeda dari oldPin ────
 function generateNewPin(oldPin) {
-  let newPin;
-  do {
-    newPin = String(Math.floor(1000 + Math.random() * 9000));
-  } while (newPin === oldPin);
-  return newPin;
+  let pin;
+  do { pin = String(Math.floor(1000 + Math.random() * 9000)); } while (pin === oldPin);
+  return pin;
 }
 
-// ─── Login Netflix ────────────────────────────────────────
-/**
- * @param {import('puppeteer').Browser} browser
- * @param {string} email
- * @param {string} password  - "PAKE KODE" atau password asli
- * @param {"rose"|"mahesh"} accountType
- */
-async function loginNetflix(browser, email, password, accountType) {
-  const page = await browser.newPage();
-  await page.evaluateOnNewDocument(() => {
+async function getCodeFromUser(email, codeType, label = "") {
+  if (CODE_INPUT_MODE === "telegram") return requestCodeFromTelegram(email, codeType, label);
+  return new Promise(resolve => {
+    const rl = readline.createInterface({ input: process.stdin, output: process.stdout });
+    rl.question(`\n  [${email}] Masukkan ${codeType === "4digit" ? "4" : "6"} digit kode: `, ans => {
+      rl.close(); resolve(ans.trim());
+    });
+  });
+}
+
+// ── Launch Browser dengan Proxy ───────────────────────────
+async function launchBrowser() {
+  const proxyConfig = process.env.PROXY_SERVER
+    ? { server: process.env.PROXY_SERVER,
+        username: process.env.PROXY_USERNAME,
+        password: process.env.PROXY_PASSWORD }
+    : undefined;
+
+  return chromium.launch({
+    headless: HEADLESS,
+    executablePath: process.env.CHROME_PATH || undefined,
+    proxy: proxyConfig,
+    args: ["--no-sandbox", "--disable-setuid-sandbox", "--disable-blink-features=AutomationControlled", "--disable-dev-shm-usage"],
+  });
+}
+
+async function newPage(browser) {
+  const proxyConfig = process.env.PROXY_SERVER
+    ? { server: process.env.PROXY_SERVER,
+        username: process.env.PROXY_USERNAME,
+        password: process.env.PROXY_PASSWORD }
+    : undefined;
+
+  const ctx = await browser.newContext({
+    viewport: { width: 1280, height: 900 },
+    userAgent: "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36",
+    locale: "id-ID",
+    proxy: proxyConfig,
+  });
+  const page = await ctx.newPage();
+  await page.addInitScript(() => {
     Object.defineProperty(navigator, "webdriver", { get: () => undefined });
-    window.chrome = { runtime: {} };
+    window.chrome = { runtime: {}, loadTimes: () => {}, csi: () => {}, app: {} };
   });
-  await page.setUserAgent(
-    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/125.0.0.0 Safari/537.36"
-  );
-  await page.setViewport({ width: 1280, height: 800 });
+  if (proxyConfig) console.log(`  [pin] Proxy aktif: ${proxyConfig.server}`);
+  return page;
+}
 
-  console.log("  [login] Clear cookies...");
-  await page.goto(URL_CLEARCOOKIES, { waitUntil: "networkidle2", timeout: TIMEOUT_NAV });
-  await sleep(1000);
+// ── Login ─────────────────────────────────────────────────
+async function loginNetflix(browser, email, password, accountType) {
+  const page = await newPage(browser);
 
+  // Clear cookies
+  await page.goto("https://www.netflix.com/clearcookies", { waitUntil: "domcontentloaded", timeout: TIMEOUT_NAV });
+  await sleep(500);
+
+  // Ke halaman login
   try {
-    await page.waitForSelector('a[href*="/login"], button[data-uia*="sign-in"]', { timeout: 8000 });
-    await page.click('a[href*="/login"], button[data-uia*="sign-in"]');
-    await page.waitForNavigation({ waitUntil: "networkidle2", timeout: TIMEOUT_NAV });
+    await page.locator('a[href*="/login"]').first().click({ timeout: 5000 });
+    await page.waitForURL("**/login**", { timeout: TIMEOUT_NAV }).catch(() => {});
   } catch {
-    await page.goto("https://www.netflix.com/login", { waitUntil: "networkidle2", timeout: TIMEOUT_NAV });
+    await page.goto("https://www.netflix.com/login", { waitUntil: "domcontentloaded", timeout: TIMEOUT_NAV });
   }
-  await sleep(800);
 
-  // Isi email
+  // Isi email dengan pressSequentially (agar React state update)
   console.log(`  [login] Isi email: ${email}`);
-  await page.waitForSelector(
-    'input[name="userLoginId"], input[type="email"], input[autocomplete="email"]',
-    { timeout: TIMEOUT_SEL }
-  );
-  const emailInput = await page.$('input[name="userLoginId"], input[type="email"], input[autocomplete="email"]')
-    ?? await page.$("input");
-  await emailInput.click({ clickCount: 3 });
-  await emailInput.type(email, { delay: DELAY_TYPE });
-  await sleep(400);
+  const emailInput = page.locator('input[name="userLoginId"], input[type="email"], input[autocomplete="email"]').first();
+  await emailInput.waitFor({ timeout: TIMEOUT_NAV });
+  await emailInput.click();
+  await sleep(300);
+  await emailInput.pressSequentially(email, { delay: 80 });
+  await sleep(600);
 
-  const contBtn = await page.$('button[data-uia="login-continue-btn"], button[type="submit"]');
-  if (contBtn) {
-    const t = await contBtn.evaluate(b => b.textContent.trim().toLowerCase());
-    if (t.includes("continue") || t.includes("lanjut")) {
-      await contBtn.click();
-      await page.waitForNavigation({ waitUntil: "networkidle2", timeout: TIMEOUT_NAV }).catch(() => {});
-      await sleep(1500);
+  // Klik Continue
+  const contBtn = page.locator('button[type="submit"], button[data-uia="login-continue-btn"]').first();
+  if (await contBtn.isVisible({ timeout: 3000 }).catch(() => false)) {
+    const box = await contBtn.boundingBox().catch(() => null);
+    if (box) {
+      await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
+      await sleep(200);
     }
+    await contBtn.click();
+  } else {
+    await page.keyboard.press("Enter");
   }
 
-  // Deteksi halaman: OTP atau password
-  const isOtpPage = await page.evaluate(() => {
-    const inputs = document.querySelectorAll('input[maxlength="1"], input[inputmode="numeric"]');
-    const body = document.body.innerText.toLowerCase();
-    return inputs.length >= 3 || body.includes("code we sent") || body.includes("enter the code");
-  });
+  await sleep(2000);
+  await page.waitForLoadState("domcontentloaded").catch(() => {});
 
+  // Cek rate limit
+  const bodyText = await page.locator("body").innerText().catch(() => "");
+  const isRateLimited = bodyText.toLowerCase().includes("something went wrong") &&
+    !(await page.locator('input[type="password"]').isVisible().catch(() => false));
+  if (isRateLimited) {
+    await page.close();
+    throw new RateLimitError(`Netflix rate limit untuk ${email}`);
+  }
+
+  console.log(`  [login] URL: ${page.url()}`);
+
+  const isOtpPage = await page.locator('input[maxlength="1"]').count().then(n => n >= 3).catch(() => false)
+    || bodyText.toLowerCase().includes("code we sent");
+  const isPassPage = await page.locator('input[type="password"]').isVisible().catch(() => false);
+
+  // ── ROSE: password ──────────────────────────────────────
   if (accountType === "rose") {
-    // ROSE: selalu pakai password
-  if (isOtpPage) {
-    console.log("  [login] Halaman OTP, switch ke password (ROSE)...");
-
-    // Cek apakah "Use password instead" sudah visible (Get Help sudah expanded)
-    const alreadyVisible = await page.evaluate(() =>
-      !!(document.querySelector('[data-uia="usePasswordInsteadHelpMenuItem"]'))
-    );
-
-    if (!alreadyVisible) {
-      // Get Help belum expanded → klik dulu
-      await page.evaluate(() => {
-        const btns = document.querySelectorAll("button");
-        for (const b of btns) {
-          if (b.textContent.trim().toLowerCase().includes("get help")) { b.click(); return; }
-        }
-      });
-      await sleep(800);
-    }
-
-    // Klik "Use password instead"
-    const clicked = await page.evaluate(() => {
-      const byUia = document.querySelector('[data-uia="usePasswordInsteadHelpMenuItem"]');
-      if (byUia) { byUia.click(); return true; }
-      for (const el of document.querySelectorAll("a, button, span")) {
-        if (el.textContent.trim().toLowerCase().includes("use password instead")) {
-          el.click(); return true;
-        }
+    if (isOtpPage) {
+      // Switch ke password
+      const byUia = page.locator('[data-uia="usePasswordInsteadHelpMenuItem"]').first();
+      if (!await byUia.isVisible({ timeout: 2000 }).catch(() => false)) {
+        await page.locator('button:has-text("Get Help")').first().click().catch(() => {});
+        await sleep(800);
       }
-      return false;
+      const switchBtn = page.locator('[data-uia="usePasswordInsteadHelpMenuItem"], a:has-text("Use password instead")').first();
+      await switchBtn.click({ timeout: 5000 });
+      await page.locator('input[type="password"]').waitFor({ timeout: 10000 });
+    }
+    console.log("  [login] Isi password (ROSE)...");
+    await page.locator('input[type="password"]').fill(password);
+    await sleep(300);
+    await page.locator('button[type="submit"]').first().click();
+    await page.waitForURL(url => !url.includes("/login"), { timeout: TIMEOUT_NAV }).catch(async () => {
+      await sleep(2000);
     });
 
-    if (!clicked) throw new Error("Tombol 'Use password instead' tidak ditemukan.");
-    await page.waitForSelector('input[type="password"], input[name="password"]', { timeout: 10000 });
-    console.log("  [login] Halaman password muncul.");
-  }
-
-    console.log("  [login] Isi password (ROSE)...");
-    const pw = await page.$('input[name="password"], input[type="password"]');
-    await pw.click({ clickCount: 3 });
-    await pw.type(password, { delay: DELAY_TYPE });
-    await sleep(300);
-    await Promise.all([
-      page.waitForNavigation({ waitUntil: "networkidle2", timeout: TIMEOUT_NAV }),
-      page.click('button[data-uia="login-submit-button"], button[type="submit"]'),
-    ]);
-
+  // ── MAHESH: password dulu, fallback kode ────────────────
   } else {
-    // MAHESH: coba password dulu, fallback ke 4-digit kode jika tidak ada password
-    if (!isOtpPage) {
-      // Langsung halaman password
+    if (!isOtpPage && isPassPage) {
       console.log("  [login] Isi password (MAHESH)...");
-      const pw = await page.$('input[name="password"], input[type="password"]');
-      if (pw) {
-        await pw.click({ clickCount: 3 });
-        await pw.type(password, { delay: DELAY_TYPE });
-        await sleep(300);
-        await Promise.all([
-          page.waitForNavigation({ waitUntil: "networkidle2", timeout: TIMEOUT_NAV }),
-          page.click('button[data-uia="login-submit-button"], button[type="submit"]'),
-        ]);
-      }
-    } else {
-      // Halaman OTP — coba switch ke password dulu
-      console.log("  [login] Halaman OTP, coba switch ke password (MAHESH)...");
-      await page.evaluate(() => {
-        document.querySelectorAll("button, span, a, div").forEach(el => {
-          if (el.textContent.trim().toLowerCase() === "get help") el.click();
-        });
+      await page.locator('input[type="password"]').fill(password);
+      await sleep(300);
+      await page.locator('button[type="submit"]').first().click();
+      await page.waitForURL(url => !url.includes("/login"), { timeout: TIMEOUT_NAV }).catch(async () => {
+        await sleep(2000);
       });
-      await sleep(700);
-
-      const hasPwOption = await page.evaluate(() =>
-        !!(document.querySelector('[data-uia="usePasswordInsteadHelpMenuItem"]') ||
-          Array.from(document.querySelectorAll("a, button, span"))
-            .some(el => el.textContent.trim().toLowerCase().includes("use password instead")))
-      );
-
-      if (hasPwOption && password && !isPakeKode(password)) {
-        // Ada opsi password → pakai password
-        await page.evaluate(() => {
-          const byUia = document.querySelector('[data-uia="usePasswordInsteadHelpMenuItem"]');
-          if (byUia) { byUia.click(); return; }
-          for (const el of document.querySelectorAll("a, button, span")) {
-            if (el.textContent.trim().toLowerCase().includes("use password instead")) { el.click(); return; }
-          }
-        });
-        await page.waitForSelector('input[type="password"]', { timeout: 10000 });
-        const pw = await page.$('input[type="password"]');
-        await pw.click({ clickCount: 3 });
-        await pw.type(password, { delay: DELAY_TYPE });
+    } else if (isOtpPage) {
+      // Coba switch ke password
+      const jeda = 2000 + Math.random() * 2000;
+      await sleep(jeda);
+      await page.locator('button:has-text("Get Help")').first().click().catch(() => {});
+      await sleep(800);
+      const usePw = page.locator('[data-uia="usePasswordInsteadHelpMenuItem"], a:has-text("Use password instead")').first();
+      if (await usePw.isVisible({ timeout: 3000 }).catch(() => false) && password && !isPakeKode(password)) {
+        await usePw.click();
+        await page.locator('input[type="password"]').waitFor({ timeout: 10000 });
+        await page.locator('input[type="password"]').fill(password);
         await sleep(300);
-        await Promise.all([
-          page.waitForNavigation({ waitUntil: "networkidle2", timeout: TIMEOUT_NAV }),
-          page.click('button[data-uia="login-submit-button"], button[type="submit"]'),
-        ]);
+        await page.locator('button[type="submit"]').first().click();
+        await page.waitForURL(url => !url.includes("/login"), { timeout: TIMEOUT_NAV }).catch(() => sleep(2000));
       } else {
-        // Tidak ada opsi password → fallback ke 4-digit kode (input manual)
-        console.log(`\n  Akun MAHESH "${email}" membutuhkan kode 4 digit.`);
-        const code4 = await askUser(`  Masukkan 4 digit kode dari email ${email}: `);
-        await fillOtpBoxes(page, code4);
-        await sleep(400);
-        await submitOtp(page);
-        await page.waitForNavigation({ waitUntil: "networkidle2", timeout: TIMEOUT_NAV }).catch(() => {});
+        // Fallback: minta kode via input
+        console.log(`  [login] MAHESH membutuhkan kode 4 digit...`);
+        await sleep(10_000);
+        const code4 = await getCodeFromUser(email, "4digit", "MAHESH");
+        for (let i = 0; i < code4.length; i++) {
+          const boxes = await page.$$('input[maxlength="1"]');
+          if (boxes[i]) { await boxes[i].click(); await boxes[i].press(code4[i]); }
+        }
+        await page.locator('button[type="submit"]').first().click().catch(() => page.keyboard.press("Enter"));
+        await page.waitForURL(url => !url.includes("/login"), { timeout: TIMEOUT_NAV }).catch(() => {});
       }
     }
   }
 
-  await sleep(1000);
   const urlAfter = page.url();
   if (urlAfter.includes("/login")) throw new Error(`Login gagal untuk ${email}.`);
   console.log(`  [login] Login berhasil: ${urlAfter}`);
   return page;
 }
 
-// ─── Fungsi Utama: changePinsForProfiles ─────────────────
-/**
- * Ganti PIN untuk profil-profil yang expired dalam satu akun.
- *
- * @param {string}   email
- * @param {string}   password
- * @param {"rose"|"mahesh"} accountType
- * @param {string[]} targetProfiles  - nama profil yang harus diganti PIN
- * @returns {Promise<Map<string, string>>}  map { profileName → newPin }
- */
+// ── Ganti PIN ─────────────────────────────────────────────
 async function changePinsForProfiles(email, password, accountType, targetProfiles) {
-  const browser = await puppeteer.launch({
-    headless: HEADLESS,
-    executablePath: process.env.CHROME_PATH || undefined,
-    args: [
-      "--no-sandbox",
-      "--disable-setuid-sandbox",
-      "--disable-blink-features=AutomationControlled",
-      "--disable-infobars",
-      "--disable-dev-shm-usage",
-      "--disable-gpu",
-      "--window-size=1280,900",
-    ],
-    defaultViewport: { width: 1280, height: 900 },
-  });
-
-  const pinChanges = new Map(); // profileName → newPin
+  const browser = await launchBrowser();
+  const pinChanges = new Map();
 
   try {
     const page = await loginNetflix(browser, email, password, accountType);
 
-    // Buka halaman pengaturan PIN profil
     console.log("  [pin] Buka /settings/migration...");
-    await page.goto(URL_PIN_SETTINGS, { waitUntil: "networkidle2", timeout: TIMEOUT_NAV });
+    await page.goto(URL_PIN_SETTINGS, { waitUntil: "domcontentloaded", timeout: TIMEOUT_NAV });
     await sleep(1500);
 
-    // Isi password untuk Kontrol Orang Tua
-    const passwordInput = await page.$('[data-uia="input-account-content-restrictions"]');
-    if (passwordInput) {
-      console.log("  [pin] Isi password untuk Kontrol Orang Tua...");
-      await passwordInput.click({ clickCount: 3 });
-      await passwordInput.type(password, { delay: DELAY_TYPE });
+    // Isi password Kontrol Orang Tua
+    const pwRestrict = page.locator('[data-uia="input-account-content-restrictions"]').first();
+    if (await pwRestrict.isVisible({ timeout: 5000 }).catch(() => false)) {
+      console.log("  [pin] Isi password Kontrol Orang Tua...");
+      await pwRestrict.fill(password);
       await sleep(300);
-      await page.click('[data-uia="btn-account-pin-submit"]');
-
-      // Halaman ini render via JS (tidak full navigation) — tunggu profil list muncul
-      await page.waitForSelector(".parental-control-profile", { timeout: TIMEOUT_SEL });
+      await page.locator('[data-uia="btn-account-pin-submit"]').click();
+      await page.waitForSelector(".parental-control-profile", { timeout: 20000 });
       await sleep(800);
     }
 
-    // Halaman profil dengan PIN sekarang tampil
-    // Baca semua profil + PIN lama, lalu update yang ada di targetProfiles
-    const targets = targetProfiles.map(p => p.trim().toLowerCase());
-
-    console.log(`  [pin] Mencari profil: ${targetProfiles.join(", ")}`);
-
-    // Baca semua profil dari halaman
-    const profiles = await page.evaluate(() => {
-      return Array.from(document.querySelectorAll(".parental-control-profile")).map(li => {
+    // Baca semua profil dan PIN lama
+    const profiles = await page.evaluate(() =>
+      Array.from(document.querySelectorAll(".parental-control-profile")).map(li => {
         const name = li.querySelector("h3")?.textContent?.trim() ?? "";
         const pins = Array.from(li.querySelectorAll('[data-uia^="pin-number-"]'))
-          .sort((a, b) => {
-            const ia = parseInt(a.getAttribute("data-uia").replace("pin-number-", ""));
-            const ib = parseInt(b.getAttribute("data-uia").replace("pin-number-", ""));
-            return ia - ib;
-          })
+          .sort((a, b) => +a.getAttribute("data-uia").slice(-1) - +b.getAttribute("data-uia").slice(-1))
           .map(inp => inp.value ?? "");
         return { name, oldPin: pins.join("") };
-      });
-    });
+      })
+    );
 
-    console.log(`  [pin] Profil ditemukan: ${profiles.map(p => `${p.name}(${p.oldPin})`).join(", ")}`);
+    console.log(`  [pin] Profil: ${profiles.map(p => `${p.name}(${p.oldPin})`).join(", ")}`);
 
-    // Update PIN untuk profil yang ditarget
+    const targets = targetProfiles.map(t => t.trim().toLowerCase());
+
     for (const prof of profiles) {
-      const isTarget = targets.some(t => prof.name.toLowerCase().includes(t));
-      if (!isTarget) continue;
+      if (!targets.some(t => prof.name.toLowerCase().includes(t))) continue;
 
       const newPin = generateNewPin(prof.oldPin);
-      console.log(`  [pin] Ganti PIN "${prof.name}": ${prof.oldPin} → ${newPin}`);
+      console.log(`  [pin] "${prof.name}": ${prof.oldPin} → ${newPin}`);
 
-      // Isi PIN baru ke input
       await page.evaluate((profileName, newPin) => {
-        const allProfiles = document.querySelectorAll(".parental-control-profile");
-        for (const li of allProfiles) {
+        for (const li of document.querySelectorAll(".parental-control-profile")) {
           const h3 = li.querySelector("h3");
-          if (!h3 || !h3.textContent.trim().toLowerCase().includes(profileName.toLowerCase())) continue;
-
-          const pinInputs = Array.from(li.querySelectorAll('[data-uia^="pin-number-"]'))
-            .sort((a, b) => {
-              return parseInt(a.getAttribute("data-uia").replace("pin-number-", "")) -
-                     parseInt(b.getAttribute("data-uia").replace("pin-number-", ""));
-            });
-
-          newPin.split("").forEach((digit, i) => {
-            if (pinInputs[i]) {
-              // Set value via native input event (React-aware)
-              const nativeInputValueSetter = Object.getOwnPropertyDescriptor(
-                window.HTMLInputElement.prototype, "value"
-              ).set;
-              nativeInputValueSetter.call(pinInputs[i], digit);
-              pinInputs[i].dispatchEvent(new Event("input", { bubbles: true }));
-              pinInputs[i].dispatchEvent(new Event("change", { bubbles: true }));
-            }
+          if (!h3?.textContent?.toLowerCase().includes(profileName.toLowerCase())) continue;
+          const inputs = Array.from(li.querySelectorAll('[data-uia^="pin-number-"]'))
+            .sort((a, b) => +a.getAttribute("data-uia").slice(-1) - +b.getAttribute("data-uia").slice(-1));
+          newPin.split("").forEach((d, i) => {
+            if (!inputs[i]) return;
+            const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value").set;
+            setter.call(inputs[i], d);
+            inputs[i].dispatchEvent(new Event("input", { bubbles: true }));
+            inputs[i].dispatchEvent(new Event("change", { bubbles: true }));
           });
-          return true;
+          return;
         }
-        return false;
       }, prof.name, newPin);
 
-      await sleep(500);
+      await sleep(400);
       pinChanges.set(prof.name, newPin);
     }
 
-    if (pinChanges.size === 0) {
-      console.log("  [pin] Tidak ada profil yang cocok untuk diganti PIN.");
-      return pinChanges;
+    if (pinChanges.size > 0) {
+      console.log("  [pin] Klik Terapkan...");
+      await page.locator('[data-uia="profile-hub-migration-apply"]').click();
+      await page.waitForURL(url => !url.includes("/settings/migration"), { timeout: TIMEOUT_NAV }).catch(() => {});
+      await sleep(1500);
+      console.log(`  [pin] Selesai! ${[...pinChanges.keys()].join(", ")}`);
     }
-
-    // Klik "Terapkan"
-    console.log("  [pin] Klik Terapkan...");
-    await page.click('[data-uia="profile-hub-migration-apply"]');
-    await page.waitForNavigation({ waitUntil: "networkidle2", timeout: TIMEOUT_NAV }).catch(() => {});
-    await sleep(1500);
-
-    console.log(`  [pin] Selesai! PIN berhasil diganti untuk: ${[...pinChanges.keys()].join(", ")}`);
-
   } finally {
     await browser.close();
   }
