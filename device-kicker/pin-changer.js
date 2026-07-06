@@ -114,8 +114,17 @@ async function loginNetflix(browser, email, password, accountType) {
   }, email);
   await sleep(500);
 
-  const emailValue = await emailInput.inputValue().catch(() => "");
+const emailValue = await emailInput.inputValue().catch(() => "");
   console.log(`  [login] Email value: "${emailValue}"`);
+
+  // Cek apakah form sudah combined (password field sudah ada SEBELUM klik Continue)
+  const passwordAlreadyPresent = await page.locator('input[type="password"]').isVisible({ timeout: 1000 }).catch(() => false);
+
+  if (passwordAlreadyPresent && password && !isPakeKode(password)) {
+    console.log("  [login] Combined form terdeteksi, isi password sebelum submit...");
+    await page.locator('input[type="password"]').fill(password);
+    await sleep(300);
+  }
 
   // Klik Continue
   const contBtn = page.locator('button[type="submit"], button[data-uia="login-continue-btn"]').first();
