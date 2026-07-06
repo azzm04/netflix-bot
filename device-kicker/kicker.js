@@ -454,19 +454,57 @@ async function loginNetflix(browser, email, password, forcePakeKode = false, acc
     await pw.click({ clickCount: 3 });
     await pw.type(password, { delay: DELAY_TYPE });
     await sleep(300);
-    await Promise.all([
-      page.waitForNavigation({ waitUntil: "networkidle2", timeout: TIMEOUT_NAV }),
-      page.click('button[data-uia="login-submit-button"], button[type="submit"]'),
-    ]);
+
+    // Klik submit dan tunggu navigasi — gunakan race antara navigation dan timeout
+    const submitBtn = await page.$('button[data-uia="login-submit-button"], button[type="submit"]');
+    if (submitBtn) {
+      await submitBtn.click();
+    } else {
+      await page.keyboard.press("Enter");
+    }
+
+    // Tunggu navigasi dengan toleransi timeout (Netflix terkadang redirect lambat)
+    await page.waitForNavigation({ waitUntil: "networkidle2", timeout: TIMEOUT_NAV }).catch(async () => {
+      // Jika timeout, coba tunggu sedikit dan cek URL
+      await sleep(3000);
+      console.log(`  [login] Navigation timeout setelah password, URL: ${page.url()}`);
+    });
     await sleep(1000);
   }
 
   const urlAfter = page.url();
+  console.log(`  [login] URL akhir setelah submit: ${urlAfter}`);
   if (urlAfter.includes("/login") || urlAfter.includes("/loginHelp")) {
-    throw new Error(`Login gagal untuk ${email}.`);
+    // Cek apakah muncul halaman OTP setelah password (2-step verification)
+    const isOtpAfterPass = await page.evaluate(() => {
+      const inputs = document.querySelectorAll('input[maxlength="1"], input[inputmode="numeric"]');
+      const body = document.body.innerText.toLowerCase();
+      return inputs.length >= 3 || body.includes("code we sent") || body.includes("enter the code");
+    });
+    if (isOtpAfterPass) {
+      console.log("  [login] OTP muncul setelah password (2-step), auto-fetch...");
+      await sleep(10_000);
+      try {
+        const code4 = await fetchNetflixCode(email, "signin", { retries: 3, retryDelay: 5000 });
+        console.log(`  [login] Mengisi kode 4 digit post-password: ${code4}`);
+        await fillOtpBoxes(page, code4);
+        await submitOtp(page);
+        await page.waitForNavigation({ waitUntil: "networkidle2", timeout: TIMEOUT_NAV }).catch(() => {});
+        await sleep(1000);
+        const urlFinal = page.url();
+        if (urlFinal.includes("/login")) {
+          throw new Error(`Login gagal untuk ${email}.`);
+        }
+      } catch (fetchErr) {
+        throw new Error(`Login gagal untuk ${email}: ${fetchErr.message}`);
+      }
+    } else {
+      throw new Error(`Login gagal untuk ${email}.`);
+    }
   }
   console.log(`  [login] Login berhasil: ${urlAfter}`);
   return page;
+
 }
 
 // -------------------------------------------------------
