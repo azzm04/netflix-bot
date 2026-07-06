@@ -4,3 +4,7 @@ __pycache__/
 credentials.json
 pin_invest.json
 pin_admin.json
+
+# Node.js
+node_modules/
+npm-debug.log*
