@@ -126,8 +126,17 @@ const emailValue = await emailInput.inputValue().catch(() => "");
     await sleep(300);
   }
 
-  // Klik Continue
+// Klik Continue
   const contBtn = page.locator('button[type="submit"], button[data-uia="login-continue-btn"]').first();
+
+  // Pastikan tombol enabled (kadang React butuh trigger blur/keyup tambahan)
+  const isDisabled = await contBtn.isDisabled().catch(() => false);
+  if (isDisabled) {
+    console.log("  [login] Tombol Continue disabled, trigger blur...");
+    await page.locator('input[type="password"]').press("Tab").catch(() => {});
+    await sleep(500);
+  }
+
   if (await contBtn.isVisible({ timeout: 3000 }).catch(() => false)) {
     const box = await contBtn.boundingBox().catch(() => null);
     if (box) {
