@@ -89,45 +89,33 @@ async function loginNetflix(browser, email, password, accountType) {
     await page.goto("https://www.netflix.com/login", { waitUntil: "domcontentloaded", timeout: TIMEOUT_NAV });
   }
 
-  // Isi email — pastikan field benar-benar terisi sebelum klik Continue
+  // Isi email — triple click clear, lalu fill dengan select all + type
   console.log(`  [login] Isi email: ${email}`);
   const emailInput = page.locator('input[name="userLoginId"], input[type="email"], input[autocomplete="email"]').first();
   await emailInput.waitFor({ timeout: TIMEOUT_NAV });
 
-  // Klik field, lalu isi dengan beberapa cara untuk memastikan React state update
+  // Klik, select all, hapus, lalu ketik
   await emailInput.click({ clickCount: 3 });
-  await sleep(300);
-  await emailInput.fill(""); // kosongkan dulu
   await sleep(200);
-
-  // Ketik manual karakter per karakter
-  for (const char of email) {
-    await emailInput.press(char);
-    await sleep(30 + Math.random() * 40);
-  }
+  await page.keyboard.press("Control+a");
+  await page.keyboard.press("Delete");
+  await sleep(200);
+  // Gunakan evaluate untuk set value via React-compatible method
+  await page.evaluate((val) => {
+    const input = document.querySelector('input[name="userLoginId"], input[type="email"]')
+      ?? document.querySelector('input[autocomplete="email"]')
+      ?? document.querySelector('input');
+    if (!input) return;
+    input.focus();
+    const setter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value').set;
+    setter.call(input, val);
+    input.dispatchEvent(new Event('input', { bubbles: true, cancelable: true }));
+    input.dispatchEvent(new Event('change', { bubbles: true }));
+  }, email);
   await sleep(500);
 
-  // Verifikasi email terisi
-  let emailVal = await emailInput.inputValue().catch(() => "");
-  console.log(`  [login] Email terisi: "${emailVal.substring(0, 20)}"`);
-
-  // Jika masih kosong, coba cara lain: evaluateHandle
-  if (!emailVal || emailVal.trim() === "") {
-    console.log("  [login] Email masih kosong, coba evaluateHandle...");
-    await page.evaluate((emailStr) => {
-      const input = document.querySelector('input[name="userLoginId"], input[type="email"], input');
-      if (!input) return;
-      const nativeInputValueSetter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value').set;
-      nativeInputValueSetter.call(input, emailStr);
-      input.dispatchEvent(new Event('input', { bubbles: true }));
-      input.dispatchEvent(new Event('change', { bubbles: true }));
-    }, email);
-    await sleep(400);
-    emailVal = await emailInput.inputValue().catch(() => "");
-    console.log(`  [login] Email setelah fallback: "${emailVal.substring(0, 20)}"`);
-  }
-
-  await sleep(800 + Math.random() * 500);
+  const emailValue = await emailInput.inputValue().catch(() => "");
+  console.log(`  [login] Email value: "${emailValue}"`);
 
   // Klik Continue
   const contBtn = page.locator('button[type="submit"], button[data-uia="login-continue-btn"]').first();

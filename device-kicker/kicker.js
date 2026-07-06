@@ -158,36 +158,25 @@ async function loginNetflix(browser, email, password, forcePakeKode = false, acc
   await emailInput.waitFor({ timeout: TIMEOUT_NAV });
 
   await emailInput.click({ clickCount: 3 });
-  await sleep(300);
-  await emailInput.fill("");
   await sleep(200);
-
-  // Ketik manual karakter per karakter
-  for (const char of email) {
-    await emailInput.press(char);
-    await sleep(30 + Math.random() * 40);
-  }
+  await page.keyboard.press("Control+a");
+  await page.keyboard.press("Delete");
+  await sleep(200);
+  await page.evaluate((val) => {
+    const input = document.querySelector('input[name="userLoginId"], input[type="email"]')
+      ?? document.querySelector('input[autocomplete="email"]')
+      ?? document.querySelector('input');
+    if (!input) return;
+    input.focus();
+    const setter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value').set;
+    setter.call(input, val);
+    input.dispatchEvent(new Event('input', { bubbles: true, cancelable: true }));
+    input.dispatchEvent(new Event('change', { bubbles: true }));
+  }, email);
   await sleep(500);
 
-  let emailValue = await emailInput.inputValue().catch(() => "");
-  console.log(`  [login] Email value: "${emailValue.substring(0, 20)}"`);
-
-  // Fallback jika masih kosong
-  if (!emailValue || emailValue.trim() === "") {
-    await page.evaluate((emailStr) => {
-      const input = document.querySelector('input[name="userLoginId"], input[type="email"], input');
-      if (!input) return;
-      const setter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value').set;
-      setter.call(input, emailStr);
-      input.dispatchEvent(new Event('input', { bubbles: true }));
-      input.dispatchEvent(new Event('change', { bubbles: true }));
-    }, email);
-    await sleep(400);
-    emailValue = await emailInput.inputValue().catch(() => "");
-    console.log(`  [login] Email fallback: "${emailValue.substring(0, 20)}"`);
-  }
-
-  await sleep(700 + Math.random() * 500);
+  const emailValue = await emailInput.inputValue().catch(() => "");
+  console.log(`  [login] Email value: "${emailValue}"`);
 
   // Klik Continue
   const continueBtn = page.locator('button[type="submit"], button[data-uia="login-continue-btn"]').first();
