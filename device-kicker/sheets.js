@@ -88,20 +88,21 @@ function isHeaderRow(row) {
 }
 
 /**
- * Cek apakah baris header menandakan blok MAHESH atau ROSE.
- * Cukup cari kata "MAHESH" atau "ROSE" di seluruh sel baris tersebut.
+ * Cek apakah baris header menandakan blok MAHESH, ROSE, atau MEET.
  *
  * @param {string[]} row
- * @returns {{ isMaheshOrRose: boolean, label: string }}
+ * @returns {{ isMaheshOrRose: boolean, isMeet: boolean, label: string }}
  */
 function classifyHeaderRow(row) {
   const fullText = row.join(" ").toUpperCase();
   const isMahesh = fullText.includes("MAHESH");
   const isRose   = fullText.includes("ROSE");
+  const isMeet   = fullText.includes("MEET");
 
-  if (isMahesh) return { isMaheshOrRose: true, label: "MAHESH" };
-  if (isRose)   return { isMaheshOrRose: true, label: "ROSE" };
-  return { isMaheshOrRose: false, label: "" };
+  if (isMahesh) return { isMaheshOrRose: true, isMeet: false, label: "MAHESH" };
+  if (isRose)   return { isMaheshOrRose: true, isMeet: false, label: "ROSE" };
+  if (isMeet)   return { isMaheshOrRose: false, isMeet: true, label: "MEET" };
+  return { isMaheshOrRose: false, isMeet: false, label: "" };
 }
 
 // ─── Auth Google ──────────────────────────────────────────
@@ -204,20 +205,21 @@ function scanSheetForExpired(rows, sheetName) {
 
     // ── Cek apakah ini baris header blok ──────────────────
     if (isHeaderRow(row)) {
-      const { isMaheshOrRose, label } = classifyHeaderRow(row);
+      const { isMaheshOrRose, isMeet, label } = classifyHeaderRow(row);
       currentBlockIsMaheshOrRose = isMaheshOrRose;
       currentBlockLabel = label;
 
       if (isMaheshOrRose) {
-        console.log(`  [scan:${sheetName}] Blok SKIP ditemukan: "${row.join(" ").trim().substring(0, 50)}"`);
+        console.log(`  [scan:${sheetName}] Blok SKIP: "${row.join(" ").trim().substring(0, 50)}"`);
+      } else if (isMeet) {
+        console.log(`  [scan:${sheetName}] Blok MEET: "${row.join(" ").trim().substring(0, 50)}"`);
       } else {
-        // Header blok selain MAHESH/ROSE (blok akun sendiri)
         const headerText = row.join(" ").trim().substring(0, 50);
         if (headerText.length > 2) {
           console.log(`  [scan:${sheetName}] Blok PROSES: "${headerText}"`);
         }
       }
-      continue; // baris header sendiri tidak diproses
+      continue;
     }
 
     // ── Baris data (ada '@' di kolom A) ───────────────────
@@ -249,11 +251,12 @@ function scanSheetForExpired(rows, sheetName) {
       profile,
       logoutText,
       logoutDate,
-      isSkipped: currentBlockIsMaheshOrRose,
+      isSkipped: currentBlockIsMaheshOrRose,   // MAHESH/ROSE → ganti PIN
+      isMeet: currentBlockLabel === "MEET",     // MEET → auto-fetch 4-digit kode
       skipReason: currentBlockIsMaheshOrRose
         ? `Blok ${currentBlockLabel} — tidak punya akses ke email akun`
         : "",
-      blockLabel: currentBlockLabel,
+      blockLabel: currentBlockLabel,            // "MAHESH" | "ROSE" | "MEET" | ""
     });
   }
 
@@ -382,9 +385,31 @@ async function markAsKicked(spreadsheetId, sheetName, rowIndex) {
   console.log(`  [sheets] markAsKicked selesai: ${sheetName} baris ${rowIndex} → kosong + hijau`);
 }
 
+/**
+ * Update PIN profil di kolom D spreadsheet.
+ * @param {string} spreadsheetId
+ * @param {string} sheetName
+ * @param {number} rowIndex  - 1-based
+ * @param {string} newPin    - PIN 4 digit baru
+ */
+async function updatePin(spreadsheetId, sheetName, rowIndex, newPin) {
+  const sheets = await getSheets();
+  // Kolom D = index 3 → huruf 'D'
+  const colD = String.fromCharCode(65 + 3); // "D"
+  const range = `${sheetName}!${colD}${rowIndex}`;
+  await sheets.spreadsheets.values.update({
+    spreadsheetId,
+    range,
+    valueInputOption: "RAW",
+    requestBody: { values: [[newPin]] },
+  });
+  console.log(`  [sheets] updatePin: ${sheetName} baris ${rowIndex} → PIN ${newPin}`);
+}
+
 module.exports = {
   getExpiredAccounts,
   markAsKicked,
+  updatePin,
   findSpreadsheetId,
   // Export untuk unit test / debug
   parseTanggalLogout,

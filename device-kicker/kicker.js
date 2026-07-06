@@ -3,6 +3,10 @@
 require("dotenv").config();
 const puppeteer = require("puppeteer");
 const { fetchNetflixCode } = require("./nfpro");
+const { requestCodeFromTelegram } = require("./tg-bridge");
+
+// Mode: "terminal" (lokal) atau "telegram" (server)
+const CODE_INPUT_MODE = process.env.CODE_INPUT_MODE ?? "terminal";
 
 const HEADLESS      = process.env.HEADLESS !== "false";
 const TIMEOUT_NAV   = 45_000;
@@ -16,13 +20,47 @@ const URL_DEVICES      = "https://www.netflix.com/manageaccountaccess";
 // shouldSkip: no-op, deteksi skip dilakukan di sheets.js via header blok
 function shouldSkip(_email) { return false; }
 
-function isPakeKode(password) {
+/**
+ * Cek apakah password menunjukkan mode "PAKE KODE" (login via kode email).
+ * MEET selalu pakai kode, terlepas isi kolom B.
+ * @param {string} password
+ * @param {boolean} isMeet
+ * @returns {boolean}
+ */
+function isPakeKode(password, isMeet = false) {
+  if (isMeet) return true; // MEET selalu pakai 4-digit kode
   if (!password) return true;
   const up = password.toUpperCase().trim();
   return up === "PAKE KODE" || up === "PAKE KODE MASUK" || up === "";
 }
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+
+/**
+ * Minta kode OTP — otomatis pilih input mode:
+ * - "terminal"  → input dari keyboard (mode lokal/debug)
+ * - "telegram"  → kirim request ke bot Telegram, tunggu reply admin
+ *
+ * @param {string} email
+ * @param {"4digit"|"6digit"} codeType
+ * @param {string} accountLabel - "MAHESH" | "ROSE" | ""
+ * @returns {Promise<string>}
+ */
+async function getCodeFromUser(email, codeType, accountLabel = "") {
+  if (CODE_INPUT_MODE === "telegram") {
+    return requestCodeFromTelegram(email, codeType, accountLabel);
+  }
+  // Terminal mode (default lokal)
+  const readline = require("readline");
+  const label = codeType === "4digit" ? "4 digit" : "6 digit";
+  return new Promise((resolve) => {
+    const rl = readline.createInterface({ input: process.stdin, output: process.stdout });
+    rl.question(`\n  👉 [${email}] Masukkan ${label} kode: `, (ans) => {
+      rl.close();
+      resolve(ans.trim());
+    });
+  });
+}
 
 // -------------------------------------------------------
 // fillOtpBoxes: isi kode digit per digit ke input OTP
@@ -125,7 +163,7 @@ async function _switchToPasswordLogin(page) {
 // -------------------------------------------------------
 // loginNetflix
 // -------------------------------------------------------
-async function loginNetflix(browser, email, password) {
+async function loginNetflix(browser, email, password, forcePakeKode = false, accountLabel = "") {
   const page = await browser.newPage();
   await page.evaluateOnNewDocument(() => {
     Object.defineProperty(navigator, "webdriver", { get: () => undefined });
@@ -184,10 +222,13 @@ async function loginNetflix(browser, email, password) {
     return inputs.length >= 3 || body.includes("code we sent") || body.includes("enter the code");
   });
 
+  // forcePakeKode = true (MEET) → skip coba password, langsung OTP
+  const effectivePakeKode = forcePakeKode || isPakeKode(password);
+
   let usedOtp = false;
 
   if (isOtpPage) {
-    if (!isPakeKode(password)) {
+    if (!effectivePakeKode) {
       console.log("  [login] Halaman OTP, coba beralih ke password...");
       const switched = await _switchToPasswordLogin(page);
       if (!switched) {
@@ -195,17 +236,27 @@ async function loginNetflix(browser, email, password) {
         usedOtp = true;
       }
     } else {
+      // isPakeKode atau forcePakeKode → langsung OTP
       usedOtp = true;
     }
 
     if (usedOtp) {
       console.log("  [login] Tunggu 10 detik agar email Netflix terkirim...");
       await sleep(10_000);
-      console.log("  [login] Auto-fetch 4-digit kode dari nfpro.store...");
-      const code4 = await fetchNetflixCode(email, "signin", { retries: 4, retryDelay: 5000 });
+
+      let code4;
+      if (accountLabel === "MAHESH") {
+        // MAHESH: tidak bisa auto-fetch → minta via Telegram atau terminal
+        console.log("  [login] MAHESH — minta kode via input...");
+        code4 = await getCodeFromUser(email, "4digit", "MAHESH");
+      } else {
+        // MEET / akun lain → auto-fetch dari nfpro.store
+        console.log("  [login] Auto-fetch 4-digit kode dari nfpro.store...");
+        code4 = await fetchNetflixCode(email, "signin", { retries: 4, retryDelay: 5000 });
+      }
+
       console.log(`  [login] Mengisi kode 4 digit: ${code4}`);
       await fillOtpBoxes(page, code4);
-      await sleep(500);
       await submitOtp(page);
       await page.waitForNavigation({ waitUntil: "networkidle2", timeout: TIMEOUT_NAV }).catch(() => {});
       await sleep(1500);
@@ -216,7 +267,7 @@ async function loginNetflix(browser, email, password) {
     !!document.querySelector('input[name="password"], input[type="password"]')
   );
 
-  if (isPassPage && !isPakeKode(password) && !usedOtp) {
+  if (isPassPage && !effectivePakeKode && !usedOtp) {
     console.log("  [login] Mengisi password...");
     const pw = await page.$('input[name="password"], input[type="password"]');
     await pw.click({ clickCount: 3 });
@@ -240,7 +291,7 @@ async function loginNetflix(browser, email, password) {
 // -------------------------------------------------------
 // handleDeviceVerification: verifikasi 6-digit di manageaccountaccess
 // -------------------------------------------------------
-async function handleDeviceVerification(page, email) {
+async function handleDeviceVerification(page, email, accountLabel = "") {
   await sleep(1500);
 
   // Cek URL dulu — Netflix kadang redirect ke /mfa sebelum manageaccountaccess
@@ -356,8 +407,14 @@ async function handleDeviceVerification(page, email) {
   console.log("  [verify] Tunggu 10 detik agar email Netflix terkirim...");
   await sleep(10_000);
 
-  console.log("  [verify] Auto-fetch 6-digit kode dari nfpro.store...");
-  const code6 = await fetchNetflixCode(email, "signin6", { retries: 4, retryDelay: 5000 });
+  let code6;
+  if (accountLabel === "MAHESH") {
+    console.log("  [verify] MAHESH — minta 6-digit kode via input...");
+    code6 = await getCodeFromUser(email, "6digit", "MAHESH");
+  } else {
+    console.log("  [verify] Auto-fetch 6-digit kode dari nfpro.store...");
+    code6 = await fetchNetflixCode(email, "signin6", { retries: 4, retryDelay: 5000 });
+  }
   console.log(`  [verify] Mengisi kode 6 digit: ${code6}`);
   await fillOtpBoxes(page, code6);
   await sleep(400);
@@ -580,47 +637,38 @@ async function kickDevicesByProfile(page, profileName) {
 // -------------------------------------------------------
 // kickDevicesForProfiles — kick BEBERAPA profil dalam 1 sesi browser
 // Login sekali, kick semua profil expired dari email yang sama
+// isMeet = true → paksa login via 4-digit kode (skip coba password)
 // -------------------------------------------------------
-async function kickDevicesForProfiles(email, password, profileNames) {
+async function kickDevicesForProfiles(email, password, profileNames, isMeet = false, accountLabel = "") {
   if (shouldSkip(email)) {
     return { skipped: true, kicked: 0, reason: "MAHESH/ROSE — no email access." };
   }
 
   const browser = await puppeteer.launch({
     headless: HEADLESS,
-    args: [
-      "--no-sandbox",
-      "--disable-setuid-sandbox",
-      "--disable-blink-features=AutomationControlled",
-      "--disable-infobars",
-    ],
+    args: ["--no-sandbox", "--disable-setuid-sandbox", "--disable-blink-features=AutomationControlled", "--disable-infobars"],
     defaultViewport: { width: 1280, height: 900 },
   });
 
   let totalKicked = 0;
   try {
-    const page = await loginNetflix(browser, email, password);
+    const page = await loginNetflix(browser, email, password, isMeet, accountLabel);
 
     console.log("  [devices] Navigasi ke /manageaccountaccess...");
     await page.goto(URL_DEVICES, { waitUntil: "networkidle2", timeout: TIMEOUT_NAV });
 
-    await handleDeviceVerification(page, email);
+    await handleDeviceVerification(page, email, accountLabel);
 
     const urlAfterVerify = page.url();
     if (!urlAfterVerify.includes("manageaccountaccess")) {
       console.log(`  [devices] Navigasi ulang dari ${urlAfterVerify}...`);
       await page.goto(URL_DEVICES, { waitUntil: "networkidle2", timeout: TIMEOUT_NAV });
       await sleep(1500);
-      await handleDeviceVerification(page, email);
+      await handleDeviceVerification(page, email, accountLabel);
     }
 
     console.log(`  [devices] Kick ${profileNames.length} profil: ${profileNames.join(", ")}`);
-
-    // Kick semua profil dalam satu halaman yang sama
-    // kickDevicesByProfile sudah handle "Tampilkan Lainnya" di awal
-    // Jalankan sekali untuk semua profil sekaligus dengan multi-target
     totalKicked = await kickDevicesByProfiles(page, profileNames);
-
     console.log(`  [devices] Total ${totalKicked} device dikick untuk ${profileNames.length} profil.`);
 
   } finally {
@@ -630,9 +678,8 @@ async function kickDevicesForProfiles(email, password, profileNames) {
   return { skipped: false, kicked: totalKicked };
 }
 
-// kickDevicesForProfile — backward compat, single profil
-async function kickDevicesForProfile(email, password, profileName) {
-  return kickDevicesForProfiles(email, password, [profileName]);
+async function kickDevicesForProfile(email, password, profileName, isMeet = false, accountLabel = "") {
+  return kickDevicesForProfiles(email, password, [profileName], isMeet, accountLabel);
 }
 
 // kickDevicesByProfiles — multi profil, logic sama tapi target adalah array

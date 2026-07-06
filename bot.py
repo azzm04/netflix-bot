@@ -431,6 +431,10 @@ def main():
     # Handler pesan tidak dikenal — private only (jangan spam balas di group)
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND & PRIVATE, pesan_tidak_dikenal))
 
+    # ── Code Bridge: handler untuk kode OTP device kicker ──
+    from handlers.code_bridge import register_handlers as register_code_bridge
+    register_code_bridge(app)
+
     print("✅ Bot berjalan... Tekan Ctrl+C untuk berhenti.")
     app.run_polling(
         allowed_updates=Update.ALL_TYPES,
