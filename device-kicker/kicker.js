@@ -284,6 +284,12 @@ async function loginNetflix(browser, email, password, forcePakeKode = false, acc
     !!document.querySelector('input[name="password"], input[type="password"]')
   );
 
+  if (!isOtpPage && !isPassPage && !usedOtp) {
+  const bodySnippet = await page.evaluate(() => document.body.innerText.slice(0, 800));
+  console.log(`  [login] DEBUG — halaman tak dikenali. Snippet:\n${bodySnippet}`);
+  await page.screenshot({ path: `/tmp/debug_${Date.now()}.png`, fullPage: true }).catch(() => {});
+}
+
   if (isPassPage && !effectivePakeKode && !usedOtp) {
     console.log("  [login] Mengisi password...");
     const pw = await page.$('input[name="password"], input[type="password"]');
