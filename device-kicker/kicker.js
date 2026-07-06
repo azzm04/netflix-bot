@@ -10,6 +10,14 @@ const { requestCodeFromTelegram } = require("./tg-bridge");
 // Mode: "terminal" (lokal) atau "telegram" (server)
 const CODE_INPUT_MODE = process.env.CODE_INPUT_MODE ?? "terminal";
 
+// Custom error untuk rate limit — bisa di-catch di index.js untuk delay 45 menit
+class RateLimitError extends Error {
+  constructor(message) {
+    super(message);
+    this.name = "RateLimitError";
+  }
+}
+
 const HEADLESS      = process.env.HEADLESS !== "false";
 const TIMEOUT_NAV   = 45_000;
 const TIMEOUT_SEL   = 20_000;
@@ -233,6 +241,15 @@ async function _switchToCodeLogin(page) {
 // -------------------------------------------------------
 async function loginNetflix(browser, email, password, forcePakeKode = false, accountLabel = "") {
   const page = await browser.newPage();
+
+  // Proxy authentication jika diset
+  if (process.env.PROXY_USERNAME && process.env.PROXY_PASSWORD) {
+    await page.authenticate({
+      username: process.env.PROXY_USERNAME,
+      password: process.env.PROXY_PASSWORD,
+    });
+  }
+
   await page.evaluateOnNewDocument(() => {
     Object.defineProperty(navigator, "webdriver", { get: () => undefined });
     window.chrome = { runtime: {}, loadTimes: () => {}, csi: () => {}, app: {} };
@@ -284,11 +301,22 @@ async function loginNetflix(browser, email, password, forcePakeKode = false, acc
       await sleep(1500);
     }
   } else {
-    // Fallback: tekan Enter
     console.log(`  [login] Tidak ada tombol Continue, tekan Enter...`);
     await page.keyboard.press("Enter");
     await page.waitForNavigation({ waitUntil: "networkidle2", timeout: TIMEOUT_NAV }).catch(() => {});
     await sleep(1500);
+  }
+
+  // Deteksi rate limit "Something went wrong"
+  const isRateLimited = await page.evaluate(() => {
+    const body = document.body.innerText.toLowerCase();
+    return body.includes("something went wrong") ||
+           body.includes("please try again in a few minutes") ||
+           body.includes("too many requests");
+  });
+  if (isRateLimited) {
+    console.log(`  [login] Rate limit terdeteksi untuk ${email}.`);
+    throw new RateLimitError(`Netflix rate limit untuk ${email}`);
   }
 
   console.log(`  [login] URL setelah email: ${page.url()}`);
@@ -775,6 +803,10 @@ async function kickDevicesForProfiles(email, password, profileNames, isMeet = fa
     return { skipped: true, kicked: 0, reason: "MAHESH/ROSE — no email access." };
   }
 
+  const proxyArgs = process.env.PROXY_SERVER
+    ? [`--proxy-server=${process.env.PROXY_SERVER}`]
+    : [];
+
   const browser = await puppeteer.launch({
     headless: HEADLESS ? "new" : false,
     executablePath: process.env.CHROME_PATH || undefined,
@@ -788,6 +820,7 @@ async function kickDevicesForProfiles(email, password, profileNames, isMeet = fa
       "--window-size=1280,900",
       "--disable-features=IsolateOrigins,site-per-process",
       "--lang=id-ID",
+      ...proxyArgs,
     ],
     defaultViewport: { width: 1280, height: 900 },
     ignoreHTTPSErrors: true,
@@ -952,4 +985,4 @@ async function kickDevicesByProfiles(page, profileNames) {
   return totalKicked;
 }
 
-module.exports = { kickDevicesForProfile, kickDevicesForProfiles, shouldSkip, isPakeKode };
+module.exports = { kickDevicesForProfile, kickDevicesForProfiles, shouldSkip, isPakeKode, RateLimitError };

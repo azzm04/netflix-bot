@@ -3,7 +3,7 @@
 require("dotenv").config();
 const cron = require("node-cron");
 const { getExpiredAccounts, markAsKicked, updatePin, findSpreadsheetId } = require("./sheets");
-const { kickDevicesForProfiles, isPakeKode } = require("./kicker");
+const { kickDevicesForProfiles, isPakeKode, RateLimitError } = require("./kicker");
 const { changePinsForProfiles } = require("./pin-changer");
 const { notifyKickDone, notifyPinChanged, notifyError, notifySummary } = require("./notify");
 
@@ -123,9 +123,32 @@ async function processExpiredAccounts() {
         });
 
       } catch (err) {
-        console.error(`  Error: ${err.message}`);
-        totalFailed += group.length;
-        await notifyError(email, profiles, err.message);
+        if (err.name === "RateLimitError") {
+          const DELAY_MS = 45 * 60 * 1000; // 45 menit
+          console.warn(`  Rate limit! Tunda 45 menit untuk ${email}...`);
+          await notifyError(email, profiles, `⏳ Rate limit — tunda 45 menit lalu retry.`);
+          await sleep(DELAY_MS);
+          console.log(`  Retry ${email} setelah 45 menit...`);
+          try {
+            const retry = await kickDevicesForProfiles(email, password, profiles, isMeet, accountLabel);
+            if (!retry.skipped) {
+              for (const account of group) {
+                await markAsKicked(spreadsheetId, account.sheetName, account.rowIndex);
+              }
+              totalKicked += group.length;
+              console.log(`  Retry berhasil: ${retry.kicked} device dikick.`);
+              await notifyKickDone({ email, profiles, kicked: retry.kicked, sheetUpdated: true, elapsed: "retry", blockLabel: accountLabel, rows: group.map(a => ({ profile: a.profile, sheetName: a.sheetName, rowIndex: a.rowIndex, logoutText: a.logoutText })) });
+            }
+          } catch (retryErr) {
+            console.error(`  Retry gagal: ${retryErr.message}`);
+            totalFailed += group.length;
+            await notifyError(email, profiles, `Retry gagal setelah 45 menit: ${retryErr.message}`);
+          }
+        } else {
+          console.error(`  Error: ${err.message}`);
+          totalFailed += group.length;
+          await notifyError(email, profiles, err.message);
+        }
       }
 
       if (gi < kickGroups.length - 1) {
