@@ -162,6 +162,64 @@ async function _switchToPasswordLogin(page) {
   }
 }
 
+async function _switchToCodeLogin(page) {
+  const clicked = await page.evaluate(() => {
+    const all = document.querySelectorAll("button, span, a, div");
+    for (const el of all) {
+      const t = el.textContent.trim().toLowerCase();
+      if (t === "get help" || t === "get help ^") { el.click(); return true; }
+    }
+    const byUia = document.querySelector(
+      '[data-uia="help-menu-toggle"], [data-uia="help-menu-toggle-expanded"]'
+    );
+    if (byUia) { byUia.click(); return true; }
+    return false;
+  });
+
+  if (!clicked) { console.log('  [login] "Get Help" tidak ditemukan (switch to code).'); return false; }
+  console.log('  [login] "Get Help" diklik, cari opsi kode...');
+
+  try {
+    await page.waitForFunction(() => {
+      return Array.from(document.querySelectorAll("a, button, span")).some(el => {
+        const t = el.textContent.trim().toLowerCase();
+        return t.includes("email me a sign-in code") ||
+               t.includes("text me a sign-in code") ||
+               t.includes("sign in with a code") ||
+               t.includes("kirim kode") ||
+               t.includes("gunakan kode");
+      });
+    }, { timeout: 5000 });
+  } catch {
+    console.log('  [login] Opsi kode tidak tersedia.');
+    return false;
+  }
+
+  await page.evaluate(() => {
+    for (const el of document.querySelectorAll("a, button, span")) {
+      const t = el.textContent.trim().toLowerCase();
+      if (t.includes("email me a sign-in code") ||
+          t.includes("text me a sign-in code") ||
+          t.includes("sign in with a code") ||
+          t.includes("kirim kode") ||
+          t.includes("gunakan kode")) {
+        el.click(); return;
+      }
+    }
+  });
+  await sleep(800);
+
+  try {
+    await page.waitForFunction(() => {
+      const inputs = document.querySelectorAll('input[maxlength="1"], input[inputmode="numeric"]');
+      return inputs.length >= 3;
+    }, { timeout: 10000 });
+    console.log('  [login] Beralih ke halaman kode berhasil.');
+    return true;
+  } catch {
+    return false;
+  }
+}
 // -------------------------------------------------------
 // loginNetflix
 // -------------------------------------------------------
@@ -284,7 +342,36 @@ async function loginNetflix(browser, email, password, forcePakeKode = false, acc
     !!document.querySelector('input[name="password"], input[type="password"]')
   );
 
-  console.log(`  [login] DEBUG STATE — isOtpPage=${isOtpPage}, isPassPage=${isPassPage}, effectivePakeKode=${effectivePakeKode}, usedOtp=${usedOtp}`);
+    console.log(`  [login] DEBUG STATE — isOtpPage=${isOtpPage}, isPassPage=${isPassPage}, effectivePakeKode=${effectivePakeKode}, usedOtp=${usedOtp}`);
+
+  if (effectivePakeKode && isPassPage && !isOtpPage && !usedOtp) {
+    console.log("  [login] Halaman password muncul tapi akun ini harus pakai kode, coba beralih...");
+    const switchedToCode = await _switchToCodeLogin(page);
+    if (switchedToCode) {
+      usedOtp = true;
+      console.log("  [login] Tunggu 10 detik agar email Netflix terkirim...");
+      await sleep(10_000);
+
+      let code4;
+      if (accountLabel === "MAHESH") {
+        code4 = await getCodeFromUser(email, "4digit", "MAHESH");
+      } else {
+        try {
+          code4 = await fetchNetflixCode(email, "signin", { retries: 3, retryDelay: 5000 });
+        } catch (fetchErr) {
+          console.warn(`  [login] Auto-fetch gagal: ${fetchErr.message}`);
+          code4 = await getCodeFromUser(email, "4digit", accountLabel);
+        }
+      }
+      console.log(`  [login] Mengisi kode 4 digit: ${code4}`);
+      await fillOtpBoxes(page, code4);
+      await submitOtp(page);
+      await page.waitForNavigation({ waitUntil: "networkidle2", timeout: TIMEOUT_NAV }).catch(() => {});
+      await sleep(1500);
+    } else {
+      console.log("  [login] Gagal beralih ke halaman kode.");
+    }
+  }
 
   if (!isOtpPage && !isPassPage && !usedOtp) {
     const bodySnippet = await page.evaluate(() => document.body.innerText.slice(0, 1000));
