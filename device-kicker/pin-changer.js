@@ -151,15 +151,10 @@ async function loginNetflix(browser, email, password, accountType) {
     || bodyText.toLowerCase().includes("code we sent")
     || bodyText.toLowerCase().includes("enter the code");
 
-  // isPassPage: cek apakah halaman menampilkan HANYA password (bukan form gabungan email+password)
-  // Ciri: ada input password DAN tidak ada input email yang kosong
+// isPassPage: cek apakah halaman punya input password (baik combined form maupun password-only)
   const isPassPage = await page.evaluate(() => {
     const pwInput = document.querySelector('input[type="password"], input[name="password"]');
-    if (!pwInput) return false;
-    // Kalau masih di halaman gabungan (email + password + continue), anggap belum di halaman password
-    const emailInput = document.querySelector('input[name="userLoginId"], input[type="email"]');
-    if (emailInput && (!emailInput.value || emailInput.value.trim() === "")) return false;
-    return true;
+    return !!pwInput;
   });
 
   // Screenshot debug
@@ -195,6 +190,24 @@ async function loginNetflix(browser, email, password, accountType) {
   } else {
     if (!isOtpPage && isPassPage) {
       console.log("  [login] Isi password (MAHESH)...");
+
+      // Cek apakah email field ke-reset kosong (combined form / reload)
+      const emailNowValue = await page.locator('input[name="userLoginId"], input[type="email"]')
+        .first().inputValue().catch(() => "");
+      if (!emailNowValue) {
+        console.log("  [login] Field email kosong, isi ulang (combined form)...");
+        await page.evaluate((val) => {
+          const input = document.querySelector('input[name="userLoginId"], input[type="email"]');
+          if (!input) return;
+          input.focus();
+          const setter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value').set;
+          setter.call(input, val);
+          input.dispatchEvent(new Event('input', { bubbles: true, cancelable: true }));
+          input.dispatchEvent(new Event('change', { bubbles: true }));
+        }, email);
+        await sleep(300);
+      }
+
       await page.locator('input[type="password"]').fill(password);
       await sleep(300);
       await page.locator('button[type="submit"]').first().click();
