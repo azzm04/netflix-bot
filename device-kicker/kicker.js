@@ -156,8 +156,15 @@ async function loginNetflix(browser, email, password, forcePakeKode = false, acc
   console.log(`  [login] Isi email: ${email}`);
   const emailInput = page.locator('input[name="userLoginId"], input[type="email"], input[autocomplete="email"]').first();
   await emailInput.waitFor({ timeout: TIMEOUT_NAV });
-  await emailInput.fill(email);
-  await sleep(800 + Math.random() * 800); // jeda setelah ketik email
+  await emailInput.click();
+  await sleep(300);
+  // Gunakan type (simulasi keyboard) bukan fill, agar React state ter-update
+  await emailInput.pressSequentially(email, { delay: 80 });
+  await sleep(500 + Math.random() * 500);
+
+  // Verifikasi email sudah terisi
+  const emailValue = await emailInput.inputValue().catch(() => "");
+  console.log(`  [login] Email value: ${emailValue.substring(0, 15)}...`);
 
   // Klik Continue
   const continueBtn = page.locator('button[type="submit"], button[data-uia="login-continue-btn"]').first();
