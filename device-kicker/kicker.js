@@ -208,10 +208,17 @@ async function loginNetflix(browser, email, password, forcePakeKode = false, acc
   if (contBtn) {
     const t = await contBtn.evaluate(b => b.textContent.trim().toLowerCase());
     if (t.includes("continue") || t.includes("lanjut")) {
+      console.log(`  [login] Klik Continue...`);
       await contBtn.click();
       await page.waitForNavigation({ waitUntil: "networkidle2", timeout: TIMEOUT_NAV }).catch(() => {});
       await sleep(1500);
     }
+  } else {
+    // Fallback: tekan Enter
+    console.log(`  [login] Tidak ada tombol Continue, tekan Enter...`);
+    await page.keyboard.press("Enter");
+    await page.waitForNavigation({ waitUntil: "networkidle2", timeout: TIMEOUT_NAV }).catch(() => {});
+    await sleep(1500);
   }
 
   console.log(`  [login] URL setelah email: ${page.url()}`);
@@ -659,7 +666,17 @@ async function kickDevicesForProfiles(email, password, profileNames, isMeet = fa
 
   const browser = await puppeteer.launch({
     headless: HEADLESS,
-    args: ["--no-sandbox", "--disable-setuid-sandbox", "--disable-blink-features=AutomationControlled", "--disable-infobars"],
+    executablePath: process.env.CHROME_PATH || undefined,
+    args: [
+      "--no-sandbox",
+      "--disable-setuid-sandbox",
+      "--disable-blink-features=AutomationControlled",
+      "--disable-infobars",
+      "--disable-dev-shm-usage",
+      "--disable-gpu",
+      "--window-size=1280,900",
+      "--disable-features=IsolateOrigins,site-per-process",
+    ],
     defaultViewport: { width: 1280, height: 900 },
   });
 

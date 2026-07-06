@@ -274,7 +274,16 @@ async function loginNetflix(browser, email, password, accountType) {
 async function changePinsForProfiles(email, password, accountType, targetProfiles) {
   const browser = await puppeteer.launch({
     headless: HEADLESS,
-    args: ["--no-sandbox", "--disable-setuid-sandbox", "--disable-blink-features=AutomationControlled"],
+    executablePath: process.env.CHROME_PATH || undefined,
+    args: [
+      "--no-sandbox",
+      "--disable-setuid-sandbox",
+      "--disable-blink-features=AutomationControlled",
+      "--disable-infobars",
+      "--disable-dev-shm-usage",
+      "--disable-gpu",
+      "--window-size=1280,900",
+    ],
     defaultViewport: { width: 1280, height: 900 },
   });
 
