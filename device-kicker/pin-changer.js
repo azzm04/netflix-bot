@@ -129,6 +129,14 @@ async function loginNetflix(browser, email, password, accountType) {
     || bodyText.toLowerCase().includes("code we sent");
   const isPassPage = await page.locator('input[type="password"]').isVisible().catch(() => false);
 
+  // Screenshot debug
+  const fs = require("fs");
+  fs.mkdirSync("/tmp/nfdebug", { recursive: true });
+  await page.screenshot({ path: `/tmp/nfdebug/pin_after_email_${Date.now()}.png`, fullPage: true }).catch(() => {});
+  const bodySnippet = bodyText.slice(0, 300).replace(/\n/g, " | ");
+  console.log(`  [login] isOtpPage=${isOtpPage}, isPassPage=${isPassPage}`);
+  console.log(`  [login] Body: ${bodySnippet}`);
+
   // ── ROSE: password ──────────────────────────────────────
   if (accountType === "rose") {
     if (isOtpPage) {
@@ -158,6 +166,11 @@ async function loginNetflix(browser, email, password, accountType) {
       await sleep(300);
       await page.locator('button[type="submit"]').first().click();
       await page.waitForURL(url => !url.includes("/login"), { timeout: TIMEOUT_NAV }).catch(async () => {
+        const urlNow = page.url();
+        const bodyNow = await page.locator("body").innerText().catch(() => "");
+        console.log(`  [login] MAHESH timeout. URL: ${urlNow}`);
+        console.log(`  [login] Body: ${bodyNow.slice(0, 300).replace(/\n/g, " | ")}`);
+        await page.screenshot({ path: `/tmp/nfdebug/pin_mahesh_timeout_${Date.now()}.png`, fullPage: true }).catch(() => {});
         await sleep(2000);
       });
     } else if (isOtpPage) {
