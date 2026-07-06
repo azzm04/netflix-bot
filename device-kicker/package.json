@@ -11,6 +11,7 @@
     "dotenv": "16.4.5",
     "googleapis": "144.0.0",
     "node-cron": "3.0.3",
+    "playwright": "^1.45.0",
     "puppeteer": "^24.15.0",
     "puppeteer-extra": "^3.3.6",
     "puppeteer-extra-plugin-stealth": "^2.11.2"
