@@ -167,7 +167,9 @@ async function loginNetflix(browser, email, password, forcePakeKode = false, acc
   const page = await browser.newPage();
   await page.evaluateOnNewDocument(() => {
     Object.defineProperty(navigator, "webdriver", { get: () => undefined });
-    window.chrome = { runtime: {} };
+    window.chrome = { runtime: {}, loadTimes: () => {}, csi: () => {}, app: {} };
+    Object.defineProperty(navigator, "plugins", { get: () => [1, 2, 3] });
+    Object.defineProperty(navigator, "languages", { get: () => ["id-ID", "id", "en-US", "en"] });
   });
   await page.setUserAgent(
     "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 " +
@@ -665,7 +667,7 @@ async function kickDevicesForProfiles(email, password, profileNames, isMeet = fa
   }
 
   const browser = await puppeteer.launch({
-    headless: HEADLESS,
+    headless: HEADLESS ? "new" : false,
     executablePath: process.env.CHROME_PATH || undefined,
     args: [
       "--no-sandbox",
@@ -676,8 +678,10 @@ async function kickDevicesForProfiles(email, password, profileNames, isMeet = fa
       "--disable-gpu",
       "--window-size=1280,900",
       "--disable-features=IsolateOrigins,site-per-process",
+      "--lang=id-ID",
     ],
     defaultViewport: { width: 1280, height: 900 },
+    ignoreHTTPSErrors: true,
   });
 
   let totalKicked = 0;
