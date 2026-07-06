@@ -308,15 +308,26 @@ async function loginNetflix(browser, email, password, forcePakeKode = false, acc
   }
 
   // Deteksi rate limit "Something went wrong"
-  const isRateLimited = await page.evaluate(() => {
-    const body = document.body.innerText.toLowerCase();
-    return body.includes("something went wrong") ||
-           body.includes("please try again in a few minutes") ||
-           body.includes("too many requests");
-  });
-  if (isRateLimited) {
-    console.log(`  [login] Rate limit terdeteksi untuk ${email}.`);
-    throw new RateLimitError(`Netflix rate limit untuk ${email}`);
+  // Hanya trigger jika: URL masih di /login DAN halaman tidak menampilkan OTP/password
+  const urlAfterContinue = page.url();
+  const isStillOnLogin = urlAfterContinue.includes("/login");
+  if (isStillOnLogin) {
+    const isRateLimited = await page.evaluate(() => {
+      const body = document.body.innerText.toLowerCase();
+      // Rate limit: error muncul DAN tidak ada form OTP (kotak input) dan tidak ada input password
+      const hasError = body.includes("something went wrong") ||
+                       body.includes("please try again in a few minutes") ||
+                       body.includes("too many requests");
+      const hasOtp = document.querySelectorAll('input[maxlength="1"], input[inputmode="numeric"]').length >= 3;
+      const hasPassword = !!document.querySelector('input[type="password"]');
+      const hasOtpPage = body.includes("code we sent") || body.includes("enter the code");
+      // Rate limit hanya jika ada error DAN tidak ada OTP/password yang valid
+      return hasError && !hasOtp && !hasPassword && !hasOtpPage;
+    });
+    if (isRateLimited) {
+      console.log(`  [login] Rate limit terdeteksi untuk ${email}.`);
+      throw new RateLimitError(`Netflix rate limit untuk ${email}`);
+    }
   }
 
   console.log(`  [login] URL setelah email: ${page.url()}`);
