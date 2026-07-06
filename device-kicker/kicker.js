@@ -6,16 +6,6 @@ const { fetchNetflixCode } = require("./nfpro");
 const { requestCodeFromTelegram } = require("./tg-bridge");
 const fs = require("fs");
 
-const HEADLESS    = process.env.HEADLESS !== "false";
-const TIMEOUT_NAV = 45_000;
-const CODE_INPUT_MODE = process.env.CODE_INPUT_MODE ?? "terminal";
-
-const URL_CLEARCOOKIES = "https://www.netflix.com/clearcookies";
-const URL_DEVICES      = "https://www.netflix.com/manageaccountaccess";
-const { chromium } = require('playwright-extra');
-const stealth = require('puppeteer-extra-plugin-stealth')();
-chromium.use(stealth);
-
 // ── Custom Errors ─────────────────────────────────────────
 class RateLimitError extends Error {
   constructor(msg) { super(msg); this.name = "RateLimitError"; }
@@ -242,8 +232,13 @@ async function loginNetflix(browser, email, password, forcePakeKode = false, acc
 
     // Tunggu navigasi keluar dari /login
     await page.waitForURL(url => !url.includes("/login"), { timeout: TIMEOUT_NAV }).catch(async () => {
-      console.log(`  [login] Timeout setelah submit password, URL: ${page.url()}`);
-      await debugShot(page, "after_submit_timeout");
+      const urlNow = page.url();
+      console.log(`  [login] Timeout setelah submit password, URL: ${urlNow}`);
+      // Screenshot untuk debug apa yang terjadi
+      await debugShot(page, "submit_timeout");
+      // Dump teks halaman untuk lihat error
+      const bodySnippet = await page.locator("body").innerText().catch(() => "").then(t => t.slice(0, 500));
+      console.log(`  [login] Halaman setelah submit:\n${bodySnippet}`);
     });
 
     await debugShot(page, "after_submit");
