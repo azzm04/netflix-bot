@@ -280,15 +280,19 @@ async function loginNetflix(browser, email, password, forcePakeKode = false, acc
     }
   }
 
-  const isPassPage = await page.evaluate(() =>
+const isPassPage = await page.evaluate(() =>
     !!document.querySelector('input[name="password"], input[type="password"]')
   );
 
   if (!isOtpPage && !isPassPage && !usedOtp) {
-  const bodySnippet = await page.evaluate(() => document.body.innerText.slice(0, 800));
-  console.log(`  [login] DEBUG — halaman tak dikenali. Snippet:\n${bodySnippet}`);
-  await page.screenshot({ path: `/tmp/debug_${Date.now()}.png`, fullPage: true }).catch(() => {});
-}
+    const bodySnippet = await page.evaluate(() => document.body.innerText.slice(0, 1000));
+    console.log(`  [login] DEBUG — halaman tak dikenali. Snippet:\n${bodySnippet}`);
+    const fs = require("fs");
+    fs.mkdirSync("/tmp/nfdebug", { recursive: true });
+    const shotPath = `/tmp/nfdebug/debug_${Date.now()}.png`;
+    await page.screenshot({ path: shotPath, fullPage: true }).catch(() => {});
+    console.log(`  [login] DEBUG — screenshot disimpan: ${shotPath}`);
+  }
 
   if (isPassPage && !effectivePakeKode && !usedOtp) {
     console.log("  [login] Mengisi password...");
