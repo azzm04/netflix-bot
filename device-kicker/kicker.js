@@ -280,9 +280,11 @@ async function loginNetflix(browser, email, password, forcePakeKode = false, acc
     }
   }
 
-const isPassPage = await page.evaluate(() =>
+  const isPassPage = await page.evaluate(() =>
     !!document.querySelector('input[name="password"], input[type="password"]')
   );
+
+  console.log(`  [login] DEBUG STATE — isOtpPage=${isOtpPage}, isPassPage=${isPassPage}, effectivePakeKode=${effectivePakeKode}, usedOtp=${usedOtp}`);
 
   if (!isOtpPage && !isPassPage && !usedOtp) {
     const bodySnippet = await page.evaluate(() => document.body.innerText.slice(0, 1000));
