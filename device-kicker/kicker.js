@@ -12,6 +12,9 @@ const CODE_INPUT_MODE = process.env.CODE_INPUT_MODE ?? "terminal";
 
 const URL_CLEARCOOKIES = "https://www.netflix.com/clearcookies";
 const URL_DEVICES      = "https://www.netflix.com/manageaccountaccess";
+const { chromium } = require('playwright-extra');
+const stealth = require('puppeteer-extra-plugin-stealth')();
+chromium.use(stealth);
 
 // ── Custom Errors ─────────────────────────────────────────
 class RateLimitError extends Error {
@@ -70,20 +73,29 @@ async function launchBrowser() {
 }
 
 async function newStealthPage(browser) {
+  const proxyConfig = process.env.PROXY_SERVER
+    ? {
+        server: process.env.PROXY_SERVER,
+        username: process.env.PROXY_USERNAME,
+        password: process.env.PROXY_PASSWORD,
+      }
+    : undefined;
+
   const ctx = await browser.newContext({
     viewport: { width: 1280, height: 900 },
-    userAgent: "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36",
     locale: "id-ID",
     extraHTTPHeaders: { "Accept-Language": "id-ID,id;q=0.9,en-US;q=0.8" },
+    proxy: proxyConfig,
+    // userAgent Dihapus: Biarkan Playwright + Stealth Plugin yang mengatur otomatis
   });
+
   const page = await ctx.newPage();
 
-  // Anti-deteksi
-  await page.addInitScript(() => {
-    Object.defineProperty(navigator, "webdriver", { get: () => undefined });
-    window.chrome = { runtime: {}, loadTimes: () => {}, csi: () => {}, app: {} };
-    Object.defineProperty(navigator, "plugins", { get: () => [1, 2, 3] });
-  });
+  if (proxyConfig) {
+    console.log(`  [browser] Proxy aktif: ${proxyConfig.server}`);
+  }
+
+  // Anti-deteksi manual (addInitScript) dihapus karena sudah ditangani chromium.use(stealth)
 
   return page;
 }
