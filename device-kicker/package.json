@@ -1,0 +1,16 @@
+{
+  "name": "netflix-device-kicker",
+  "version": "1.0.0",
+  "description": "Auto-kick expired Netflix profile devices via Puppeteer",
+  "main": "index.js",
+  "scripts": {
+    "start": "node index.js",
+    "kick-now": "node index.js --run-now"
+  },
+  "dependencies": {
+    "dotenv": "16.4.5",
+    "googleapis": "144.0.0",
+    "node-cron": "3.0.3",
+    "puppeteer": "^24.15.0"
+  }
+}
