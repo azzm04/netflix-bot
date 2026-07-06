@@ -392,31 +392,43 @@ async function loginNetflix(browser, email, password, forcePakeKode = false, acc
     console.log(`  [login] DEBUG STATE — isOtpPage=${isOtpPage}, isPassPage=${isPassPage}, effectivePakeKode=${effectivePakeKode}, usedOtp=${usedOtp}`);
 
   if (effectivePakeKode && isPassPage && !isOtpPage && !usedOtp) {
-    console.log("  [login] Halaman password muncul tapi akun ini harus pakai kode, coba beralih...");
-    const switchedToCode = await _switchToCodeLogin(page);
-    if (switchedToCode) {
-      usedOtp = true;
-      console.log("  [login] Tunggu 10 detik agar email Netflix terkirim...");
-      await sleep(10_000);
-
-      let code4;
-      if (accountLabel === "MAHESH") {
-        code4 = await getCodeFromUser(email, "4digit", "MAHESH");
-      } else {
-        try {
-          code4 = await fetchNetflixCode(email, "signin", { retries: 3, retryDelay: 5000 });
-        } catch (fetchErr) {
-          console.warn(`  [login] Auto-fetch gagal: ${fetchErr.message}`);
-          code4 = await getCodeFromUser(email, "4digit", accountLabel);
-        }
-      }
-      console.log(`  [login] Mengisi kode 4 digit: ${code4}`);
-      await fillOtpBoxes(page, code4);
-      await submitOtp(page);
-      await page.waitForNavigation({ waitUntil: "networkidle2", timeout: TIMEOUT_NAV }).catch(() => {});
-      await sleep(1500);
+    // Jika MEET tapi Netflix langsung tampilkan halaman password (bukan OTP),
+    // ada dua kemungkinan:
+    // 1. Akun punya password → gunakan password langsung (lebih reliable)
+    // 2. Akun PAKE KODE tanpa password → coba beralih ke kode
+    if (password && !isPakeKode(password)) {
+      // Punya password → pakai saja, skip paksa kode
+      console.log("  [login] MEET: Netflix tampilkan password page, gunakan password...");
+      // Lanjut ke blok isPassPage di bawah
     } else {
-      console.log("  [login] Gagal beralih ke halaman kode.");
+      // Tidak ada password → coba beralih ke kode
+      console.log("  [login] Halaman password muncul tapi akun ini harus pakai kode, coba beralih...");
+      const switchedToCode = await _switchToCodeLogin(page);
+      if (switchedToCode) {
+        usedOtp = true;
+        console.log("  [login] Tunggu 10 detik agar email Netflix terkirim...");
+        await sleep(10_000);
+
+        let code4;
+        if (accountLabel === "MAHESH") {
+          code4 = await getCodeFromUser(email, "4digit", "MAHESH");
+        } else {
+          try {
+            code4 = await fetchNetflixCode(email, "signin", { retries: 3, retryDelay: 5000 });
+          } catch (fetchErr) {
+            console.warn(`  [login] Auto-fetch gagal: ${fetchErr.message}`);
+            code4 = await getCodeFromUser(email, "4digit", accountLabel);
+          }
+        }
+        console.log(`  [login] Mengisi kode 4 digit: ${code4}`);
+        await fillOtpBoxes(page, code4);
+        await submitOtp(page);
+        await page.waitForNavigation({ waitUntil: "networkidle2", timeout: TIMEOUT_NAV }).catch(() => {});
+        await sleep(1500);
+      } else {
+        console.log("  [login] Gagal beralih ke kode, fallback ke password jika ada...");
+        // Tidak ada password dan tidak bisa beralih ke kode → error akan muncul di bawah
+      }
     }
   }
 
@@ -430,7 +442,13 @@ async function loginNetflix(browser, email, password, forcePakeKode = false, acc
     console.log(`  [login] DEBUG — screenshot disimpan: ${shotPath}`);
   }
 
-  if (isPassPage && !effectivePakeKode && !usedOtp) {
+  // Isi password jika:
+  // 1. Halaman password muncul, DAN
+  // 2. Akun punya password (bukan PAKE KODE), DAN
+  // 3. Belum pakai OTP
+  // Untuk MEET: jika Netflix tampilkan halaman password dan akun punya password → pakai password
+  const shouldUsePassword = isPassPage && !usedOtp && password && !isPakeKode(password);
+  if (shouldUsePassword) {
     console.log("  [login] Mengisi password...");
     const pw = await page.$('input[name="password"], input[type="password"]');
     await pw.click({ clickCount: 3 });
