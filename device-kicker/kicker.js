@@ -148,11 +148,20 @@ async function loginNetflix(browser, email, password, forcePakeKode = false, acc
   const emailInput = page.locator('input[name="userLoginId"], input[type="email"], input[autocomplete="email"]').first();
   await emailInput.waitFor({ timeout: TIMEOUT_NAV });
   await emailInput.fill(email);
+  await sleep(800 + Math.random() * 800); // jeda setelah ketik email
 
   // Klik Continue
   const continueBtn = page.locator('button[type="submit"], button[data-uia="login-continue-btn"]').first();
   if (await continueBtn.isVisible({ timeout: 3000 }).catch(() => false)) {
     console.log("  [login] Klik Continue...");
+    // Gerak mouse ke tombol dulu
+    const box = await continueBtn.boundingBox().catch(() => null);
+    if (box) {
+      await page.mouse.move(box.x + box.width / 2 - 10, box.y - 15);
+      await sleep(200 + Math.random() * 300);
+      await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
+      await sleep(100 + Math.random() * 200);
+    }
     await continueBtn.click();
   } else {
     await page.keyboard.press("Enter");
@@ -272,16 +281,43 @@ async function _handleOtpLogin(page, email, accountLabel) {
 }
 
 async function _switchToPasswordPage(page) {
-  // Klik Get Help
+  // Jeda manusiawi 2-4 detik sebelum klik
+  const delay = 2000 + Math.random() * 2000;
+  console.log(`  [login] Jeda ${Math.round(delay)}ms sebelum klik Get Help...`);
+  await sleep(delay);
+
+  // Cek error sebelum klik
+  const errorBefore = await page.locator(':text("Something went wrong")').isVisible({ timeout: 1000 }).catch(() => false);
+  if (errorBefore) {
+    console.log("  [login] Error terdeteksi sebelum klik — reCAPTCHA block.");
+    return false;
+  }
+
   const getHelpBtn = page.locator('button:has-text("Get Help"), button[data-uia*="help"]').first();
-  if (await getHelpBtn.isVisible({ timeout: 3000 }).catch(() => false)) {
-    await getHelpBtn.click();
-    await sleep(600);
+  if (!await getHelpBtn.isVisible({ timeout: 3000 }).catch(() => false)) return false;
+
+  // Simulasi gerakan mouse manusiawi
+  const box = await getHelpBtn.boundingBox().catch(() => null);
+  if (box) {
+    await page.mouse.move(box.x + box.width / 2 - 30, box.y - 20);
+    await sleep(300 + Math.random() * 300);
+    await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
+    await sleep(150 + Math.random() * 200);
+  }
+  await getHelpBtn.click();
+  await sleep(800 + Math.random() * 600);
+
+  // Cek error setelah klik
+  const errorAfter = await page.locator(':text("Something went wrong")').isVisible({ timeout: 2000 }).catch(() => false);
+  if (errorAfter) {
+    console.log("  [login] Error muncul setelah klik Get Help — reCAPTCHA block.");
+    return false;
   }
 
   // Klik Use password instead
   const usePwBtn = page.locator('[data-uia="usePasswordInsteadHelpMenuItem"], a:has-text("Use password instead")').first();
-  if (await usePwBtn.isVisible({ timeout: 3000 }).catch(() => false)) {
+  if (await usePwBtn.isVisible({ timeout: 4000 }).catch(() => false)) {
+    await sleep(500 + Math.random() * 400);
     await usePwBtn.click();
     await sleep(500);
     return true;
