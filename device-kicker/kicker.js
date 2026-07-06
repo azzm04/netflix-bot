@@ -179,6 +179,14 @@ async function _switchToCodeLogin(page) {
   if (!clicked) { console.log('  [login] "Get Help" tidak ditemukan (switch to code).'); return false; }
   console.log('  [login] "Get Help" diklik, cari opsi kode...');
 
+    await sleep(500);
+  const menuTexts = await page.evaluate(() => {
+    return Array.from(document.querySelectorAll("a, button, span, div"))
+      .map(el => el.textContent.trim())
+      .filter(t => t.length > 0 && t.length < 80);
+  });
+  console.log(`  [login] DEBUG MENU TEXTS:\n${[...new Set(menuTexts)].join(" | ")}`);
+  
   try {
     await page.waitForFunction(() => {
       return Array.from(document.querySelectorAll("a, button, span")).some(el => {
