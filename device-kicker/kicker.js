@@ -250,9 +250,15 @@ async function loginNetflix(browser, email, password, forcePakeKode = false, acc
         console.log("  [login] MAHESH — minta kode via input...");
         code4 = await getCodeFromUser(email, "4digit", "MAHESH");
       } else {
-        // MEET / akun lain → auto-fetch dari nfpro.store
+        // MEET / akun lain → coba auto-fetch dulu, fallback ke input jika gagal
         console.log("  [login] Auto-fetch 4-digit kode dari nfpro.store...");
-        code4 = await fetchNetflixCode(email, "signin", { retries: 4, retryDelay: 5000 });
+        try {
+          code4 = await fetchNetflixCode(email, "signin", { retries: 3, retryDelay: 5000 });
+        } catch (fetchErr) {
+          console.warn(`  [login] Auto-fetch gagal: ${fetchErr.message}`);
+          console.log("  [login] Fallback: minta kode via input...");
+          code4 = await getCodeFromUser(email, "4digit", accountLabel);
+        }
       }
 
       console.log(`  [login] Mengisi kode 4 digit: ${code4}`);
@@ -412,8 +418,15 @@ async function handleDeviceVerification(page, email, accountLabel = "") {
     console.log("  [verify] MAHESH — minta 6-digit kode via input...");
     code6 = await getCodeFromUser(email, "6digit", "MAHESH");
   } else {
+    // Coba auto-fetch dulu, fallback ke input jika gagal
     console.log("  [verify] Auto-fetch 6-digit kode dari nfpro.store...");
-    code6 = await fetchNetflixCode(email, "signin6", { retries: 4, retryDelay: 5000 });
+    try {
+      code6 = await fetchNetflixCode(email, "signin6", { retries: 3, retryDelay: 5000 });
+    } catch (fetchErr) {
+      console.warn(`  [verify] Auto-fetch gagal: ${fetchErr.message}`);
+      console.log("  [verify] Fallback: minta kode via input...");
+      code6 = await getCodeFromUser(email, "6digit", accountLabel);
+    }
   }
   console.log(`  [verify] Mengisi kode 6 digit: ${code6}`);
   await fillOtpBoxes(page, code6);

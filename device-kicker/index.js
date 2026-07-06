@@ -5,6 +5,7 @@ const cron = require("node-cron");
 const { getExpiredAccounts, markAsKicked, updatePin, findSpreadsheetId } = require("./sheets");
 const { kickDevicesForProfiles, isPakeKode } = require("./kicker");
 const { changePinsForProfiles } = require("./pin-changer");
+const { notifyKickDone, notifyPinChanged, notifyError, notifySummary } = require("./notify");
 
 const CRON_SCHEDULE = process.env.CRON_SCHEDULE ?? "*/15 * * * *";
 const RUN_NOW = process.argv.includes("--run-now");
@@ -31,18 +32,17 @@ async function processExpiredAccounts() {
     return;
   }
 
-  // 2. Pisahkan: KICK (normal) vs PIN CHANGE (MAHESH/ROSE)
+  // 2. Pisahkan: KICK (normal/MEET) vs PIN CHANGE (MAHESH/ROSE)
   const toKick = [];
   const toPin  = [];
-
   for (const a of expiredList) {
-    if (a.isSkipped) toPin.push(a);   // MAHESH/ROSE → ganti PIN
-    else             toKick.push(a);  // normal      → kick device
+    if (a.isSkipped) toPin.push(a);
+    else             toKick.push(a);
   }
 
-  console.log(`\nTotal expired   : ${expiredList.length}`);
-  console.log(`Kick device     : ${toKick.length}`);
-  console.log(`Ganti PIN       : ${toPin.length} (MAHESH/ROSE)`);
+  console.log(`\nTotal expired : ${expiredList.length}`);
+  console.log(`Kick device   : ${toKick.length}`);
+  console.log(`Ganti PIN     : ${toPin.length} (MAHESH/ROSE)`);
 
   if (toKick.length === 0 && toPin.length === 0) {
     console.log("Tidak ada yang bisa diproses.\n");
@@ -64,8 +64,6 @@ async function processExpiredAccounts() {
 
   // ── SECTION A: KICK DEVICE ──────────────────────────────
   if (toKick.length > 0) {
-    // Group by email → login sekali per email
-    // Semua akun dalam satu group pasti punya isMeet yang sama
     const emailGroups = new Map();
     for (const a of toKick) {
       const key = a.email.toLowerCase();
@@ -75,25 +73,24 @@ async function processExpiredAccounts() {
     const kickGroups = [...emailGroups.values()];
 
     console.log(`\n== KICK DEVICE (${kickGroups.length} email, ${toKick.length} profil) ==`);
-    kickGroups.forEach((grp, i) => {
-      console.log(`  ${i + 1}. ${grp[0].email} -> [${grp.map(a => a.profile).join(", ")}]`);
-    });
 
     for (let gi = 0; gi < kickGroups.length; gi++) {
-      const group = kickGroups[gi];
-      const { email, password } = group[0];
-      const profiles = group.map(a => a.profile);
+      const group       = kickGroups[gi];
+      const email       = group[0].email;
+      const password    = group[0].password;
+      const isMeet      = group[0].isMeet ?? false;
+      const accountLabel = group[0].blockLabel ?? "";
+      const profiles    = group.map(a => a.profile);
 
       console.log(`\n${"─".repeat(60)}`);
       console.log(`[${gi + 1}/${kickGroups.length}] ${email}`);
-      console.log(`  Profil  : ${profiles.join(", ")}`);
-      console.log(`  Login   : ${isPakeKode(password) ? "PAKE KODE" : "Password"}`);
+      console.log(`  Profil : ${profiles.join(", ")}`);
+      console.log(`  Tipe   : ${isMeet ? "MEET (auto 4-digit)" : isPakeKode(password) ? "PAKE KODE" : "Password"}`);
       console.log("─".repeat(60));
 
+      const t0 = Date.now();
       try {
-        const isMeet = group[0].isMeet ?? false;
-      const accountLabel = group[0].blockLabel ?? "";
-      const result = await kickDevicesForProfiles(email, password, profiles, isMeet, accountLabel);
+        const result = await kickDevicesForProfiles(email, password, profiles, isMeet, accountLabel);
 
         if (result.skipped) {
           console.log(`  Skip: ${result.reason}`);
@@ -104,16 +101,35 @@ async function processExpiredAccounts() {
         for (const account of group) {
           await markAsKicked(spreadsheetId, account.sheetName, account.rowIndex);
         }
-        console.log(`  Berhasil: ${result.kicked} device dikick, sheet diupdate.`);
+
+        const elapsed = ((Date.now() - t0) / 1000).toFixed(1);
+        console.log(`  Berhasil: ${result.kicked} device dikick dalam ${elapsed}s`);
         totalKicked += group.length;
+
+        // Notifikasi Telegram
+        await notifyKickDone({
+          email,
+          profiles,
+          kicked: result.kicked,
+          sheetUpdated: true,
+          elapsed,
+          blockLabel: accountLabel,
+          rows: group.map(a => ({
+            profile: a.profile,
+            sheetName: a.sheetName,
+            rowIndex: a.rowIndex,
+            logoutText: a.logoutText,
+          })),
+        });
 
       } catch (err) {
         console.error(`  Error: ${err.message}`);
         totalFailed += group.length;
+        await notifyError(email, profiles, err.message);
       }
 
       if (gi < kickGroups.length - 1) {
-        console.log("\n  Jeda 4 detik...");
+        console.log("  Jeda 4 detik...");
         await sleep(4000);
       }
     }
@@ -121,7 +137,6 @@ async function processExpiredAccounts() {
 
   // ── SECTION B: GANTI PIN (MAHESH/ROSE) ─────────────────
   if (toPin.length > 0) {
-    // Group by email
     const pinGroups = new Map();
     for (const a of toPin) {
       const key = a.email.toLowerCase();
@@ -130,36 +145,29 @@ async function processExpiredAccounts() {
     }
     const pinEmailGroups = [...pinGroups.values()];
 
-    console.log(`\n== GANTI PIN MAHESH/ROSE (${pinEmailGroups.length} email, ${toPin.length} profil) ==`);
-    pinEmailGroups.forEach((grp, i) => {
-      console.log(`  ${i + 1}. ${grp[0].email} [${grp[0].blockLabel}] -> [${grp.map(a => a.profile).join(", ")}]`);
-    });
+    console.log(`\n== GANTI PIN (${pinEmailGroups.length} email, ${toPin.length} profil) ==`);
 
     for (let gi = 0; gi < pinEmailGroups.length; gi++) {
-      const group = pinEmailGroups[gi];
-      const { email, password, blockLabel } = group[0];
-      const profiles  = group.map(a => a.profile);
+      const group       = pinEmailGroups[gi];
+      const email       = group[0].email;
+      const password    = group[0].password;
+      const blockLabel  = group[0].blockLabel;
       const accountType = blockLabel === "ROSE" ? "rose" : "mahesh";
+      const profiles    = group.map(a => a.profile);
 
       console.log(`\n${"─".repeat(60)}`);
       console.log(`[${gi + 1}/${pinEmailGroups.length}] ${email} [${blockLabel}]`);
-      console.log(`  Profil  : ${profiles.join(", ")}`);
-      console.log(`  Tipe    : ${accountType.toUpperCase()}`);
+      console.log(`  Profil : ${profiles.join(", ")}`);
       console.log("─".repeat(60));
 
+      const t0 = Date.now();
       try {
         const pinChanges = await changePinsForProfiles(email, password, accountType, profiles);
+        const elapsed = ((Date.now() - t0) / 1000).toFixed(1);
 
-        if (pinChanges.size === 0) {
-          console.log("  Tidak ada PIN yang diganti.");
-          totalFailed += group.length;
-          continue;
-        }
-
-        // Update spreadsheet: PIN baru di kolom D + kosongkan E/F/G + hijau
+        // Update spreadsheet: PIN baru + kosongkan E/F/G + hijau
         for (const account of group) {
           const newPin = pinChanges.get(account.profile)
-            // coba partial match (nama profil bisa ada emoji)
             ?? [...pinChanges.entries()].find(([k]) =>
                 account.profile.toLowerCase().includes(k.toLowerCase()) ||
                 k.toLowerCase().includes(account.profile.toLowerCase())
@@ -169,20 +177,33 @@ async function processExpiredAccounts() {
             await updatePin(spreadsheetId, account.sheetName, account.rowIndex, newPin);
             await markAsKicked(spreadsheetId, account.sheetName, account.rowIndex);
             console.log(`  PIN "${account.profile}": ${newPin} — sheet diupdate.`);
-          } else {
-            console.log(`  PIN "${account.profile}": tidak ditemukan di hasil.`);
           }
         }
 
         totalPinChanged += group.length;
 
+        // Notifikasi Telegram
+        await notifyPinChanged({
+          email,
+          blockLabel,
+          pinChanges,
+          sheetUpdated: true,
+          elapsed,
+          rows: group.map(a => ({
+            profile: a.profile,
+            sheetName: a.sheetName,
+            rowIndex: a.rowIndex,
+          })),
+        });
+
       } catch (err) {
         console.error(`  Error: ${err.message}`);
         totalFailed += group.length;
+        await notifyError(email, profiles, err.message);
       }
 
       if (gi < pinEmailGroups.length - 1) {
-        console.log("\n  Jeda 4 detik...");
+        console.log("  Jeda 4 detik...");
         await sleep(4000);
       }
     }
@@ -191,11 +212,19 @@ async function processExpiredAccounts() {
   // ── Ringkasan ───────────────────────────────────────────
   const elapsed = ((Date.now() - startTime) / 1000).toFixed(1);
   console.log(`\n${"=".repeat(60)}`);
-  console.log(`SELESAI dalam ${elapsed} detik`);
-  console.log(`  Kick berhasil    : ${totalKicked}`);
-  console.log(`  PIN diganti      : ${totalPinChanged}`);
-  console.log(`  Gagal            : ${totalFailed}`);
+  console.log(`SELESAI dalam ${elapsed}s`);
+  console.log(`  Kick    : ${totalKicked}`);
+  console.log(`  PIN     : ${totalPinChanged}`);
+  console.log(`  Gagal   : ${totalFailed}`);
   console.log("=".repeat(60) + "\n");
+
+  // Notifikasi ringkasan
+  await notifySummary({
+    totalKick: totalKicked,
+    totalPin: totalPinChanged,
+    totalFailed,
+    elapsed,
+  });
 }
 
 // ─── Run ──────────────────────────────────────────────────
