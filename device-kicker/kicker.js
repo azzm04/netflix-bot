@@ -156,15 +156,38 @@ async function loginNetflix(browser, email, password, forcePakeKode = false, acc
   console.log(`  [login] Isi email: ${email}`);
   const emailInput = page.locator('input[name="userLoginId"], input[type="email"], input[autocomplete="email"]').first();
   await emailInput.waitFor({ timeout: TIMEOUT_NAV });
-  await emailInput.click();
-  await sleep(300);
-  // Gunakan type (simulasi keyboard) bukan fill, agar React state ter-update
-  await emailInput.pressSequentially(email, { delay: 80 });
-  await sleep(500 + Math.random() * 500);
 
-  // Verifikasi email sudah terisi
-  const emailValue = await emailInput.inputValue().catch(() => "");
-  console.log(`  [login] Email value: ${emailValue.substring(0, 15)}...`);
+  await emailInput.click({ clickCount: 3 });
+  await sleep(300);
+  await emailInput.fill("");
+  await sleep(200);
+
+  // Ketik manual karakter per karakter
+  for (const char of email) {
+    await emailInput.press(char);
+    await sleep(30 + Math.random() * 40);
+  }
+  await sleep(500);
+
+  let emailValue = await emailInput.inputValue().catch(() => "");
+  console.log(`  [login] Email value: "${emailValue.substring(0, 20)}"`);
+
+  // Fallback jika masih kosong
+  if (!emailValue || emailValue.trim() === "") {
+    await page.evaluate((emailStr) => {
+      const input = document.querySelector('input[name="userLoginId"], input[type="email"], input');
+      if (!input) return;
+      const setter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value').set;
+      setter.call(input, emailStr);
+      input.dispatchEvent(new Event('input', { bubbles: true }));
+      input.dispatchEvent(new Event('change', { bubbles: true }));
+    }, email);
+    await sleep(400);
+    emailValue = await emailInput.inputValue().catch(() => "");
+    console.log(`  [login] Email fallback: "${emailValue.substring(0, 20)}"`);
+  }
+
+  await sleep(700 + Math.random() * 500);
 
   // Klik Continue
   const continueBtn = page.locator('button[type="submit"], button[data-uia="login-continue-btn"]').first();

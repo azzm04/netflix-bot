@@ -89,14 +89,45 @@ async function loginNetflix(browser, email, password, accountType) {
     await page.goto("https://www.netflix.com/login", { waitUntil: "domcontentloaded", timeout: TIMEOUT_NAV });
   }
 
-  // Isi email dengan pressSequentially (agar React state update)
+  // Isi email — pastikan field benar-benar terisi sebelum klik Continue
   console.log(`  [login] Isi email: ${email}`);
   const emailInput = page.locator('input[name="userLoginId"], input[type="email"], input[autocomplete="email"]').first();
   await emailInput.waitFor({ timeout: TIMEOUT_NAV });
-  await emailInput.click();
+
+  // Klik field, lalu isi dengan beberapa cara untuk memastikan React state update
+  await emailInput.click({ clickCount: 3 });
   await sleep(300);
-  await emailInput.pressSequentially(email, { delay: 80 });
-  await sleep(600);
+  await emailInput.fill(""); // kosongkan dulu
+  await sleep(200);
+
+  // Ketik manual karakter per karakter
+  for (const char of email) {
+    await emailInput.press(char);
+    await sleep(30 + Math.random() * 40);
+  }
+  await sleep(500);
+
+  // Verifikasi email terisi
+  let emailVal = await emailInput.inputValue().catch(() => "");
+  console.log(`  [login] Email terisi: "${emailVal.substring(0, 20)}"`);
+
+  // Jika masih kosong, coba cara lain: evaluateHandle
+  if (!emailVal || emailVal.trim() === "") {
+    console.log("  [login] Email masih kosong, coba evaluateHandle...");
+    await page.evaluate((emailStr) => {
+      const input = document.querySelector('input[name="userLoginId"], input[type="email"], input');
+      if (!input) return;
+      const nativeInputValueSetter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value').set;
+      nativeInputValueSetter.call(input, emailStr);
+      input.dispatchEvent(new Event('input', { bubbles: true }));
+      input.dispatchEvent(new Event('change', { bubbles: true }));
+    }, email);
+    await sleep(400);
+    emailVal = await emailInput.inputValue().catch(() => "");
+    console.log(`  [login] Email setelah fallback: "${emailVal.substring(0, 20)}"`);
+  }
+
+  await sleep(800 + Math.random() * 500);
 
   // Klik Continue
   const contBtn = page.locator('button[type="submit"], button[data-uia="login-continue-btn"]').first();
@@ -104,14 +135,16 @@ async function loginNetflix(browser, email, password, accountType) {
     const box = await contBtn.boundingBox().catch(() => null);
     if (box) {
       await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
-      await sleep(200);
+      await sleep(300);
     }
+    console.log("  [login] Klik Continue...");
     await contBtn.click();
   } else {
     await page.keyboard.press("Enter");
   }
 
-  await sleep(2000);
+  // Tunggu halaman pindah ke OTP atau password
+  await sleep(3000);
   await page.waitForLoadState("domcontentloaded").catch(() => {});
 
   // Cek rate limit
@@ -125,9 +158,21 @@ async function loginNetflix(browser, email, password, accountType) {
 
   console.log(`  [login] URL: ${page.url()}`);
 
+  // Re-deteksi halaman SETELAH Continue diklik
   const isOtpPage = await page.locator('input[maxlength="1"]').count().then(n => n >= 3).catch(() => false)
-    || bodyText.toLowerCase().includes("code we sent");
-  const isPassPage = await page.locator('input[type="password"]').isVisible().catch(() => false);
+    || bodyText.toLowerCase().includes("code we sent")
+    || bodyText.toLowerCase().includes("enter the code");
+
+  // isPassPage: cek apakah halaman menampilkan HANYA password (bukan form gabungan email+password)
+  // Ciri: ada input password DAN tidak ada input email yang kosong
+  const isPassPage = await page.evaluate(() => {
+    const pwInput = document.querySelector('input[type="password"], input[name="password"]');
+    if (!pwInput) return false;
+    // Kalau masih di halaman gabungan (email + password + continue), anggap belum di halaman password
+    const emailInput = document.querySelector('input[name="userLoginId"], input[type="email"]');
+    if (emailInput && (!emailInput.value || emailInput.value.trim() === "")) return false;
+    return true;
+  });
 
   // Screenshot debug
   const fs = require("fs");
