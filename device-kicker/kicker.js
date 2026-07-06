@@ -6,6 +6,13 @@ const { fetchNetflixCode } = require("./nfpro");
 const { requestCodeFromTelegram } = require("./tg-bridge");
 const fs = require("fs");
 
+const HEADLESS        = process.env.HEADLESS !== "false";
+const TIMEOUT_NAV     = 45_000;
+const CODE_INPUT_MODE = process.env.CODE_INPUT_MODE ?? "terminal";
+
+const URL_CLEARCOOKIES = "https://www.netflix.com/clearcookies";
+const URL_DEVICES      = "https://www.netflix.com/manageaccountaccess";
+
 // ── Custom Errors ─────────────────────────────────────────
 class RateLimitError extends Error {
   constructor(msg) { super(msg); this.name = "RateLimitError"; }
