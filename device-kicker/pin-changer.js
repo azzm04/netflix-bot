@@ -220,12 +220,21 @@ const emailValue = await emailInput.inputValue().catch(() => "");
       await page.locator('input[type="password"]').fill(password);
       await sleep(300);
       await page.locator('button[type="submit"]').first().click();
-      await page.waitForURL(url => !url.includes("/login"), { timeout: TIMEOUT_NAV }).catch(async () => {
+   await page.waitForURL(url => !url.includes("/login"), { timeout: TIMEOUT_NAV }).catch(async () => {
         const urlNow = page.url();
         const bodyNow = await page.locator("body").innerText().catch(() => "");
         console.log(`  [login] MAHESH timeout. URL: ${urlNow}`);
-        console.log(`  [login] Body: ${bodyNow.slice(0, 300).replace(/\n/g, " | ")}`);
-        await page.screenshot({ path: `/tmp/nfdebug/pin_mahesh_timeout_${Date.now()}.png`, fullPage: true }).catch(() => {});
+        console.log(`  [login] Body FULL: ${bodyNow.replace(/\n/g, " | ")}`);
+
+        // Cek pesan error spesifik yang mungkin ke-cut sebelumnya
+        const errorText = await page.locator('[data-uia="login-error"], .ui-message-error, [role="alert"]')
+          .allInnerTexts().catch(() => []);
+        console.log(`  [login] Error elements: ${JSON.stringify(errorText)}`);
+
+        const timestamp = Date.now();
+        const screenshotPath = `/tmp/nfdebug/pin_mahesh_timeout_${timestamp}.png`;
+        await page.screenshot({ path: screenshotPath, fullPage: true }).catch(() => {});
+        console.log(`  [login] Screenshot: ${screenshotPath}`);
         await sleep(2000);
       });
     } else if (isOtpPage) {
