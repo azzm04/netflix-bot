@@ -5,6 +5,9 @@ const cron = require("node-cron");
 const { getExpiredAccounts, markAsKicked, updatePin, findSpreadsheetId } = require("./sheets");
 const { kickDevicesForProfiles, isPakeKode, RateLimitError } = require("./kicker");
 const { changePinsForProfiles } = require("./pin-changer");
+const { kickDevicesForProfilesCookie, CookieExpiredError } = require("./kicker-cookie");
+const { changePinsForProfilesCookie } = require("./pin-changer-cookie");
+const { getCookieForEmail } = require("./cookie-helper");
 const { notifyKickDone, notifyPinChanged, notifyError, notifySummary } = require("./notify");
 
 const CRON_SCHEDULE = process.env.CRON_SCHEDULE ?? "*/15 * * * *";
@@ -90,7 +93,17 @@ async function processExpiredAccounts() {
 
       const t0 = Date.now();
       try {
-        const result = await kickDevicesForProfiles(email, password, profiles, isMeet, accountLabel);
+        // ── Prioritas: pakai cookie jika tersedia, fallback ke login ──
+        const hasCookie = !!getCookieForEmail(email);
+        let result;
+
+        if (hasCookie) {
+          console.log(`  Mode   : 🍪 Cookie injection`);
+          result = await kickDevicesForProfilesCookie(email, profiles);
+        } else {
+          console.log(`  Mode   : 🔑 Login biasa (${isMeet ? "MEET" : isPakeKode(password) ? "PAKE KODE" : "Password"})`);
+          result = await kickDevicesForProfiles(email, password, profiles, isMeet, accountLabel);
+        }
 
         if (result.skipped) {
           console.log(`  Skip: ${result.reason}`);
@@ -123,7 +136,27 @@ async function processExpiredAccounts() {
         });
 
       } catch (err) {
-        if (err.name === "RateLimitError") {
+        if (err.name === "CookieExpiredError") {
+          // Cookie expired → fallback ke login biasa
+          console.warn(`  Cookie expired, fallback ke login biasa...`);
+          await notifyError(email, profiles, `⚠️ Cookie expired — fallback ke login biasa.`);
+          try {
+            const fallback = await kickDevicesForProfiles(email, password, profiles, isMeet, accountLabel);
+            if (!fallback.skipped) {
+              for (const account of group) {
+                await markAsKicked(spreadsheetId, account.sheetName, account.rowIndex);
+              }
+              const elapsed = ((Date.now() - t0) / 1000).toFixed(1);
+              totalKicked += group.length;
+              console.log(`  Fallback berhasil: ${fallback.kicked} device dikick.`);
+              await notifyKickDone({ email, profiles, kicked: fallback.kicked, sheetUpdated: true, elapsed, blockLabel: accountLabel, rows: group.map(a => ({ profile: a.profile, sheetName: a.sheetName, rowIndex: a.rowIndex, logoutText: a.logoutText })) });
+            }
+          } catch (fbErr) {
+            console.error(`  Fallback gagal: ${fbErr.message}`);
+            totalFailed += group.length;
+            await notifyError(email, profiles, `Fallback login gagal: ${fbErr.message}`);
+          }
+        } else if (err.name === "RateLimitError") {
           const DELAY_MS = 45 * 60 * 1000; // 45 menit
           console.warn(`  Rate limit! Tunda 45 menit untuk ${email}...`);
           await notifyError(email, profiles, `⏳ Rate limit — tunda 45 menit lalu retry.`);
@@ -185,7 +218,17 @@ async function processExpiredAccounts() {
 
       const t0 = Date.now();
       try {
-        const pinChanges = await changePinsForProfiles(email, password, accountType, profiles);
+        // ── Prioritas: pakai cookie jika tersedia, fallback ke login ──
+        const hasCookie = !!getCookieForEmail(email);
+        let pinChanges;
+
+        if (hasCookie) {
+          console.log(`  Mode   : 🍪 Cookie injection`);
+          pinChanges = await changePinsForProfilesCookie(email, password, profiles);
+        } else {
+          console.log(`  Mode   : 🔑 Login biasa`);
+          pinChanges = await changePinsForProfiles(email, password, accountType, profiles);
+        }
         const elapsed = ((Date.now() - t0) / 1000).toFixed(1);
 
         // Update spreadsheet: PIN baru + kosongkan E/F/G + hijau
@@ -220,9 +263,36 @@ async function processExpiredAccounts() {
         });
 
       } catch (err) {
-        console.error(`  Error: ${err.message}`);
-        totalFailed += group.length;
-        await notifyError(email, profiles, err.message);
+        if (err.name === "CookieExpiredError") {
+          // Cookie expired → fallback ke login biasa
+          console.warn(`  Cookie expired, fallback ke login biasa...`);
+          await notifyError(email, profiles, `⚠️ Cookie expired — fallback ke login biasa.`);
+          try {
+            const pinChanges = await changePinsForProfiles(email, password, accountType, profiles);
+            const elapsed = ((Date.now() - t0) / 1000).toFixed(1);
+            for (const account of group) {
+              const newPin = pinChanges.get(account.profile)
+                ?? [...pinChanges.entries()].find(([k]) =>
+                    account.profile.toLowerCase().includes(k.toLowerCase()) ||
+                    k.toLowerCase().includes(account.profile.toLowerCase())
+                  )?.[1];
+              if (newPin) {
+                await updatePin(spreadsheetId, account.sheetName, account.rowIndex, newPin);
+                await markAsKicked(spreadsheetId, account.sheetName, account.rowIndex);
+              }
+            }
+            totalPinChanged += group.length;
+            await notifyPinChanged({ email, blockLabel, pinChanges, sheetUpdated: true, elapsed, rows: group.map(a => ({ profile: a.profile, sheetName: a.sheetName, rowIndex: a.rowIndex })) });
+          } catch (fbErr) {
+            console.error(`  Fallback gagal: ${fbErr.message}`);
+            totalFailed += group.length;
+            await notifyError(email, profiles, `Fallback login gagal: ${fbErr.message}`);
+          }
+        } else {
+          console.error(`  Error: ${err.message}`);
+          totalFailed += group.length;
+          await notifyError(email, profiles, err.message);
+        }
       }
 
       if (gi < pinEmailGroups.length - 1) {
