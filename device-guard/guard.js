@@ -304,6 +304,59 @@ async function guardAccount(email, profiles) {
     // Evaluasi setiap profil yang perlu di-guard
     const processedCards = new Set();
 
+    // ── Step 1: Kick device "tidak ada aktivitas" ─────────
+    // Device tanpa profil aktif tidak berguna dan harus selalu dikick
+    const noActivityDevices = profileDevices.get("__noactivity__") ?? [];
+    for (const dev of noActivityDevices) {
+      if (dev.isCurrent) continue;
+      const card      = cards.nth(dev.cardIndex);
+      const keluarBtn = card.locator('button:has-text("Keluar"), button:has-text("Sign Out")').first();
+      if (await keluarBtn.isVisible({ timeout: 1000 }).catch(() => false)) {
+        await keluarBtn.click();
+        totalKicked++;
+        processedCards.add(dev.cardIndex);
+        const msg = `Dikick: "${dev.deviceName}" (tidak ada aktivitas)`;
+        details.push(msg);
+        console.log(`  [guard] ✓ ${msg}`);
+        await sleep(1500);
+      }
+    }
+    if (noActivityDevices.length > 0) {
+      console.log(`  [guard] ${noActivityDevices.length} device "tidak ada aktivitas" diproses.`);
+    }
+
+    // ── Step 2: Kick device yang profilnya tidak ada di spreadsheet ──
+    // Profil yang diizinkan (dari spreadsheet)
+    const allowedProfileKeys = new Set(profiles.map(p => p.name.toLowerCase()));
+
+    for (const [profKey, devs] of profileDevices.entries()) {
+      if (profKey === "__noactivity__") continue; // sudah dihandle di step 1
+
+      // Cek apakah profil ini ada di daftar spreadsheet
+      const isKnownProfile = [...allowedProfileKeys].some(
+        k => profKey.includes(k) || k.includes(profKey)
+      );
+
+      if (!isKnownProfile) {
+        console.log(`  [guard] Profil "${devs[0]?.profileName}" tidak ada di spreadsheet → kick semua devicenya`);
+        for (const dev of devs) {
+          if (dev.isCurrent || processedCards.has(dev.cardIndex)) continue;
+          const card      = cards.nth(dev.cardIndex);
+          const keluarBtn = card.locator('button:has-text("Keluar"), button:has-text("Sign Out")').first();
+          if (await keluarBtn.isVisible({ timeout: 1000 }).catch(() => false)) {
+            await keluarBtn.click();
+            totalKicked++;
+            processedCards.add(dev.cardIndex);
+            const msg = `Dikick: "${dev.deviceName}" dari profil tidak dikenal "${devs[0]?.profileName}"`;
+            details.push(msg);
+            console.log(`  [guard] ✓ ${msg}`);
+            await sleep(1500);
+          }
+        }
+      }
+    }
+
+    // ── Step 3: Cek rules per profil yang diizinkan ───────
     for (const prof of profiles) {
       const profKey     = prof.name.toLowerCase();
       const allowedDev  = prof.allowedDevice;
