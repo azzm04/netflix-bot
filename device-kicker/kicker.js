@@ -19,8 +19,6 @@ class RateLimitError extends Error {
 }
 
 // ── Helpers ───────────────────────────────────────────────
-function shouldSkip(_email) { return false; }
-
 function isPakeKode(password) {
   if (!password) return true;
   const up = password.toUpperCase().trim();
@@ -47,18 +45,10 @@ function debugShot(page, name) {
   return page.screenshot({ path: `${dir}/${name}_${Date.now()}.png`, fullPage: true }).catch(() => {});
 }
 
-// ── Launch Browser ────────────────────────────────────────
+// ── Launch Browser (tanpa proxy) ──────────────────────────
 async function launchBrowser() {
-  const proxyConfig = process.env.PROXY_SERVER
-    ? { server: process.env.PROXY_SERVER,
-        username: process.env.PROXY_USERNAME,
-        password: process.env.PROXY_PASSWORD }
-    : undefined;
-
   return chromium.launch({
     headless: HEADLESS,
-    executablePath: process.env.CHROME_PATH || undefined,
-    proxy: proxyConfig,
     args: [
       "--no-sandbox",
       "--disable-setuid-sandbox",
@@ -69,58 +59,43 @@ async function launchBrowser() {
   });
 }
 
-async function newStealthPage(browser) {
-  const proxyConfig = process.env.PROXY_SERVER
-    ? {
-        server: process.env.PROXY_SERVER,
-        username: process.env.PROXY_USERNAME,
-        password: process.env.PROXY_PASSWORD,
-      }
-    : undefined;
-
+async function newPage(browser) {
   const ctx = await browser.newContext({
     viewport: { width: 1280, height: 900 },
     locale: "id-ID",
     extraHTTPHeaders: { "Accept-Language": "id-ID,id;q=0.9,en-US;q=0.8" },
-    proxy: proxyConfig,
-    // userAgent Dihapus: Biarkan Playwright + Stealth Plugin yang mengatur otomatis
   });
-
-  const page = await ctx.newPage();
-
-  if (proxyConfig) {
-    console.log(`  [browser] Proxy aktif: ${proxyConfig.server}`);
-  }
-
-  // Anti-deteksi manual (addInitScript) dihapus karena sudah ditangani chromium.use(stealth)
-
-  return page;
+  return ctx.newPage();
 }
 
 // ── OTP Input Boxes ───────────────────────────────────────
 async function fillOtpBoxes(page, code) {
   const digits = code.replace(/\D/g, "").split("");
-
-  // Playwright: cari input OTP
   const selectors = [
     'input[inputmode="numeric"]',
     'input[maxlength="1"]',
     'input[autocomplete="one-time-code"]',
   ];
-
   let inputs = [];
   for (const sel of selectors) {
     inputs = await page.$$(sel);
     if (inputs.length >= digits.length) break;
   }
-
   if (inputs.length === 0) {
-    // Fallback: satu input
-    const single = page.locator('input[type="text"], input[type="number"]').first();
-    await single.fill(code);
+    await page.locator('input[type="text"], input[type="number"]').first().fill(code);
     return;
   }
-
+  if (inputs.length === 1) {
+    // Single input (Netflix /mfa style)
+    await inputs[0].click();
+    await inputs[0].evaluate((el, val) => {
+      const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value").set;
+      setter.call(el, val);
+      el.dispatchEvent(new Event("input",  { bubbles: true }));
+      el.dispatchEvent(new Event("change", { bubbles: true }));
+    }, code);
+    return;
+  }
   for (let i = 0; i < digits.length && i < inputs.length; i++) {
     await inputs[i].click();
     await inputs[i].press(digits[i]);
@@ -129,22 +104,13 @@ async function fillOtpBoxes(page, code) {
 }
 
 // ── Login ─────────────────────────────────────────────────
-/**
- * @param {import('playwright').Browser} browser
- * @param {string} email
- * @param {string} password
- * @param {boolean} forcePakeKode - true untuk MEET
- * @param {string} accountLabel
- */
 async function loginNetflix(browser, email, password, forcePakeKode = false, accountLabel = "") {
-  const page = await newStealthPage(browser);
+  const page = await newPage(browser);
   const effectivePakeKode = forcePakeKode || isPakeKode(password);
 
-  // Step 1: Clear cookies
   console.log("  [login] Clear cookies...");
   await page.goto(URL_CLEARCOOKIES, { waitUntil: "domcontentloaded", timeout: TIMEOUT_NAV });
 
-  // Klik Sign In jika ada
   try {
     await page.locator('a[href*="/login"], [data-uia*="sign-in"]').first().click({ timeout: 5000 });
     await page.waitForURL("**/login**", { timeout: TIMEOUT_NAV }).catch(() => {});
@@ -152,11 +118,10 @@ async function loginNetflix(browser, email, password, forcePakeKode = false, acc
     await page.goto("https://www.netflix.com/login", { waitUntil: "domcontentloaded", timeout: TIMEOUT_NAV });
   }
 
-  // Step 2: Isi email
+  // Isi email via React-compatible setter
   console.log(`  [login] Isi email: ${email}`);
   const emailInput = page.locator('input[name="userLoginId"], input[type="email"], input[autocomplete="email"]').first();
   await emailInput.waitFor({ timeout: TIMEOUT_NAV });
-
   await emailInput.click({ clickCount: 3 });
   await sleep(200);
   await page.keyboard.press("Control+a");
@@ -168,21 +133,17 @@ async function loginNetflix(browser, email, password, forcePakeKode = false, acc
       ?? document.querySelector('input');
     if (!input) return;
     input.focus();
-    const setter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value').set;
+    const setter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, "value").set;
     setter.call(input, val);
-    input.dispatchEvent(new Event('input', { bubbles: true, cancelable: true }));
-    input.dispatchEvent(new Event('change', { bubbles: true }));
+    input.dispatchEvent(new Event("input", { bubbles: true, cancelable: true }));
+    input.dispatchEvent(new Event("change", { bubbles: true }));
   }, email);
   await sleep(500);
-
-  const emailValue = await emailInput.inputValue().catch(() => "");
-  console.log(`  [login] Email value: "${emailValue}"`);
 
   // Klik Continue
   const continueBtn = page.locator('button[type="submit"], button[data-uia="login-continue-btn"]').first();
   if (await continueBtn.isVisible({ timeout: 3000 }).catch(() => false)) {
     console.log("  [login] Klik Continue...");
-    // Gerak mouse ke tombol dulu
     const box = await continueBtn.boundingBox().catch(() => null);
     if (box) {
       await page.mouse.move(box.x + box.width / 2 - 10, box.y - 15);
@@ -195,7 +156,6 @@ async function loginNetflix(browser, email, password, forcePakeKode = false, acc
     await page.keyboard.press("Enter");
   }
 
-  // Tunggu halaman berubah (OTP atau password)
   await sleep(2000);
   await page.waitForLoadState("domcontentloaded").catch(() => {});
 
@@ -212,31 +172,24 @@ async function loginNetflix(browser, email, password, forcePakeKode = false, acc
 
   console.log(`  [login] URL: ${page.url()}`);
 
-  // Step 3: Deteksi halaman
   const isOtpPage = await page.locator('input[maxlength="1"], input[inputmode="numeric"]').count().then(n => n >= 3).catch(() => false)
     || bodyText.toLowerCase().includes("code we sent")
     || bodyText.toLowerCase().includes("enter the code");
-
   const isPassPage = await page.locator('input[type="password"]').isVisible().catch(() => false);
-
   console.log(`  [login] isOtpPage=${isOtpPage}, isPassPage=${isPassPage}, effectivePakeKode=${effectivePakeKode}`);
 
-  // ── Flow OTP ─────────────────────────────────────────────
+  // ── Flow OTP ──────────────────────────────────────────────
   if (isOtpPage) {
     if (!effectivePakeKode) {
-      // Coba beralih ke password
-      console.log("  [login] OTP page, coba switch ke password...");
       const switched = await _switchToPasswordPage(page);
       if (switched) {
         await page.locator('input[type="password"]').waitFor({ timeout: 10000 });
       } else {
-        // Tidak bisa switch, tetap pakai OTP
         await _handleOtpLogin(page, email, accountLabel);
         await page.waitForURL(url => !url.includes("/login"), { timeout: TIMEOUT_NAV }).catch(() => {});
         return _verifyLoginSuccess(page, email);
       }
     } else {
-      // PAKE KODE / MEET: langsung OTP
       await _handleOtpLogin(page, email, accountLabel);
       await page.waitForURL(url => !url.includes("/login"), { timeout: TIMEOUT_NAV }).catch(() => {});
       return _verifyLoginSuccess(page, email);
@@ -247,29 +200,14 @@ async function loginNetflix(browser, email, password, forcePakeKode = false, acc
   const passVisible = await page.locator('input[type="password"]').isVisible().catch(() => false);
   if (passVisible && !isPakeKode(password)) {
     console.log("  [login] Isi password...");
-    await debugShot(page, "before_password");
-
     await page.locator('input[type="password"]').fill(password);
     await sleep(300);
-    await debugShot(page, "after_fill_password");
-
-    // Klik Sign In
     await page.locator('button[data-uia="login-submit-button"], button[type="submit"]').first().click();
-
-    // Tunggu navigasi keluar dari /login
     await page.waitForURL(url => !url.includes("/login"), { timeout: TIMEOUT_NAV }).catch(async () => {
-      const urlNow = page.url();
-      console.log(`  [login] Timeout setelah submit password, URL: ${urlNow}`);
-      // Screenshot untuk debug apa yang terjadi
+      console.log(`  [login] Timeout setelah submit password, URL: ${page.url()}`);
       await debugShot(page, "submit_timeout");
-      // Dump teks halaman untuk lihat error
-      const bodySnippet = await page.locator("body").innerText().catch(() => "").then(t => t.slice(0, 500));
-      console.log(`  [login] Halaman setelah submit:\n${bodySnippet}`);
     });
 
-    await debugShot(page, "after_submit");
-
-    // Cek apakah Netflix minta OTP setelah password (2-step)
     const urlAfter = page.url();
     if (urlAfter.includes("/login")) {
       const isOtpAfterPass = await page.locator('input[maxlength="1"]').count().then(n => n >= 3).catch(() => false);
@@ -304,7 +242,6 @@ async function _handleOtpLogin(page, email, accountLabel) {
   console.log(`  [login] Isi kode 4 digit: ${code4}`);
   await fillOtpBoxes(page, code4);
 
-  // Submit (Enter atau klik tombol)
   const submitBtn = page.locator('button[type="submit"], button[data-uia*="continue"]').first();
   if (await submitBtn.isVisible({ timeout: 2000 }).catch(() => false)) {
     await submitBtn.click();
@@ -314,22 +251,16 @@ async function _handleOtpLogin(page, email, accountLabel) {
 }
 
 async function _switchToPasswordPage(page) {
-  // Jeda manusiawi 2-4 detik sebelum klik
   const delay = 2000 + Math.random() * 2000;
   console.log(`  [login] Jeda ${Math.round(delay)}ms sebelum klik Get Help...`);
   await sleep(delay);
 
-  // Cek error sebelum klik
   const errorBefore = await page.locator(':text("Something went wrong")').isVisible({ timeout: 1000 }).catch(() => false);
-  if (errorBefore) {
-    console.log("  [login] Error terdeteksi sebelum klik — reCAPTCHA block.");
-    return false;
-  }
+  if (errorBefore) return false;
 
   const getHelpBtn = page.locator('button:has-text("Get Help"), button[data-uia*="help"]').first();
   if (!await getHelpBtn.isVisible({ timeout: 3000 }).catch(() => false)) return false;
 
-  // Simulasi gerakan mouse manusiawi
   const box = await getHelpBtn.boundingBox().catch(() => null);
   if (box) {
     await page.mouse.move(box.x + box.width / 2 - 30, box.y - 20);
@@ -340,14 +271,9 @@ async function _switchToPasswordPage(page) {
   await getHelpBtn.click();
   await sleep(800 + Math.random() * 600);
 
-  // Cek error setelah klik
   const errorAfter = await page.locator(':text("Something went wrong")').isVisible({ timeout: 2000 }).catch(() => false);
-  if (errorAfter) {
-    console.log("  [login] Error muncul setelah klik Get Help — reCAPTCHA block.");
-    return false;
-  }
+  if (errorAfter) return false;
 
-  // Klik Use password instead
   const usePwBtn = page.locator('[data-uia="usePasswordInsteadHelpMenuItem"], a:has-text("Use password instead")').first();
   if (await usePwBtn.isVisible({ timeout: 4000 }).catch(() => false)) {
     await sleep(500 + Math.random() * 400);
@@ -370,13 +296,10 @@ function _verifyLoginSuccess(page, email) {
 // ── Verifikasi /manageaccountaccess ───────────────────────
 async function handleDeviceVerification(page, email, accountLabel = "") {
   await sleep(1000);
-
   const url = page.url();
-  const isMfaUrl = url.includes("/mfa");
   const bodyText = await page.locator("body").innerText().catch(() => "");
-  const needsVerify = isMfaUrl ||
+  const needsVerify = url.includes("/mfa") ||
     bodyText.toLowerCase().includes("verifikasi identitas") ||
-    bodyText.toLowerCase().includes("first, let's make sure") ||
     bodyText.toLowerCase().includes("email a code") ||
     bodyText.toLowerCase().includes("kirim kode");
 
@@ -386,20 +309,15 @@ async function handleDeviceVerification(page, email, accountLabel = "") {
   }
 
   console.log(`  [verify] Halaman verifikasi (${url})`);
-
-  // Tunggu tombol email code
   const emailCodeBtn = page.locator('[data-uia="account-mfa-button-OTP_EMAIL"] button').first();
   await emailCodeBtn.waitFor({ timeout: 10000 });
   await emailCodeBtn.click();
   console.log("  [verify] Klik Email a code.");
 
-  // Tunggu form OTP muncul (tetap di halaman yang sama)
   await page.waitForFunction(() => {
     const inputs = document.querySelectorAll('input[maxlength="1"], input[inputmode="numeric"]');
     return inputs.length >= 3 || document.body.innerText.toLowerCase().includes("code will expire");
-  }, { timeout: 20000 }).catch(() => {
-    console.log("  [verify] Form OTP tidak muncul, lanjut...");
-  });
+  }, { timeout: 20000 }).catch(() => {});
 
   console.log("  [verify] Tunggu 10 detik agar email terkirim...");
   await sleep(10_000);
@@ -440,7 +358,6 @@ async function kickDevicesByProfiles(page, profileNames) {
 
   await sleep(1500);
 
-  // Klik "Tampilkan Lainnya" sampai habis
   let more = true;
   while (more) {
     const showMore = page.locator('[data-uia="device-list+show-more-button"]');
@@ -453,7 +370,6 @@ async function kickDevicesByProfiles(page, profileNames) {
     }
   }
 
-  // Iterasi semua card
   for (let round = 0; round < 30; round++) {
     const cards = page.locator('li[data-uia^="device-list+"]');
     const count = await cards.count();
@@ -468,14 +384,9 @@ async function kickDevicesByProfiles(page, profileNames) {
 
       foundUnprocessed = true;
 
-      // Cek PERANGKAT SAAT INI
       const isCurrent = await card.locator('[data-uia$="+current-device-badge+ANNOUNCE"]').count() > 0;
-      if (isCurrent) {
-        processedIds.add(uniqueKey);
-        continue;
-      }
+      if (isCurrent) { processedIds.add(uniqueKey); continue; }
 
-      // Expand jika belum ada tombol Keluar
       const keluarBtn = card.locator('button:has-text("Keluar"), button:has-text("Sign Out")').first();
       const isExpanded = await keluarBtn.isVisible({ timeout: 500 }).catch(() => false);
       if (!isExpanded) {
@@ -483,42 +394,27 @@ async function kickDevicesByProfiles(page, profileNames) {
         if (await dropBtn.isVisible({ timeout: 500 }).catch(() => false)) {
           await dropBtn.click();
           await sleep(800);
-        } else {
-          processedIds.add(uniqueKey);
-          continue;
-        }
+        } else { processedIds.add(uniqueKey); continue; }
       }
 
-      // Cek profil
       const cardText = await card.innerText().catch(() => "");
       const lowerText = cardText.toLowerCase();
 
-      // Deteksi nama profil dari "(terakhir ditonton)"
       let profileText = null;
-      const lines = cardText.split("\n").map(l => l.trim()).filter(Boolean);
-      for (const line of lines) {
+      for (const line of cardText.split("\n").map(l => l.trim()).filter(Boolean)) {
         if (line.toLowerCase().includes("terakhir ditonton") || line.toLowerCase().includes("last watched")) {
           profileText = line;
           break;
         }
       }
-
-      // Bersihkan teks "tidak ada aktivitas"
-      if (profileText && (
-        profileText.toLowerCase().includes("tidak ada aktivitas") ||
-        profileText.toLowerCase().includes("no activity")
-      )) profileText = null;
-
-      const noActivity = lowerText.includes("tidak ada aktivitas") || lowerText.includes("no activity");
-
-      // Skip jika profil ada tapi tidak cocok
-      const matchedTarget = targets.find(t => profileText && profileText.toLowerCase().includes(t));
-      if (profileText && !matchedTarget) {
-        processedIds.add(uniqueKey);
-        continue;
+      if (profileText && (profileText.toLowerCase().includes("tidak ada aktivitas") || profileText.toLowerCase().includes("no activity"))) {
+        profileText = null;
       }
 
-      // Kick!
+      const noActivity = lowerText.includes("tidak ada aktivitas") || lowerText.includes("no activity");
+      const matchedTarget = targets.find(t => profileText && profileText.toLowerCase().includes(t));
+      if (profileText && !matchedTarget) { processedIds.add(uniqueKey); continue; }
+
       const keluarVisible = await keluarBtn.isVisible({ timeout: 1000 }).catch(() => false);
       if (keluarVisible) {
         const display = profileText ?? (noActivity ? "tidak ada aktivitas" : "no profile");
@@ -530,33 +426,26 @@ async function kickDevicesByProfiles(page, profileNames) {
       } else {
         processedIds.add(uniqueKey);
       }
-      break; // proses satu card per round
+      break;
     }
-
     if (!foundUnprocessed) break;
   }
-
   return totalKicked;
 }
 
 // ── Entry Points ──────────────────────────────────────────
 async function kickDevicesForProfiles(email, password, profileNames, isMeet = false, accountLabel = "") {
-  if (shouldSkip(email)) return { skipped: true, kicked: 0, reason: "MAHESH/ROSE" };
-
   const browser = await launchBrowser();
   let totalKicked = 0;
   try {
     const page = await loginNetflix(browser, email, password, isMeet, accountLabel);
-
     await page.goto(URL_DEVICES, { waitUntil: "domcontentloaded", timeout: TIMEOUT_NAV });
     await handleDeviceVerification(page, email, accountLabel);
-
     if (!page.url().includes("manageaccountaccess")) {
       await page.goto(URL_DEVICES, { waitUntil: "domcontentloaded", timeout: TIMEOUT_NAV });
       await sleep(1000);
       await handleDeviceVerification(page, email, accountLabel);
     }
-
     totalKicked = await kickDevicesByProfiles(page, profileNames);
     console.log(`  [devices] Total ${totalKicked} dikick.`);
   } finally {
@@ -569,4 +458,4 @@ async function kickDevicesForProfile(email, password, profileName, isMeet = fals
   return kickDevicesForProfiles(email, password, [profileName], isMeet, accountLabel);
 }
 
-module.exports = { kickDevicesForProfile, kickDevicesForProfiles, shouldSkip, isPakeKode, RateLimitError };
+module.exports = { kickDevicesForProfile, kickDevicesForProfiles, isPakeKode, RateLimitError };

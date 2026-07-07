@@ -1,21 +1,46 @@
 "use strict";
 
+/**
+ * index.js — Cookie Kicker + PIN Changer (Server Mode)
+ *
+ * Berbeda dari device-kicker/index.js:
+ *  - HANYA pakai cookie injection (tidak ada fallback ke login biasa)
+ *  - Jika CookieExpiredError → kirim notif Telegram + skip akun tersebut
+ *  - Cocok untuk dijalankan di server tanpa akses browser GUI interaktif
+ */
+
 require("dotenv").config();
 const cron = require("node-cron");
 const { getExpiredAccounts, markAsKicked, updatePin, findSpreadsheetId } = require("./sheets");
-const { kickDevicesForProfiles, isPakeKode, RateLimitError } = require("./kicker");
-const { changePinsForProfiles } = require("./pin-changer");
-const { notifyKickDone, notifyPinChanged, notifyError, notifySummary } = require("./notify");
+const { kickDevicesForProfilesCookie, CookieExpiredError } = require("./kicker-cookie");
+const { changePinsForProfilesCookie } = require("./pin-changer-cookie");
+const { getCookieForEmail } = require("./cookie-helper");
+const { notifyKickDone, notifyPinChanged, notifyError, notifySummary, sendTelegram } = require("./notify");
 
 const CRON_SCHEDULE = process.env.CRON_SCHEDULE ?? "*/15 * * * *";
 const RUN_NOW = process.argv.includes("--run-now");
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
+// ── Notifikasi cookie expired ─────────────────────────────
+async function notifyCookieExpired(email, profiles) {
+  const profileList = profiles.join(", ");
+  await sendTelegram(
+    `🍪 *Cookie Expired — Perlu Update Manual*\n\n` +
+    `📧 Akun: \`${email}\`\n` +
+    `👤 Profil: ${profileList}\n\n` +
+    `Cookie tidak valid atau belum ada. Akun ini di-skip.\n\n` +
+    `*Cara memperbarui cookie:*\n` +
+    `Di komputer lokal jalankan:\n` +
+    `\`node cookie-helper.js save-interactive "${email}"\`\n` +
+    `Lalu copy \`cookies.json\` terbaru ke server.`
+  );
+}
+
 // -------------------------------------------------------
 async function processExpiredAccounts() {
   const startTime = Date.now();
   console.log(`\n${"=".repeat(60)}`);
-  console.log(`[${new Date().toLocaleString("id-ID")}] Mulai proses device kicker...`);
+  console.log(`[cookie-server] [${new Date().toLocaleString("id-ID")}] Mulai proses...`);
   console.log("=".repeat(60));
 
   // 1. Baca expired dari sheets
@@ -23,12 +48,12 @@ async function processExpiredAccounts() {
   try {
     expiredList = await getExpiredAccounts();
   } catch (err) {
-    console.error("Gagal baca spreadsheet:", err.message);
+    console.error("[cookie-server] Gagal baca spreadsheet:", err.message);
     return;
   }
 
   if (expiredList.length === 0) {
-    console.log("Tidak ada akun expired saat ini.\n");
+    console.log("[cookie-server] Tidak ada akun expired saat ini.\n");
     return;
   }
 
@@ -40,12 +65,12 @@ async function processExpiredAccounts() {
     else             toKick.push(a);
   }
 
-  console.log(`\nTotal expired : ${expiredList.length}`);
-  console.log(`Kick device   : ${toKick.length}`);
-  console.log(`Ganti PIN     : ${toPin.length} (MAHESH/ROSE)`);
+  console.log(`\n[cookie-server] Total expired : ${expiredList.length}`);
+  console.log(`[cookie-server] Kick device   : ${toKick.length}`);
+  console.log(`[cookie-server] Ganti PIN     : ${toPin.length} (MAHESH/ROSE)`);
 
   if (toKick.length === 0 && toPin.length === 0) {
-    console.log("Tidak ada yang bisa diproses.\n");
+    console.log("[cookie-server] Tidak ada yang bisa diproses.\n");
     return;
   }
 
@@ -54,7 +79,7 @@ async function processExpiredAccounts() {
   try {
     spreadsheetId = await findSpreadsheetId();
   } catch (err) {
-    console.error("Gagal cari spreadsheet ID:", err.message);
+    console.error("[cookie-server] Gagal cari spreadsheet ID:", err.message);
     return;
   }
 
@@ -72,28 +97,34 @@ async function processExpiredAccounts() {
     }
     const kickGroups = [...emailGroups.values()];
 
-    console.log(`\n== KICK DEVICE (${kickGroups.length} email, ${toKick.length} profil) ==`);
+    console.log(`\n[cookie-server] == KICK DEVICE (${kickGroups.length} email, ${toKick.length} profil) ==`);
 
     for (let gi = 0; gi < kickGroups.length; gi++) {
-      const group       = kickGroups[gi];
-      const email       = group[0].email;
-      const password    = group[0].password;
-      const isMeet      = group[0].isMeet ?? false;
+      const group        = kickGroups[gi];
+      const email        = group[0].email;
       const accountLabel = group[0].blockLabel ?? "";
-      const profiles    = group.map(a => a.profile);
+      const profiles     = group.map(a => a.profile);
 
       console.log(`\n${"─".repeat(60)}`);
-      console.log(`[${gi + 1}/${kickGroups.length}] ${email}`);
+      console.log(`[cookie-server] [${gi + 1}/${kickGroups.length}] ${email}`);
       console.log(`  Profil : ${profiles.join(", ")}`);
-      console.log(`  Tipe   : ${isMeet ? "MEET (auto 4-digit)" : isPakeKode(password) ? "PAKE KODE" : "Password"}`);
+      console.log(`  Mode   : 🍪 Cookie injection`);
       console.log("─".repeat(60));
+
+      // Cek cookie tersedia sebelum proses
+      if (!getCookieForEmail(email)) {
+        console.warn(`[cookie-server]   Cookie tidak ada untuk ${email} — skip.`);
+        await notifyCookieExpired(email, profiles);
+        totalFailed += group.length;
+        continue;
+      }
 
       const t0 = Date.now();
       try {
-        const result = await kickDevicesForProfiles(email, password, profiles, isMeet, accountLabel);
+        const result = await kickDevicesForProfilesCookie(email, profiles);
 
         if (result.skipped) {
-          console.log(`  Skip: ${result.reason}`);
+          console.log(`[cookie-server]   Skip: ${result.reason}`);
           totalFailed += group.length;
           continue;
         }
@@ -103,7 +134,7 @@ async function processExpiredAccounts() {
         }
 
         const elapsed = ((Date.now() - t0) / 1000).toFixed(1);
-        console.log(`  Berhasil: ${result.kicked} device dikick dalam ${elapsed}s`);
+        console.log(`[cookie-server]   Berhasil: ${result.kicked} device dikick dalam ${elapsed}s`);
         totalKicked += group.length;
 
         // Notifikasi Telegram
@@ -123,36 +154,20 @@ async function processExpiredAccounts() {
         });
 
       } catch (err) {
-        if (err.name === "RateLimitError") {
-          const DELAY_MS = 45 * 60 * 1000; // 45 menit
-          console.warn(`  Rate limit! Tunda 45 menit untuk ${email}...`);
-          await notifyError(email, profiles, `⏳ Rate limit — tunda 45 menit lalu retry.`);
-          await sleep(DELAY_MS);
-          console.log(`  Retry ${email} setelah 45 menit...`);
-          try {
-            const retry = await kickDevicesForProfiles(email, password, profiles, isMeet, accountLabel);
-            if (!retry.skipped) {
-              for (const account of group) {
-                await markAsKicked(spreadsheetId, account.sheetName, account.rowIndex);
-              }
-              totalKicked += group.length;
-              console.log(`  Retry berhasil: ${retry.kicked} device dikick.`);
-              await notifyKickDone({ email, profiles, kicked: retry.kicked, sheetUpdated: true, elapsed: "retry", blockLabel: accountLabel, rows: group.map(a => ({ profile: a.profile, sheetName: a.sheetName, rowIndex: a.rowIndex, logoutText: a.logoutText })) });
-            }
-          } catch (retryErr) {
-            console.error(`  Retry gagal: ${retryErr.message}`);
-            totalFailed += group.length;
-            await notifyError(email, profiles, `Retry gagal setelah 45 menit: ${retryErr.message}`);
-          }
+        if (err instanceof CookieExpiredError || err.name === "CookieExpiredError") {
+          // Cookie expired → kirim notif + skip, TIDAK crash
+          console.warn(`[cookie-server]   Cookie expired untuk ${email} — skip.`);
+          await notifyCookieExpired(email, profiles);
+          totalFailed += group.length;
         } else {
-          console.error(`  Error: ${err.message}`);
+          console.error(`[cookie-server]   Error: ${err.message}`);
           totalFailed += group.length;
           await notifyError(email, profiles, err.message);
         }
       }
 
       if (gi < kickGroups.length - 1) {
-        console.log("  Jeda 4 detik...");
+        console.log("[cookie-server]   Jeda 4 detik...");
         await sleep(4000);
       }
     }
@@ -168,24 +183,32 @@ async function processExpiredAccounts() {
     }
     const pinEmailGroups = [...pinGroups.values()];
 
-    console.log(`\n== GANTI PIN (${pinEmailGroups.length} email, ${toPin.length} profil) ==`);
+    console.log(`\n[cookie-server] == GANTI PIN (${pinEmailGroups.length} email, ${toPin.length} profil) ==`);
 
     for (let gi = 0; gi < pinEmailGroups.length; gi++) {
-      const group       = pinEmailGroups[gi];
-      const email       = group[0].email;
-      const password    = group[0].password;
-      const blockLabel  = group[0].blockLabel;
-      const accountType = blockLabel === "ROSE" ? "rose" : "mahesh";
-      const profiles    = group.map(a => a.profile);
+      const group      = pinEmailGroups[gi];
+      const email      = group[0].email;
+      const password   = group[0].password;
+      const blockLabel = group[0].blockLabel;
+      const profiles   = group.map(a => a.profile);
 
       console.log(`\n${"─".repeat(60)}`);
-      console.log(`[${gi + 1}/${pinEmailGroups.length}] ${email} [${blockLabel}]`);
+      console.log(`[cookie-server] [${gi + 1}/${pinEmailGroups.length}] ${email} [${blockLabel}]`);
       console.log(`  Profil : ${profiles.join(", ")}`);
+      console.log(`  Mode   : 🍪 Cookie injection`);
       console.log("─".repeat(60));
+
+      // Cek cookie tersedia sebelum proses
+      if (!getCookieForEmail(email)) {
+        console.warn(`[cookie-server]   Cookie tidak ada untuk ${email} — skip.`);
+        await notifyCookieExpired(email, profiles);
+        totalFailed += group.length;
+        continue;
+      }
 
       const t0 = Date.now();
       try {
-        const pinChanges = await changePinsForProfiles(email, password, accountType, profiles);
+        const pinChanges = await changePinsForProfilesCookie(email, password, profiles);
         const elapsed = ((Date.now() - t0) / 1000).toFixed(1);
 
         // Update spreadsheet: PIN baru + kosongkan E/F/G + hijau
@@ -199,7 +222,7 @@ async function processExpiredAccounts() {
           if (newPin) {
             await updatePin(spreadsheetId, account.sheetName, account.rowIndex, newPin);
             await markAsKicked(spreadsheetId, account.sheetName, account.rowIndex);
-            console.log(`  PIN "${account.profile}": ${newPin} — sheet diupdate.`);
+            console.log(`[cookie-server]   PIN "${account.profile}": ${newPin} — sheet diupdate.`);
           }
         }
 
@@ -220,13 +243,20 @@ async function processExpiredAccounts() {
         });
 
       } catch (err) {
-        console.error(`  Error: ${err.message}`);
-        totalFailed += group.length;
-        await notifyError(email, profiles, err.message);
+        if (err instanceof CookieExpiredError || err.name === "CookieExpiredError") {
+          // Cookie expired → kirim notif + skip, TIDAK crash
+          console.warn(`[cookie-server]   Cookie expired untuk ${email} — skip.`);
+          await notifyCookieExpired(email, profiles);
+          totalFailed += group.length;
+        } else {
+          console.error(`[cookie-server]   Error: ${err.message}`);
+          totalFailed += group.length;
+          await notifyError(email, profiles, err.message);
+        }
       }
 
       if (gi < pinEmailGroups.length - 1) {
-        console.log("  Jeda 4 detik...");
+        console.log("[cookie-server]   Jeda 4 detik...");
         await sleep(4000);
       }
     }
@@ -235,7 +265,7 @@ async function processExpiredAccounts() {
   // ── Ringkasan ───────────────────────────────────────────
   const elapsed = ((Date.now() - startTime) / 1000).toFixed(1);
   console.log(`\n${"=".repeat(60)}`);
-  console.log(`SELESAI dalam ${elapsed}s`);
+  console.log(`[cookie-server] SELESAI dalam ${elapsed}s`);
   console.log(`  Kick    : ${totalKicked}`);
   console.log(`  PIN     : ${totalPinChanged}`);
   console.log(`  Gagal   : ${totalFailed}`);
@@ -252,10 +282,10 @@ async function processExpiredAccounts() {
 
 // ─── Run ──────────────────────────────────────────────────
 if (RUN_NOW) {
-  console.log("Netflix Device Kicker — Run Now\n");
+  console.log("[cookie-server] Netflix Cookie Kicker — Run Now\n");
   processExpiredAccounts().catch(console.error);
 } else {
-  console.log(`Netflix Device Kicker — Scheduler: "${CRON_SCHEDULE}"\n`);
+  console.log(`[cookie-server] Netflix Cookie Kicker — Scheduler: "${CRON_SCHEDULE}"\n`);
   processExpiredAccounts().catch(console.error);
   cron.schedule(CRON_SCHEDULE, () => {
     processExpiredAccounts().catch(console.error);
