@@ -1,0 +1,1160 @@
+[
+  {
+    "method": "POST",
+    "url": "https://web.prod.cloud.netflix.com/graphql",
+    "headers": {
+      "content-type": "application/json",
+      "x-netflix-csrf": null,
+      "x-netflix.request.client.user.guid": null,
+      "cookie": "(dari context — tidak diprint)"
+    },
+    "body": {
+      "operationName": "CLCSInterstitialAccountPages",
+      "variables": {
+        "format": "HTML",
+        "resolutionMode": "WEB_1X",
+        "accountSubpage": "/settings/migration"
+      },
+      "extensions": {
+        "persistedQuery": {
+          "id": "aadb7477-2ba6-498c-9106-cff28e5ac7ef",
+          "version": 102
+        }
+      }
+    },
+    "rawBody": "{\"operationName\":\"CLCSInterstitialAccountPages\",\"variables\":{\"format\":\"HTML\",\"resolutionMode\":\"WEB_1X\",\"accountSubpage\":\"/settings/migration\"},\"extensions\":{\"persistedQuery\":{\"id\":\"aadb7477-2ba6-498c-9106-cff28e5ac7ef\",\"version\":102}}}",
+    "timestamp": "2026-07-06T20:01:13.901Z"
+  },
+  {
+    "method": "POST",
+    "url": "https://logs.netflix.com/log/www/cl/2",
+    "headers": {
+      "content-type": "application/json",
+      "x-netflix-csrf": null,
+      "x-netflix.request.client.user.guid": null,
+      "cookie": "(dari context — tidak diprint)"
+    },
+    "body": {
+      "currentState": {
+        "5796707211165755": {
+          "source": "www",
+          "schema": {
+            "name": "netflixApp",
+            "version": "1.1026.0"
+          },
+          "type": [
+            "Log",
+            "Session"
+          ],
+          "id": 5796707211165755,
+          "sequence": 1,
+          "time": 1783368073837
+        },
+        "5796707503100653": {
+          "nfvdid": "BQFmAAEBENEfAT80a21NCqTyhLid4WlglVHMJZkqISvDb0jUcsqpFrizRka7U_KUBvzRKYmjYkLEFqaWhYEx1bL29IBsvk3cdaH_HR7v6iywuZN8CRhXJxtCjbYO-RP7tt0tbkLrREk_Nw4mZOYO3rrJmII1XBGh",
+          "type": [
+            "VisitorDeviceId",
+            "AccountIdentity",
+            "Session"
+          ],
+          "id": 5796707503100653,
+          "sequence": 3,
+          "time": 1783368073845
+        },
+        "5796707280345053": {
+          "uiLocale": "en-FR",
+          "type": [
+            "UiLocale"
+          ],
+          "id": 5796707280345053
+        },
+        "5796707329846373": {
+          "utcOffset": 25200000,
+          "type": [
+            "TimeZone"
+          ],
+          "id": 5796707329846373
+        },
+        "5796707345949476": {
+          "cells": {
+            "54989": 3,
+            "56308": 3,
+            "58930": 2,
+            "59817": 2,
+            "66493": 2,
+            "69620": 2,
+            "70166": 1,
+            "70436": 2,
+            "72287": 2,
+            "73602": 2,
+            "74027": 1,
+            "74210": 2,
+            "74597": 1,
+            "75012": 2,
+            "75509": 2,
+            "75536": 2,
+            "76362": 2,
+            "77356": 4,
+            "77512": 2,
+            "77825": 1,
+            "78125": 2,
+            "78708": 2,
+            "78758": 2,
+            "79085": 2,
+            "79371": 1,
+            "79455": 1,
+            "79645": 2,
+            "79681": 2,
+            "79779": 2,
+            "79780": 2,
+            "79782": 2,
+            "80082": 2,
+            "80083": 1,
+            "80305": 2,
+            "80377": 2,
+            "80378": 2,
+            "80380": 2,
+            "80381": 2,
+            "80382": 2,
+            "80383": 1,
+            "80425": 2,
+            "80592": 1,
+            "80593": 2,
+            "80594": 2,
+            "80595": 2,
+            "80596": 2,
+            "80820": 2,
+            "80821": 1,
+            "80823": 2,
+            "80825": 2,
+            "80997": 2,
+            "81079": 2,
+            "81081": 1,
+            "81084": 2,
+            "81085": 1,
+            "81086": 2,
+            "81087": 1,
+            "81207": 4,
+            "81348": 2,
+            "81350": 1,
+            "81351": 1,
+            "81356": 1,
+            "81358": 2,
+            "81362": 2,
+            "81367": 2,
+            "81388": 1,
+            "81830": 2,
+            "81837": 1,
+            "81841": 2,
+            "82062": 2,
+            "82136": 2,
+            "82137": 2,
+            "82139": 1,
+            "82143": 2,
+            "82159": 1,
+            "82358": 2,
+            "82359": 2,
+            "82365": 2,
+            "82629": 3,
+            "82698": 2,
+            "82743": 2,
+            "82745": 1,
+            "82746": 2,
+            "82747": 2,
+            "82900": 2,
+            "82999": 2,
+            "83003": 2,
+            "83005": 2,
+            "83011": 2,
+            "83213": 2,
+            "83216": 2,
+            "83489": 2,
+            "83493": 2,
+            "83495": 2,
+            "83558": 3,
+            "83690": 1,
+            "83694": 2,
+            "83695": 1,
+            "83699": 1,
+            "83709": 2,
+            "83710": 2,
+            "83711": 2,
+            "83717": 2,
+            "83718": 2,
+            "83721": 2,
+            "83726": 1,
+            "83730": 1,
+            "83733": 2,
+            "83735": 2,
+            "83742": 1,
+            "83746": 2,
+            "83788": 1,
+            "84107": 2,
+            "84112": 2,
+            "84114": 2,
+            "84117": 2,
+            "84118": 2,
+            "84121": 2,
+            "84488": 4,
+            "84509": 2,
+            "84510": 1,
+            "84511": 1,
+            "84521": 1,
+            "84778": 2,
+            "84779": 2,
+            "84780": 1,
+            "84781": 1,
+            "84782": 2,
+            "84882": 2,
+            "84903": 2,
+            "85035": 4,
+            "85201": 1,
+            "85202": 2,
+            "85203": 2,
+            "85205": 2,
+            "85206": 1,
+            "85207": 2,
+            "85209": 2,
+            "85211": 2,
+            "85216": 2,
+            "85220": 2,
+            "85221": 1,
+            "85251": 1,
+            "85411": 1,
+            "85418": 4,
+            "85429": 2,
+            "85447": 2,
+            "85449": 2,
+            "85450": 2,
+            "85453": 2,
+            "85521": 1,
+            "85789": 1,
+            "85806": 1
+          },
+          "type": [
+            "TestAllocations"
+          ],
+          "id": 5796707345949476
+        },
+        "5796707401629260": {
+          "cluster": "nq_website_account-prod-release",
+          "type": [
+            "www.Cluster"
+          ],
+          "id": 5796707401629260
+        },
+        "5796707417786718": {
+          "appVersion": "shakti-vba2185e8",
+          "type": [
+            "AppVersion"
+          ],
+          "id": 5796707417786718
+        },
+        "5796707470817105": {
+          "uiVersion": "shakti-vba2185e8",
+          "type": [
+            "UiVersion"
+          ],
+          "id": 5796707470817105
+        },
+        "5796707518850501": {
+          "profileGuid": "XOUYACWNDJD2BFSPW3GS4K6GVQ",
+          "type": [
+            "ProfileGuid",
+            "ProfileIdentity",
+            "Session"
+          ],
+          "id": 5796707518850501,
+          "sequence": 4,
+          "time": 1783368073845
+        },
+        "5796707552904054": {
+          "url": "/settings/migration",
+          "referrerUrl": "",
+          "type": [
+            "Webpage"
+          ],
+          "id": 5796707552904054
+        },
+        "5796707597651569": {
+          "userAgent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/127.0.0.0 Safari/537.36",
+          "type": [
+            "UserAgent"
+          ],
+          "id": 5796707597651569
+        },
+        "5796707670351756": {
+          "time": 1783368072498.5,
+          "view": "parentalControlMigrationGuide",
+          "type": [
+            "NavigationLevel",
+            "Session"
+          ],
+          "id": 5796707670351756,
+          "sequence": 6
+        }
+      },
+      "reverseDeltas": [
+        [
+          1
+        ],
+        [
+          {
+            "version": "7.4.0",
+            "type": [
+              "LoggerInitialized",
+              "DiscreteEvent"
+            ],
+            "id": 5796707272747230,
+            "sequence": 2,
+            "time": 1783368073837
+          },
+          7
+        ],
+        [
+          1
+        ],
+        [
+          3
+        ],
+        [
+          1
+        ],
+        [
+          1
+        ],
+        [
+          1
+        ],
+        [
+          {
+            "type": [
+              "accessibility.Screen",
+              "accessibility.AccessibilityToolEvent",
+              "DiscreteEvent"
+            ],
+            "id": 5796707734075453,
+            "sequence": 8,
+            "time": 1783368073853
+          },
+          1
+        ],
+        [
+          {
+            "time": 1783368073134.8,
+            "type": [
+              "SessionEnded"
+            ],
+            "id": 5796707774628755,
+            "sequence": 9,
+            "duration": 636.300048828125,
+            "sessionId": 5796707620145506
+          },
+          {
+            "time": 1783368072498.5,
+            "type": [
+              "ProcessStateTransition",
+              "Action",
+              "Session"
+            ],
+            "id": 5796707620145506,
+            "sequence": 5
+          },
+          1
+        ],
+        [
+          {
+            "name": "FCP",
+            "id": 5796707793634508,
+            "delta": 898.2000000029802,
+            "is_back_forward_cache_load": false,
+            "initial_pathname": "/settings/migration",
+            "current_pathname": "/settings/migration",
+            "conductor_route_path": "/settings/migration",
+            "view": "parentalControlMigrationGuide",
+            "type": [
+              "WebVitalsFCP",
+              "DiscreteEvent"
+            ],
+            "sequence": 10,
+            "time": 1783368073867
+          },
+          1
+        ],
+        [
+          {
+            "type": [
+              "SessionEnded"
+            ],
+            "id": 5796707821773763,
+            "sequence": 11,
+            "time": 1783368073892,
+            "duration": 39,
+            "sessionId": 5796707691036351
+          },
+          {
+            "actualTime": 1783368072498.5,
+            "appStartType": "cold",
+            "type": [
+              "RenderNavigationLevel",
+              "Action",
+              "Session"
+            ],
+            "id": 5796707691036351,
+            "sequence": 7,
+            "time": 1783368073853
+          },
+          1
+        ],
+        [
+          {
+            "measurementId": 0,
+            "data": {
+              "traceEvents": {
+                "https://assets.nflxext.com/web/ffe/wp/ui/components/profilehub/parentalControlHubClient.eade14a1849419bae085.js": {
+                  "entryType": "resource",
+                  "startTime": 642.2000000029802,
+                  "duration": 325.6000000014901,
+                  "initiatorType": "link",
+                  "deliveryType": "",
+                  "nextHopProtocol": "http/1.1",
+                  "renderBlockingStatus": "non-blocking",
+                  "workerStart": 0,
+                  "redirectStart": 0,
+                  "redirectEnd": 0,
+                  "fetchStart": 642.2000000029802,
+                  "domainLookupStart": 659.3000000044703,
+                  "domainLookupEnd": 659.3000000044703,
+                  "connectStart": 659.3000000044703,
+                  "secureConnectionStart": 684.2000000029802,
+                  "connectEnd": 712.4000000059605,
+                  "requestStart": 712.7000000029802,
+                  "responseStart": 739.4000000059605,
+                  "firstInterimResponseStart": 0,
+                  "responseEnd": 967.8000000044703,
+                  "transferSize": 1194045,
+                  "encodedBodySize": 1193745,
+                  "decodedBodySize": 5513516,
+                  "responseStatus": 200,
+                  "serverTiming": []
+                },
+                "https://assets.nflxext.com/web/ffe/wp/@nf-web-ui/ui-shared/dist/less/pages/account/ProfileHub.6b48837e91a4c3fb9324.css": {
+                  "entryType": "resource",
+                  "startTime": 642.8000000044703,
+                  "duration": 130.39999999850988,
+                  "initiatorType": "link",
+                  "deliveryType": "",
+                  "nextHopProtocol": "http/1.1",
+                  "renderBlockingStatus": "blocking",
+                  "workerStart": 0,
+                  "redirectStart": 0,
+                  "redirectEnd": 0,
+                  "fetchStart": 642.8000000044703,
+                  "domainLookupStart": 659.5,
+                  "domainLookupEnd": 659.5,
+                  "connectStart": 659.5,
+                  "secureConnectionStart": 683.9000000059605,
+                  "connectEnd": 712.1000000014901,
+                  "requestStart": 712.2000000029802,
+                  "responseStart": 736.9000000059605,
+                  "firstInterimResponseStart": 0,
+                  "responseEnd": 773.2000000029802,
+                  "transferSize": 29040,
+                  "encodedBodySize": 28740,
+                  "decodedBodySize": 164375,
+                  "responseStatus": 200,
+                  "serverTiming": []
+                },
+                "https://occ.a.nflxso.net/genc/hawkins/5.22.1/font/netflix-sans-core-variable-full.woff2": {
+                  "entryType": "resource",
+                  "startTime": 642.9000000059605,
+                  "duration": 267.69999999552965,
+                  "initiatorType": "link",
+                  "deliveryType": "",
+                  "nextHopProtocol": "",
+                  "renderBlockingStatus": "non-blocking",
+                  "workerStart": 0,
+                  "redirectStart": 0,
+                  "redirectEnd": 0,
+                  "fetchStart": 642.9000000059605,
+                  "domainLookupStart": 0,
+                  "domainLookupEnd": 0,
+                  "connectStart": 0,
+                  "secureConnectionStart": 0,
+                  "connectEnd": 0,
+                  "requestStart": 0,
+                  "responseStart": 0,
+                  "firstInterimResponseStart": 0,
+                  "responseEnd": 910.6000000014901,
+                  "transferSize": 0,
+                  "encodedBodySize": 0,
+                  "decodedBodySize": 0,
+                  "responseStatus": 200,
+                  "serverTiming": []
+                }
+              }
+            },
+            "type": [
+              "CrticialResourceTimingReported",
+              "DiscreteEvent"
+            ],
+            "id": 5796707876020879,
+            "sequence": 12,
+            "time": 1783368073926
+          },
+          1
+        ],
+        [
+          {
+            "name": "TTFB",
+            "id": 5796707900046448,
+            "delta": 636.3000000044703,
+            "is_back_forward_cache_load": false,
+            "initial_pathname": "/settings/migration",
+            "current_pathname": "/settings/migration",
+            "conductor_route_path": "/settings/migration",
+            "view": "parentalControlMigrationGuide",
+            "type": [
+              "WebVitalsTTFB",
+              "DiscreteEvent"
+            ],
+            "sequence": 13,
+            "time": 1783368073932
+          },
+          2
+        ],
+        [
+          {
+            "name": "LCP",
+            "id": 5796707960890508,
+            "delta": 898.2000000029802,
+            "is_back_forward_cache_load": false,
+            "initial_pathname": "/settings/migration",
+            "current_pathname": "/settings/migration",
+            "conductor_route_path": "/settings/migration",
+            "view": "parentalControlMigrationGuide",
+            "type": [
+              "WebVitalsLCP",
+              "DiscreteEvent"
+            ],
+            "sequence": 14,
+            "time": 1783368073960
+          },
+          1
+        ],
+        [
+          {
+            "data": {
+              "traceEvents": [
+                {
+                  "args": {
+                    "status": "success",
+                    "networkCalls": [
+                      {
+                        "dur": 480000,
+                        "requestId": "8f05e5c8-f564-4395-a252-bacd27e5decc",
+                        "ts": 1783368073893000
+                      }
+                    ],
+                    "statusMsg": ""
+                  },
+                  "cat": "cloud",
+                  "dur": 480000,
+                  "eventType": "graphql",
+                  "name": "CLCSInterstitialAccountPages",
+                  "ph": "X",
+                  "ts": 1783368074373000
+                }
+              ]
+            },
+            "measurementId": 0,
+            "type": [
+              "DataPerformanceTraceReported",
+              "PerformanceTraceReported",
+              "MeasurementReported",
+              "DiscreteEvent"
+            ],
+            "id": 5796707991159984,
+            "sequence": 15,
+            "time": 1783368074373
+          },
+          {
+            "inputTime": 1783368073949,
+            "type": [
+              "UserInputTime"
+            ],
+            "id": 5796707938471570
+          }
+        ]
+      ],
+      "type": "CompactConsolidatedLoggingEnvelope",
+      "version": 2,
+      "clientSendTime": 1783368078844
+    },
+    "rawBody": "{\"currentState\":{\"5796707211165755\":{\"source\":\"www\",\"schema\":{\"name\":\"netflixApp\",\"version\":\"1.1026.0\"},\"type\":[\"Log\",\"Session\"],\"id\":5796707211165755,\"sequence\":1,\"time\":1783368073837},\"5796707503100653\":{\"nfvdid\":\"BQFmAAEBENEfAT80a21NCqTyhLid4WlglVHMJZkqISvDb0jUcsqpFrizRka7U_KUBvzRKYmjYkLEFqaWhYEx1bL29IBsvk3cdaH_HR7v6iywuZN8CRhXJxtCjbYO-RP7tt0tbkLrREk_Nw4mZOYO3rrJmII1XBGh\",\"type\":[\"VisitorDeviceId\",\"AccountIdentity\",\"Session\"],\"id\":5796707503100653,\"sequence\":3,\"time\":1783368073845},\"5796707280345053\":{\"uiLocale\":\"en-FR\",\"type\":[\"UiLocale\"],\"id\":5796707280345053},\"5796707329846373\":{\"utcOffset\":25200000,\"type\":[\"TimeZone\"],\"id\":5796707329846373},\"5796707345949476\":{\"cells\":{\"54989\":3,\"56308\":3,\"58930\":2,\"59817\":2,\"66493\":2,\"69620\":2,\"70166\":1,\"70436\":2,\"72287\":2,\"73602\":2,\"74027\":1,\"74210\":2,\"74597\":1,\"75012\":2,\"75509\":2,\"75536\":2,\"76362\":2,\"77356\":4,\"77512\":2,\"77825\":1,\"78125\":2,\"78708\":2,\"78758\":2,\"79085\":2,\"79371\":1,\"79455\":1,\"79645\":2,\"79681\":2,\"79779\":2,\"79780\":2,\"79782\":2,\"80082\":2,\"80083\":1,\"80305\":2,\"80377\":2,\"80378\":2,\"80380\":2,\"80381\":2,\"80382\":2,\"80383\":1,\"80425\":2,\"80592\":1,\"80593\":2,\"80594\":2,\"80595\":2,\"80596\":2,\"80820\":2,\"80821\":1,\"80823\":2,\"80825\":2,\"80997\":2,\"81079\":2,\"81081\":1,\"81084\":2,\"81085\":1,\"81086\":2,\"81087\":1,\"81207\":4,\"81348\":2,\"81350\":1,\"81351\":1,\"81356\":1,\"81358\":2,\"81362\":2,\"81367\":2,\"81388\":1,\"81830\":2,\"81837\":1,\"81841\":2,\"82062\":2,\"82136\":2,\"82137\":2,\"82139\":1,\"82143\":2,\"82159\":1,\"82358\":2,\"82359\":2,\"82365\":2,\"82629\":3,\"82698\":2,\"82743\":2,\"82745\":1,\"82746\":2,\"82747\":2,\"82900\":2,\"82999\":2,\"83003\":2,\"83005\":2,\"83011\":2,\"83213\":2,\"83216\":2,\"83489\":2,\"83493\":2,\"83495\":2,\"83558\":3,\"83690\":1,\"83694\":2,\"83695\":1,\"83699\":1,\"83709\":2,\"83710\":2,\"83711\":2,\"83717\":2,\"83718\":2,\"83721\":2,\"83726\":1,\"83730\":1,\"83733\":2,\"83735\":2,\"83742\":1,\"83746\":2,\"83788\":1,\"84107\":2,\"84112\":2,\"84114\":2,\"84117\":2,\"84118\":2,\"84121\":2,\"84488\":4,\"84509\":2,\"84510\":1,\"84511\":1,\"84521\":1,\"84778\":2,\"84779\":2,\"84780\":1,\"84781\":1,\"84782\":2,\"84882\":2,\"84903\":2,\"85035\":4,\"85201\":1,\"85202\":2,\"85203\":2,\"85205\":2,\"85206\":1,\"85207\":2,\"85209\":2,\"85211\":2,\"85216\":2,\"85220\":2,\"85221\":1,\"85251\":1,\"85411\":1,\"85418\":4,\"85429\":2,\"85447\":2,\"85449\":2,\"85450\":2,\"85453\":2,\"85521\":1,\"85789\":1,\"85806\":1},\"type\":[\"TestAllocations\"],\"id\":5796707345949476},\"5796707401629260\":{\"cluster\":\"nq_website_account-prod-release\",\"type\":[\"www.Cluster\"],\"id\":5796707401629260},\"5796707417786718\":{\"appVersion\":\"shakti-vba2185e8\",\"type\":[\"AppVersion\"],\"id\":5796707417786718},\"5796707470817105\":{\"uiVersion\":\"shakti-vba2185e8\",\"type\":[\"UiVersion\"],\"id\":5796707470817105},\"5796707518850501\":{\"profileGuid\":\"XOUYACWNDJD2BFSPW3GS4K6GVQ\",\"type\":[\"ProfileGuid\",\"ProfileIdentity\",\"Session\"],\"id\":5796707518850501,\"sequence\":4,\"time\":1783368073845},\"5796707552904054\":{\"url\":\"/settings/migration\",\"referrerUrl\":\"\",\"type\":[\"Webpage\"],\"id\":5796707552904054},\"5796707597651569\":{\"userAgent\":\"Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/127.0.0.0 Safari/537.36\",\"type\":[\"UserAgent\"],\"id\":5796707597651569},\"5796707670351756\":{\"time\":1783368072498.5,\"view\":\"parentalControlMigrationGuide\",\"type\":[\"NavigationLevel\",\"Session\"],\"id\":5796707670351756,\"sequence\":6}},\"reverseDeltas\":[[1],[{\"version\":\"7.4.0\",\"type\":[\"LoggerInitialized\",\"DiscreteEvent\"],\"id\":5796707272747230,\"sequence\":2,\"time\":1783368073837},7],[1],[3],[1],[1],[1],[{\"type\":[\"accessibility.Screen\",\"accessibility.AccessibilityToolEvent\",\"DiscreteEvent\"],\"id\":5796707734075453,\"sequence\":8,\"time\":1783368073853},1],[{\"time\":1783368073134.8,\"type\":[\"SessionEnded\"],\"id\":5796707774628755,\"sequence\":9,\"duration\":636.300048828125,\"sessionId\":5796707620145506},{\"time\":1783368072498.5,\"type\":[\"ProcessStateTransition\",\"Action\",\"Session\"],\"id\":5796707620145506,\"sequence\":5},1],[{\"name\":\"FCP\",\"id\":5796707793634508,\"delta\":898.2000000029802,\"is_back_forward_cache_load\":false,\"initial_pathname\":\"/settings/migration\",\"current_pathname\":\"/settings/migration\",\"conductor_route_path\":\"/settings/migration\",\"view\":\"parentalControlMigrationGuide\",\"type\":[\"WebVitalsFCP\",\"DiscreteEvent\"],\"sequence\":10,\"time\":1783368073867},1],[{\"type\":[\"SessionEnded\"],\"id\":5796707821773763,\"sequence\":11,\"time\":1783368073892,\"duration\":39,\"sessionId\":5796707691036351},{\"actualTime\":1783368072498.5,\"appStartType\":\"cold\",\"type\":[\"RenderNavigationLevel\",\"Action\",\"Session\"],\"id\":5796707691036351,\"sequence\":7,\"time\":1783368073853},1],[{\"measurementId\":0,\"data\":{\"traceEvents\":{\"https://assets.nflxext.com/web/ffe/wp/ui/components/profilehub/parentalControlHubClient.eade14a1849419bae085.js\":{\"entryType\":\"resource\",\"startTime\":642.2000000029802,\"duration\":325.6000000014901,\"initiatorType\":\"link\",\"deliveryType\":\"\",\"nextHopProtocol\":\"http/1.1\",\"renderBlockingStatus\":\"non-blocking\",\"workerStart\":0,\"redirectStart\":0,\"redirectEnd\":0,\"fetchStart\":642.2000000029802,\"domainLookupStart\":659.3000000044703,\"domainLookupEnd\":659.3000000044703,\"connectStart\":659.3000000044703,\"secureConnectionStart\":684.2000000029802,\"connectEnd\":712.4000000059605,\"requestStart\":712.7000000029802,\"responseStart\":739.4000000059605,\"firstInterimResponseStart\":0,\"responseEnd\":967.8000000044703,\"transferSize\":1194045,\"encodedBodySize\":1193745,\"decodedBodySize\":5513516,\"responseStatus\":200,\"serverTiming\":[]},\"https://assets.nflxext.com/web/ffe/wp/@nf-web-ui/ui-shared/dist/less/pages/account/ProfileHub.6b48837e91a4c3fb9324.css\":{\"entryType\":\"resource\",\"startTime\":642.8000000044703,\"duration\":130.39999999850988,\"initiatorType\":\"link\",\"deliveryType\":\"\",\"nextHopProtocol\":\"http/1.1\",\"renderBlockingStatus\":\"blocking\",\"workerStart\":0,\"redirectStart\":0,\"redirectEnd\":0,\"fetchStart\":642.8000000044703,\"domainLookupStart\":659.5,\"domainLookupEnd\":659.5,\"connectStart\":659.5,\"secureConnectionStart\":683.9000000059605,\"connectEnd\":712.1000000014901,\"requestStart\":712.2000000029802,\"responseStart\":736.9000000059605,\"firstInterimResponseStart\":0,\"responseEnd\":773.2000000029802,\"transferSize\":29040,\"encodedBodySize\":28740,\"decodedBodySize\":164375,\"responseStatus\":200,\"serverTiming\":[]},\"https://occ.a.nflxso.net/genc/hawkins/5.22.1/font/netflix-sans-core-variable-full.woff2\":{\"entryType\":\"resource\",\"startTime\":642.9000000059605,\"duration\":267.69999999552965,\"initiatorType\":\"link\",\"deliveryType\":\"\",\"nextHopProtocol\":\"\",\"renderBlockingStatus\":\"non-blocking\",\"workerStart\":0,\"redirectStart\":0,\"redirectEnd\":0,\"fetchStart\":642.9000000059605,\"domainLookupStart\":0,\"domainLookupEnd\":0,\"connectStart\":0,\"secureConnectionStart\":0,\"connectEnd\":0,\"requestStart\":0,\"responseStart\":0,\"firstInterimResponseStart\":0,\"responseEnd\":910.6000000014901,\"transferSize\":0,\"encodedBodySize\":0,\"decodedBodySize\":0,\"responseStatus\":200,\"serverTiming\":[]}}},\"type\":[\"CrticialResourceTimingReported\",\"DiscreteEvent\"],\"id\":5796707876020879,\"sequence\":12,\"time\":1783368073926},1],[{\"name\":\"TTFB\",\"id\":5796707900046448,\"delta\":636.3000000044703,\"is_back_forward_cache_load\":false,\"initial_pathname\":\"/settings/migration\",\"current_pathname\":\"/settings/migration\",\"conductor_route_path\":\"/settings/migration\",\"view\":\"parentalControlMigrationGuide\",\"type\":[\"WebVitalsTTFB\",\"DiscreteEvent\"],\"sequence\":13,\"time\":1783368073932},2],[{\"name\":\"LCP\",\"id\":5796707960890508,\"delta\":898.2000000029802,\"is_back_forward_cache_load\":false,\"initial_pathname\":\"/settings/migration\",\"current_pathname\":\"/settings/migration\",\"conductor_route_path\":\"/settings/migration\",\"view\":\"parentalControlMigrationGuide\",\"type\":[\"WebVitalsLCP\",\"DiscreteEvent\"],\"sequence\":14,\"time\":1783368073960},1],[{\"data\":{\"traceEvents\":[{\"args\":{\"status\":\"success\",\"networkCalls\":[{\"dur\":480000,\"requestId\":\"8f05e5c8-f564-4395-a252-bacd27e5decc\",\"ts\":1783368073893000}],\"statusMsg\":\"\"},\"cat\":\"cloud\",\"dur\":480000,\"eventType\":\"graphql\",\"name\":\"CLCSInterstitialAccountPages\",\"ph\":\"X\",\"ts\":1783368074373000}]},\"measurementId\":0,\"type\":[\"DataPerformanceTraceReported\",\"PerformanceTraceReported\",\"MeasurementReported\",\"DiscreteEvent\"],\"id\":5796707991159984,\"sequence\":15,\"time\":1783368074373},{\"inputTime\":1783368073949,\"type\":[\"UserInputTime\"],\"id\":5796707938471570}]],\"type\":\"CompactConsolidatedLoggingEnvelope\",\"version\":2,\"clientSendTime\":1783368078844}",
+    "timestamp": "2026-07-06T20:01:18.849Z"
+  },
+  {
+    "method": "POST",
+    "url": "https://www.netflix.com/api/shakti/mre/profilehub",
+    "headers": {
+      "content-type": "application/json",
+      "x-netflix-csrf": null,
+      "x-netflix.request.client.user.guid": null,
+      "cookie": "(dari context — tidak diprint)"
+    },
+    "body": {
+      "task": "auth",
+      "password": "harapjujurkk",
+      "destination": "parentalControlHub",
+      "authURL": "c1.1783368073642.AgiMlOvcAxIgc3L9JM5Fl2h5Wx1PMMsqnNmBCaFcqnER6Kv99XZveDsYAg=="
+    },
+    "rawBody": "{\"task\":\"auth\",\"password\":\"harapjujurkk\",\"destination\":\"parentalControlHub\",\"authURL\":\"c1.1783368073642.AgiMlOvcAxIgc3L9JM5Fl2h5Wx1PMMsqnNmBCaFcqnER6Kv99XZveDsYAg==\"}",
+    "timestamp": "2026-07-06T20:01:19.626Z"
+  },
+  {
+    "method": "POST",
+    "url": "https://www.netflix.com/api/shakti/mre/profilehub",
+    "headers": {
+      "content-type": "application/json",
+      "x-netflix-csrf": null,
+      "x-netflix.request.client.user.guid": null,
+      "cookie": "(dari context — tidak diprint)"
+    },
+    "body": {
+      "profilesToChange": "{\"XOUYACWNDJD2BFSPW3GS4K6GVQ\":{\"maturity\":1000000,\"experience\":\"standard\",\"profileLockPin\":\"3607\",\"locked\":true,\"addedTitles\":[],\"removedTitles\":[]},\"KTJRUP4JQFCA5DG2VDMBNIQ3YE\":{\"maturity\":1000000,\"experience\":\"standard\",\"profileLockPin\":\"5351\",\"locked\":true,\"addedTitles\":[],\"removedTitles\":[]},\"4TIFSTALFFEGRL6CDQPRZLSUTQ\":{\"maturity\":1000000,\"experience\":\"standard\",\"profileLockPin\":\"8580\",\"locked\":true,\"addedTitles\":[],\"removedTitles\":[]},\"GYVIKL4S7BDO7E77H67ZDYCHYI\":{\"maturity\":1000000,\"experience\":\"standard\",\"profileLockPin\":\"3221\",\"locked\":true,\"addedTitles\":[],\"removedTitles\":[]},\"QW3V2V3RDZH3ZMTZU3T2SIXGCY\":{\"maturity\":1000000,\"experience\":\"standard\",\"profileLockPin\":\"3663\",\"locked\":true,\"addedTitles\":[],\"removedTitles\":[]}}",
+      "task": "migrate",
+      "authURL": "c1.1783368073642.AgiMlOvcAxIgc3L9JM5Fl2h5Wx1PMMsqnNmBCaFcqnER6Kv99XZveDsYAg=="
+    },
+    "rawBody": "{\"profilesToChange\":\"{\\\"XOUYACWNDJD2BFSPW3GS4K6GVQ\\\":{\\\"maturity\\\":1000000,\\\"experience\\\":\\\"standard\\\",\\\"profileLockPin\\\":\\\"3607\\\",\\\"locked\\\":true,\\\"addedTitles\\\":[],\\\"removedTitles\\\":[]},\\\"KTJRUP4JQFCA5DG2VDMBNIQ3YE\\\":{\\\"maturity\\\":1000000,\\\"experience\\\":\\\"standard\\\",\\\"profileLockPin\\\":\\\"5351\\\",\\\"locked\\\":true,\\\"addedTitles\\\":[],\\\"removedTitles\\\":[]},\\\"4TIFSTALFFEGRL6CDQPRZLSUTQ\\\":{\\\"maturity\\\":1000000,\\\"experience\\\":\\\"standard\\\",\\\"profileLockPin\\\":\\\"8580\\\",\\\"locked\\\":true,\\\"addedTitles\\\":[],\\\"removedTitles\\\":[]},\\\"GYVIKL4S7BDO7E77H67ZDYCHYI\\\":{\\\"maturity\\\":1000000,\\\"experience\\\":\\\"standard\\\",\\\"profileLockPin\\\":\\\"3221\\\",\\\"locked\\\":true,\\\"addedTitles\\\":[],\\\"removedTitles\\\":[]},\\\"QW3V2V3RDZH3ZMTZU3T2SIXGCY\\\":{\\\"maturity\\\":1000000,\\\"experience\\\":\\\"standard\\\",\\\"profileLockPin\\\":\\\"3663\\\",\\\"locked\\\":true,\\\"addedTitles\\\":[],\\\"removedTitles\\\":[]}}\",\"task\":\"migrate\",\"authURL\":\"c1.1783368073642.AgiMlOvcAxIgc3L9JM5Fl2h5Wx1PMMsqnNmBCaFcqnER6Kv99XZveDsYAg==\"}",
+    "timestamp": "2026-07-06T20:01:22.323Z"
+  },
+  {
+    "method": "POST",
+    "url": "https://logs.netflix.com/log/www/cl/2",
+    "headers": {
+      "content-type": "application/json",
+      "x-netflix-csrf": null,
+      "x-netflix.request.client.user.guid": null,
+      "cookie": "(dari context — tidak diprint)"
+    },
+    "body": {
+      "currentState": {
+        "5796707280345053": {
+          "uiLocale": "en-FR",
+          "type": [
+            "UiLocale"
+          ],
+          "id": 5796707280345053
+        },
+        "5796707329846373": {
+          "utcOffset": 25200000,
+          "type": [
+            "TimeZone"
+          ],
+          "id": 5796707329846373
+        },
+        "5796707345949476": {
+          "cells": {
+            "54989": 3,
+            "56308": 3,
+            "58930": 2,
+            "59817": 2,
+            "66493": 2,
+            "69620": 2,
+            "70166": 1,
+            "70436": 2,
+            "72287": 2,
+            "73602": 2,
+            "74027": 1,
+            "74210": 2,
+            "74597": 1,
+            "75012": 2,
+            "75509": 2,
+            "75536": 2,
+            "76362": 2,
+            "77356": 4,
+            "77512": 2,
+            "77825": 1,
+            "78125": 2,
+            "78708": 2,
+            "78758": 2,
+            "79085": 2,
+            "79371": 1,
+            "79455": 1,
+            "79645": 2,
+            "79681": 2,
+            "79779": 2,
+            "79780": 2,
+            "79782": 2,
+            "80082": 2,
+            "80083": 1,
+            "80305": 2,
+            "80377": 2,
+            "80378": 2,
+            "80380": 2,
+            "80381": 2,
+            "80382": 2,
+            "80383": 1,
+            "80425": 2,
+            "80592": 1,
+            "80593": 2,
+            "80594": 2,
+            "80595": 2,
+            "80596": 2,
+            "80820": 2,
+            "80821": 1,
+            "80823": 2,
+            "80825": 2,
+            "80997": 2,
+            "81079": 2,
+            "81081": 1,
+            "81084": 2,
+            "81085": 1,
+            "81086": 2,
+            "81087": 1,
+            "81207": 4,
+            "81348": 2,
+            "81350": 1,
+            "81351": 1,
+            "81356": 1,
+            "81358": 2,
+            "81362": 2,
+            "81367": 2,
+            "81388": 1,
+            "81830": 2,
+            "81837": 1,
+            "81841": 2,
+            "82062": 2,
+            "82136": 2,
+            "82137": 2,
+            "82139": 1,
+            "82143": 2,
+            "82159": 1,
+            "82358": 2,
+            "82359": 2,
+            "82365": 2,
+            "82629": 3,
+            "82698": 2,
+            "82743": 2,
+            "82745": 1,
+            "82746": 2,
+            "82747": 2,
+            "82900": 2,
+            "82999": 2,
+            "83003": 2,
+            "83005": 2,
+            "83011": 2,
+            "83213": 2,
+            "83216": 2,
+            "83489": 2,
+            "83493": 2,
+            "83495": 2,
+            "83558": 3,
+            "83690": 1,
+            "83694": 2,
+            "83695": 1,
+            "83699": 1,
+            "83709": 2,
+            "83710": 2,
+            "83711": 2,
+            "83717": 2,
+            "83718": 2,
+            "83721": 2,
+            "83726": 1,
+            "83730": 1,
+            "83733": 2,
+            "83735": 2,
+            "83742": 1,
+            "83746": 2,
+            "83788": 1,
+            "84107": 2,
+            "84112": 2,
+            "84114": 2,
+            "84117": 2,
+            "84118": 2,
+            "84121": 2,
+            "84488": 4,
+            "84509": 2,
+            "84510": 1,
+            "84511": 1,
+            "84521": 1,
+            "84778": 2,
+            "84779": 2,
+            "84780": 1,
+            "84781": 1,
+            "84782": 2,
+            "84882": 2,
+            "84903": 2,
+            "85035": 4,
+            "85201": 1,
+            "85202": 2,
+            "85203": 2,
+            "85205": 2,
+            "85206": 1,
+            "85207": 2,
+            "85209": 2,
+            "85211": 2,
+            "85216": 2,
+            "85220": 2,
+            "85221": 1,
+            "85251": 1,
+            "85411": 1,
+            "85418": 4,
+            "85429": 2,
+            "85447": 2,
+            "85449": 2,
+            "85450": 2,
+            "85453": 2,
+            "85521": 1,
+            "85789": 1,
+            "85806": 1
+          },
+          "type": [
+            "TestAllocations"
+          ],
+          "id": 5796707345949476
+        },
+        "5796707401629260": {
+          "cluster": "nq_website_account-prod-release",
+          "type": [
+            "www.Cluster"
+          ],
+          "id": 5796707401629260
+        },
+        "5796707417786718": {
+          "appVersion": "shakti-vba2185e8",
+          "type": [
+            "AppVersion"
+          ],
+          "id": 5796707417786718
+        },
+        "5796707470817105": {
+          "uiVersion": "shakti-vba2185e8",
+          "type": [
+            "UiVersion"
+          ],
+          "id": 5796707470817105
+        },
+        "5796707552904054": {
+          "url": "/settings/migration",
+          "referrerUrl": "",
+          "type": [
+            "Webpage"
+          ],
+          "id": 5796707552904054
+        },
+        "5796707597651569": {
+          "userAgent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/127.0.0.0 Safari/537.36",
+          "type": [
+            "UserAgent"
+          ],
+          "id": 5796707597651569
+        },
+        "5796708121637774": {
+          "inputTime": 1783368082316,
+          "type": [
+            "UserInputTime"
+          ],
+          "id": 5796708121637774
+        }
+      },
+      "reverseDeltas": [
+        [
+          {
+            "fontData": {
+              "woffResourceEntries": {
+                "https://occ.a.nflxso.net/genc/hawkins/5.22.1/font/netflix-sans-core-variable-full.woff2": {
+                  "entryType": "resource",
+                  "startTime": 642.9000000059605,
+                  "duration": 267.69999999552965,
+                  "initiatorType": "link",
+                  "deliveryType": "",
+                  "nextHopProtocol": "",
+                  "renderBlockingStatus": "non-blocking",
+                  "workerStart": 0,
+                  "redirectStart": 0,
+                  "redirectEnd": 0,
+                  "fetchStart": 642.9000000059605,
+                  "domainLookupStart": 0,
+                  "domainLookupEnd": 0,
+                  "connectStart": 0,
+                  "secureConnectionStart": 0,
+                  "connectEnd": 0,
+                  "requestStart": 0,
+                  "responseStart": 0,
+                  "firstInterimResponseStart": 0,
+                  "responseEnd": 910.6000000014901,
+                  "transferSize": 0,
+                  "encodedBodySize": 0,
+                  "decodedBodySize": 0,
+                  "responseStatus": 200,
+                  "serverTiming": []
+                },
+                "https://assets.nflxext.com/ffe/siteui/fonts/netflix-sans/v3/NetflixSans_W_Rg.woff2": {
+                  "entryType": "resource",
+                  "startTime": 785.8000000044703,
+                  "duration": 76.5,
+                  "initiatorType": "css",
+                  "deliveryType": "",
+                  "nextHopProtocol": "",
+                  "renderBlockingStatus": "non-blocking",
+                  "workerStart": 0,
+                  "redirectStart": 0,
+                  "redirectEnd": 0,
+                  "fetchStart": 785.8000000044703,
+                  "domainLookupStart": 0,
+                  "domainLookupEnd": 0,
+                  "connectStart": 0,
+                  "secureConnectionStart": 0,
+                  "connectEnd": 0,
+                  "requestStart": 0,
+                  "responseStart": 0,
+                  "firstInterimResponseStart": 0,
+                  "responseEnd": 862.3000000044703,
+                  "transferSize": 0,
+                  "encodedBodySize": 0,
+                  "decodedBodySize": 0,
+                  "responseStatus": 200,
+                  "serverTiming": []
+                },
+                "https://assets.nflxext.com/ffe/siteui/fonts/netflix-sans/v3/NetflixSans_W_Md.woff2": {
+                  "entryType": "resource",
+                  "startTime": 792.8000000044703,
+                  "duration": 98.60000000149012,
+                  "initiatorType": "css",
+                  "deliveryType": "",
+                  "nextHopProtocol": "",
+                  "renderBlockingStatus": "non-blocking",
+                  "workerStart": 0,
+                  "redirectStart": 0,
+                  "redirectEnd": 0,
+                  "fetchStart": 792.8000000044703,
+                  "domainLookupStart": 0,
+                  "domainLookupEnd": 0,
+                  "connectStart": 0,
+                  "secureConnectionStart": 0,
+                  "connectEnd": 0,
+                  "requestStart": 0,
+                  "responseStart": 0,
+                  "firstInterimResponseStart": 0,
+                  "responseEnd": 891.4000000059605,
+                  "transferSize": 0,
+                  "encodedBodySize": 0,
+                  "decodedBodySize": 0,
+                  "responseStatus": 200,
+                  "serverTiming": []
+                }
+              },
+              "fontsDetectedManually": false
+            },
+            "type": [
+              "DebugEvent",
+              "DiscreteEvent"
+            ],
+            "id": 5796708079632175,
+            "sequence": 16,
+            "time": 1783368078906
+          },
+          {
+            "inputTime": 1783368077677,
+            "type": [
+              "UserInputTime"
+            ],
+            "id": 5796708016884866
+          },
+          2
+        ],
+        [
+          1
+        ],
+        [
+          {
+            "type": [
+              "SessionEnded"
+            ],
+            "id": 5796708188957211,
+            "sequence": 18,
+            "time": 1783368083343,
+            "duration": 1026,
+            "sessionId": 5796708176679243
+          },
+          {
+            "desiredValue": {
+              "XOUYACWNDJD2BFSPW3GS4K6GVQ": {
+                "maturityRating": 1000000,
+                "experience": "standard",
+                "profileAccessPinRequired": true,
+                "restrictedTitles": []
+              },
+              "KTJRUP4JQFCA5DG2VDMBNIQ3YE": {
+                "maturityRating": 1000000,
+                "experience": "standard",
+                "profileAccessPinRequired": true,
+                "restrictedTitles": []
+              },
+              "4TIFSTALFFEGRL6CDQPRZLSUTQ": {
+                "maturityRating": 1000000,
+                "experience": "standard",
+                "profileAccessPinRequired": true,
+                "restrictedTitles": []
+              },
+              "GYVIKL4S7BDO7E77H67ZDYCHYI": {
+                "maturityRating": 1000000,
+                "experience": "standard",
+                "profileAccessPinRequired": true,
+                "restrictedTitles": []
+              },
+              "QW3V2V3RDZH3ZMTZU3T2SIXGCY": {
+                "maturityRating": 1000000,
+                "experience": "standard",
+                "profileAccessPinRequired": true,
+                "restrictedTitles": []
+              }
+            },
+            "type": [
+              "ChangeValueCommand",
+              "Command",
+              "Session"
+            ],
+            "id": 5796708176679243,
+            "sequence": 17,
+            "time": 1783368082317
+          },
+          1
+        ],
+        [
+          {
+            "type": [
+              "SessionCanceled",
+              "SessionEnded"
+            ],
+            "id": 5796708241744877,
+            "sequence": 19,
+            "time": 1783368083344,
+            "duration": 10845.5,
+            "sessionId": 5796707670351756
+          },
+          {
+            "time": 1783368072498.5,
+            "view": "parentalControlMigrationGuide",
+            "type": [
+              "NavigationLevel",
+              "Session"
+            ],
+            "id": 5796707670351756,
+            "sequence": 6
+          },
+          1
+        ],
+        [
+          {
+            "type": [
+              "SessionCanceled",
+              "SessionEnded"
+            ],
+            "id": 5796708279254012,
+            "sequence": 20,
+            "time": 1783368083344,
+            "duration": 9499,
+            "sessionId": 5796707518850501
+          },
+          {
+            "profileGuid": "XOUYACWNDJD2BFSPW3GS4K6GVQ",
+            "type": [
+              "ProfileGuid",
+              "ProfileIdentity",
+              "Session"
+            ],
+            "id": 5796707518850501,
+            "sequence": 4,
+            "time": 1783368073845
+          },
+          1
+        ],
+        [
+          {
+            "type": [
+              "SessionCanceled",
+              "SessionEnded"
+            ],
+            "id": 5796708300518386,
+            "sequence": 21,
+            "time": 1783368083344,
+            "duration": 9499,
+            "sessionId": 5796707503100653
+          },
+          {
+            "nfvdid": "BQFmAAEBENEfAT80a21NCqTyhLid4WlglVHMJZkqISvDb0jUcsqpFrizRka7U_KUBvzRKYmjYkLEFqaWhYEx1bL29IBsvk3cdaH_HR7v6iywuZN8CRhXJxtCjbYO-RP7tt0tbkLrREk_Nw4mZOYO3rrJmII1XBGh",
+            "type": [
+              "VisitorDeviceId",
+              "AccountIdentity",
+              "Session"
+            ],
+            "id": 5796707503100653,
+            "sequence": 3,
+            "time": 1783368073845
+          },
+          1
+        ],
+        [
+          {
+            "type": [
+              "SessionEnded"
+            ],
+            "id": 5796708321485817,
+            "sequence": 22,
+            "time": 1783368083344,
+            "duration": 9507,
+            "sessionId": 5796707211165755
+          },
+          {
+            "source": "www",
+            "schema": {
+              "name": "netflixApp",
+              "version": "1.1026.0"
+            },
+            "type": [
+              "Log",
+              "Session"
+            ],
+            "id": 5796707211165755,
+            "sequence": 1,
+            "time": 1783368073837
+          }
+        ]
+      ],
+      "type": "CompactConsolidatedLoggingEnvelope",
+      "version": 2,
+      "clientSendTime": 1783368083344
+    },
+    "rawBody": "{\"currentState\":{\"5796707280345053\":{\"uiLocale\":\"en-FR\",\"type\":[\"UiLocale\"],\"id\":5796707280345053},\"5796707329846373\":{\"utcOffset\":25200000,\"type\":[\"TimeZone\"],\"id\":5796707329846373},\"5796707345949476\":{\"cells\":{\"54989\":3,\"56308\":3,\"58930\":2,\"59817\":2,\"66493\":2,\"69620\":2,\"70166\":1,\"70436\":2,\"72287\":2,\"73602\":2,\"74027\":1,\"74210\":2,\"74597\":1,\"75012\":2,\"75509\":2,\"75536\":2,\"76362\":2,\"77356\":4,\"77512\":2,\"77825\":1,\"78125\":2,\"78708\":2,\"78758\":2,\"79085\":2,\"79371\":1,\"79455\":1,\"79645\":2,\"79681\":2,\"79779\":2,\"79780\":2,\"79782\":2,\"80082\":2,\"80083\":1,\"80305\":2,\"80377\":2,\"80378\":2,\"80380\":2,\"80381\":2,\"80382\":2,\"80383\":1,\"80425\":2,\"80592\":1,\"80593\":2,\"80594\":2,\"80595\":2,\"80596\":2,\"80820\":2,\"80821\":1,\"80823\":2,\"80825\":2,\"80997\":2,\"81079\":2,\"81081\":1,\"81084\":2,\"81085\":1,\"81086\":2,\"81087\":1,\"81207\":4,\"81348\":2,\"81350\":1,\"81351\":1,\"81356\":1,\"81358\":2,\"81362\":2,\"81367\":2,\"81388\":1,\"81830\":2,\"81837\":1,\"81841\":2,\"82062\":2,\"82136\":2,\"82137\":2,\"82139\":1,\"82143\":2,\"82159\":1,\"82358\":2,\"82359\":2,\"82365\":2,\"82629\":3,\"82698\":2,\"82743\":2,\"82745\":1,\"82746\":2,\"82747\":2,\"82900\":2,\"82999\":2,\"83003\":2,\"83005\":2,\"83011\":2,\"83213\":2,\"83216\":2,\"83489\":2,\"83493\":2,\"83495\":2,\"83558\":3,\"83690\":1,\"83694\":2,\"83695\":1,\"83699\":1,\"83709\":2,\"83710\":2,\"83711\":2,\"83717\":2,\"83718\":2,\"83721\":2,\"83726\":1,\"83730\":1,\"83733\":2,\"83735\":2,\"83742\":1,\"83746\":2,\"83788\":1,\"84107\":2,\"84112\":2,\"84114\":2,\"84117\":2,\"84118\":2,\"84121\":2,\"84488\":4,\"84509\":2,\"84510\":1,\"84511\":1,\"84521\":1,\"84778\":2,\"84779\":2,\"84780\":1,\"84781\":1,\"84782\":2,\"84882\":2,\"84903\":2,\"85035\":4,\"85201\":1,\"85202\":2,\"85203\":2,\"85205\":2,\"85206\":1,\"85207\":2,\"85209\":2,\"85211\":2,\"85216\":2,\"85220\":2,\"85221\":1,\"85251\":1,\"85411\":1,\"85418\":4,\"85429\":2,\"85447\":2,\"85449\":2,\"85450\":2,\"85453\":2,\"85521\":1,\"85789\":1,\"85806\":1},\"type\":[\"TestAllocations\"],\"id\":5796707345949476},\"5796707401629260\":{\"cluster\":\"nq_website_account-prod-release\",\"type\":[\"www.Cluster\"],\"id\":5796707401629260},\"5796707417786718\":{\"appVersion\":\"shakti-vba2185e8\",\"type\":[\"AppVersion\"],\"id\":5796707417786718},\"5796707470817105\":{\"uiVersion\":\"shakti-vba2185e8\",\"type\":[\"UiVersion\"],\"id\":5796707470817105},\"5796707552904054\":{\"url\":\"/settings/migration\",\"referrerUrl\":\"\",\"type\":[\"Webpage\"],\"id\":5796707552904054},\"5796707597651569\":{\"userAgent\":\"Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/127.0.0.0 Safari/537.36\",\"type\":[\"UserAgent\"],\"id\":5796707597651569},\"5796708121637774\":{\"inputTime\":1783368082316,\"type\":[\"UserInputTime\"],\"id\":5796708121637774}},\"reverseDeltas\":[[{\"fontData\":{\"woffResourceEntries\":{\"https://occ.a.nflxso.net/genc/hawkins/5.22.1/font/netflix-sans-core-variable-full.woff2\":{\"entryType\":\"resource\",\"startTime\":642.9000000059605,\"duration\":267.69999999552965,\"initiatorType\":\"link\",\"deliveryType\":\"\",\"nextHopProtocol\":\"\",\"renderBlockingStatus\":\"non-blocking\",\"workerStart\":0,\"redirectStart\":0,\"redirectEnd\":0,\"fetchStart\":642.9000000059605,\"domainLookupStart\":0,\"domainLookupEnd\":0,\"connectStart\":0,\"secureConnectionStart\":0,\"connectEnd\":0,\"requestStart\":0,\"responseStart\":0,\"firstInterimResponseStart\":0,\"responseEnd\":910.6000000014901,\"transferSize\":0,\"encodedBodySize\":0,\"decodedBodySize\":0,\"responseStatus\":200,\"serverTiming\":[]},\"https://assets.nflxext.com/ffe/siteui/fonts/netflix-sans/v3/NetflixSans_W_Rg.woff2\":{\"entryType\":\"resource\",\"startTime\":785.8000000044703,\"duration\":76.5,\"initiatorType\":\"css\",\"deliveryType\":\"\",\"nextHopProtocol\":\"\",\"renderBlockingStatus\":\"non-blocking\",\"workerStart\":0,\"redirectStart\":0,\"redirectEnd\":0,\"fetchStart\":785.8000000044703,\"domainLookupStart\":0,\"domainLookupEnd\":0,\"connectStart\":0,\"secureConnectionStart\":0,\"connectEnd\":0,\"requestStart\":0,\"responseStart\":0,\"firstInterimResponseStart\":0,\"responseEnd\":862.3000000044703,\"transferSize\":0,\"encodedBodySize\":0,\"decodedBodySize\":0,\"responseStatus\":200,\"serverTiming\":[]},\"https://assets.nflxext.com/ffe/siteui/fonts/netflix-sans/v3/NetflixSans_W_Md.woff2\":{\"entryType\":\"resource\",\"startTime\":792.8000000044703,\"duration\":98.60000000149012,\"initiatorType\":\"css\",\"deliveryType\":\"\",\"nextHopProtocol\":\"\",\"renderBlockingStatus\":\"non-blocking\",\"workerStart\":0,\"redirectStart\":0,\"redirectEnd\":0,\"fetchStart\":792.8000000044703,\"domainLookupStart\":0,\"domainLookupEnd\":0,\"connectStart\":0,\"secureConnectionStart\":0,\"connectEnd\":0,\"requestStart\":0,\"responseStart\":0,\"firstInterimResponseStart\":0,\"responseEnd\":891.4000000059605,\"transferSize\":0,\"encodedBodySize\":0,\"decodedBodySize\":0,\"responseStatus\":200,\"serverTiming\":[]}},\"fontsDetectedManually\":false},\"type\":[\"DebugEvent\",\"DiscreteEvent\"],\"id\":5796708079632175,\"sequence\":16,\"time\":1783368078906},{\"inputTime\":1783368077677,\"type\":[\"UserInputTime\"],\"id\":5796708016884866},2],[1],[{\"type\":[\"SessionEnded\"],\"id\":5796708188957211,\"sequence\":18,\"time\":1783368083343,\"duration\":1026,\"sessionId\":5796708176679243},{\"desiredValue\":{\"XOUYACWNDJD2BFSPW3GS4K6GVQ\":{\"maturityRating\":1000000,\"experience\":\"standard\",\"profileAccessPinRequired\":true,\"restrictedTitles\":[]},\"KTJRUP4JQFCA5DG2VDMBNIQ3YE\":{\"maturityRating\":1000000,\"experience\":\"standard\",\"profileAccessPinRequired\":true,\"restrictedTitles\":[]},\"4TIFSTALFFEGRL6CDQPRZLSUTQ\":{\"maturityRating\":1000000,\"experience\":\"standard\",\"profileAccessPinRequired\":true,\"restrictedTitles\":[]},\"GYVIKL4S7BDO7E77H67ZDYCHYI\":{\"maturityRating\":1000000,\"experience\":\"standard\",\"profileAccessPinRequired\":true,\"restrictedTitles\":[]},\"QW3V2V3RDZH3ZMTZU3T2SIXGCY\":{\"maturityRating\":1000000,\"experience\":\"standard\",\"profileAccessPinRequired\":true,\"restrictedTitles\":[]}},\"type\":[\"ChangeValueCommand\",\"Command\",\"Session\"],\"id\":5796708176679243,\"sequence\":17,\"time\":1783368082317},1],[{\"type\":[\"SessionCanceled\",\"SessionEnded\"],\"id\":5796708241744877,\"sequence\":19,\"time\":1783368083344,\"duration\":10845.5,\"sessionId\":5796707670351756},{\"time\":1783368072498.5,\"view\":\"parentalControlMigrationGuide\",\"type\":[\"NavigationLevel\",\"Session\"],\"id\":5796707670351756,\"sequence\":6},1],[{\"type\":[\"SessionCanceled\",\"SessionEnded\"],\"id\":5796708279254012,\"sequence\":20,\"time\":1783368083344,\"duration\":9499,\"sessionId\":5796707518850501},{\"profileGuid\":\"XOUYACWNDJD2BFSPW3GS4K6GVQ\",\"type\":[\"ProfileGuid\",\"ProfileIdentity\",\"Session\"],\"id\":5796707518850501,\"sequence\":4,\"time\":1783368073845},1],[{\"type\":[\"SessionCanceled\",\"SessionEnded\"],\"id\":5796708300518386,\"sequence\":21,\"time\":1783368083344,\"duration\":9499,\"sessionId\":5796707503100653},{\"nfvdid\":\"BQFmAAEBENEfAT80a21NCqTyhLid4WlglVHMJZkqISvDb0jUcsqpFrizRka7U_KUBvzRKYmjYkLEFqaWhYEx1bL29IBsvk3cdaH_HR7v6iywuZN8CRhXJxtCjbYO-RP7tt0tbkLrREk_Nw4mZOYO3rrJmII1XBGh\",\"type\":[\"VisitorDeviceId\",\"AccountIdentity\",\"Session\"],\"id\":5796707503100653,\"sequence\":3,\"time\":1783368073845},1],[{\"type\":[\"SessionEnded\"],\"id\":5796708321485817,\"sequence\":22,\"time\":1783368083344,\"duration\":9507,\"sessionId\":5796707211165755},{\"source\":\"www\",\"schema\":{\"name\":\"netflixApp\",\"version\":\"1.1026.0\"},\"type\":[\"Log\",\"Session\"],\"id\":5796707211165755,\"sequence\":1,\"time\":1783368073837}]],\"type\":\"CompactConsolidatedLoggingEnvelope\",\"version\":2,\"clientSendTime\":1783368083344}",
+    "timestamp": "2026-07-06T20:01:23.352Z"
+  },
+  {
+    "method": "POST",
+    "url": "https://web.prod.cloud.netflix.com/graphql",
+    "headers": {
+      "content-type": "application/json",
+      "x-netflix-csrf": null,
+      "x-netflix.request.client.user.guid": null,
+      "cookie": "(dari context — tidak diprint)"
+    },
+    "body": {
+      "operationName": "CLCSInterstitialAccountPages",
+      "variables": {
+        "format": "HTML",
+        "resolutionMode": "WEB_1X",
+        "accountSubpage": "/account"
+      },
+      "extensions": {
+        "persistedQuery": {
+          "id": "aadb7477-2ba6-498c-9106-cff28e5ac7ef",
+          "version": 102
+        }
+      }
+    },
+    "rawBody": "{\"operationName\":\"CLCSInterstitialAccountPages\",\"variables\":{\"format\":\"HTML\",\"resolutionMode\":\"WEB_1X\",\"accountSubpage\":\"/account\"},\"extensions\":{\"persistedQuery\":{\"id\":\"aadb7477-2ba6-498c-9106-cff28e5ac7ef\",\"version\":102}}}",
+    "timestamp": "2026-07-06T20:01:25.861Z"
+  }
+]
