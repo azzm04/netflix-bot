@@ -366,17 +366,17 @@ async function guardAccount(email, profiles) {
         }
 
         // Dari yang cocok tipe, kick jika melebihi maxAllowed
-        // Hitung device saat ini (termasuk current) yang sudah cocok
-        const currentCount = devicesForProfile.filter(
+        const currentMatchCount = devicesForProfile.filter(
           d => d.isCurrent && isDeviceAllowed(d.deviceName, allowedDev)
         ).length;
-        const alreadyUsed = maxAllowed - currentCount;
+        // Sisa slot = maxAllowed dikurangi device current yang sudah cocok
+        const remainingSlots = Math.max(0, maxAllowed - currentMatchCount);
 
-        for (let i = alreadyUsed; i < allowedDevices.length; i++) {
+        for (let i = remainingSlots; i < allowedDevices.length; i++) {
           toKick.push(allowedDevices[i]);
           console.log(`    → KICK: "${allowedDevices[i].deviceName}" (melebihi limit ${maxAllowed})`);
         }
-        for (let i = 0; i < Math.min(alreadyUsed, allowedDevices.length); i++) {
+        for (let i = 0; i < Math.min(remainingSlots, allowedDevices.length); i++) {
           console.log(`    → BIARKAN: "${allowedDevices[i].deviceName}"`);
         }
       } else {
