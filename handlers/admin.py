@@ -630,7 +630,106 @@ async def terima_pin_baru(update: Update, context: ContextTypes.DEFAULT_TYPE):
     return ConversationHandler.END
 
 
-# ─── /cancel, timeout, pesan tidak dikenal ─────────────────
+# ─── /cekcookies ───────────────────────────────────────────
+
+async def cmd_cekcookies(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Cek status cookie semua akun via keep-alive headless."""
+    if update.effective_user.id != ADMIN_ID:
+        await update.message.reply_text("⛔ Hanya admin utama.")
+        return
+
+    pesan = await update.message.reply_text("🔍 Mengecek cookie semua akun...")
+
+    import subprocess
+    import os
+    import json
+
+    # Path ke cookie-kicker-pin-changer
+    base_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    ckpc_dir = os.path.join(base_dir, "cookie-kicker-pin-changer")
+    cookies_file = os.path.join(ckpc_dir, "cookies.json")
+
+    # Baca cookies.json untuk daftar email
+    if not os.path.exists(cookies_file):
+        await pesan.edit_text("⚠️ File cookies.json tidak ditemukan.")
+        return
+
+    try:
+        with open(cookies_file, "r") as f:
+            cookies = json.load(f)
+    except Exception as e:
+        await pesan.edit_text(f"⚠️ Gagal baca cookies.json: {e}")
+        return
+
+    emails = list(cookies.keys())
+    if not emails:
+        await pesan.edit_text("ℹ️ Tidak ada cookie tersimpan di cookies.json.")
+        return
+
+    await pesan.edit_text(f"🔍 Mengecek {len(emails)} akun... (bisa 1-2 menit)")
+
+    # Jalankan keep-alive.js via subprocess
+    try:
+        result = subprocess.run(
+            ["node", "keep-alive.js"],
+            cwd=ckpc_dir,
+            capture_output=True,
+            text=True,
+            timeout=120,
+        )
+        output = result.stdout + result.stderr
+    except subprocess.TimeoutExpired:
+        await pesan.edit_text("⚠️ Timeout saat cek cookie (>2 menit).")
+        return
+    except Exception as e:
+        await pesan.edit_text(f"⚠️ Gagal jalankan keep-alive.js: {e}")
+        return
+
+    # Parse output untuk ringkasan
+    ok_list      = []
+    expired_list = []
+    failed_list  = []
+
+    for line in output.splitlines():
+        if "✓ Cookie diperbarui" in line or "✓ Sesi aktif" in line:
+            ok_list.append(line)
+        elif "✗ Expired" in line or "cookie_expired" in line:
+            expired_list.append(line)
+        elif "✗ Gagal" in line or "✗" in line:
+            failed_list.append(line)
+
+    # Baca ulang cookies.json untuk lihat email mana yang hilang (dihapus karena expired)
+    try:
+        with open(cookies_file, "r") as f:
+            cookies_after = json.load(f)
+    except Exception:
+        cookies_after = cookies
+
+    expired_emails = [e for e in emails if e not in cookies_after]
+    ok_count       = len(cookies_after)
+    expired_count  = len(expired_emails)
+
+    teks  = "🍪 *STATUS COOKIE AKUN*\n"
+    teks += "━━━━━━━━━━━━━━━━\n"
+    teks += f"✅ Valid   : *{ok_count}*\n"
+    teks += f"❌ Expired : *{expired_count}*\n"
+    teks += f"📊 Total   : *{len(emails)}*\n"
+
+    if expired_emails:
+        teks += "\n*Akun yang perlu harvest ulang:*\n"
+        for e in expired_emails:
+            teks += f"• `{e}`\n"
+        teks += "\nJalankan di lokal:\n`node harvest-cookies.js HARIAN`"
+    else:
+        teks += "\n✅ Semua cookie masih valid!"
+
+    teks += "\n━━━━━━━━━━━━━━━━"
+
+    # Telegram max 4096 chars
+    if len(teks) > 4000:
+        teks = teks[:4000] + "\n_...terpotong_"
+
+    await pesan.edit_text(teks, parse_mode="Markdown")
 
 async def cancel(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     """Batalkan proses."""
