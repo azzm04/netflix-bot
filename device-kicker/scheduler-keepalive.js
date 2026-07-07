@@ -18,9 +18,9 @@ const { execSync } = require("child_process");
 const path    = require("path");
 const fs      = require("fs");
 
-// Jadwal: jam 03:00 setiap hari ke-1, 4, 7, 10, ... (tiap 3 hari)
-// Ganti ke "0 3 * * *" jika mau tiap hari
-const SCHEDULE = process.env.KEEPALIVE_SCHEDULE ?? "0 3 1-31/3 * *";
+// Jadwal: sekali sehari jam 02:00 dini hari (saat traffic rendah)
+// Ganti via .env: KEEPALIVE_SCHEDULE="0 2 * * *"
+const SCHEDULE = process.env.KEEPALIVE_SCHEDULE ?? "0 2 * * *";
 const RUN_NOW  = process.argv.includes("--now");
 const LOG_FILE = path.resolve(__dirname, "keepalive.log");
 
