@@ -727,10 +727,10 @@ async def cmd_cekcookies(update: Update, context: ContextTypes.DEFAULT_TYPE):
             teks += f"• `{e}`\n"
         teks += (
             "\n*Cara update:*\n"
-            "1\\. Login Netflix di browser\n"
-            "2\\. DevTools → Application → Cookies\n"
-            "3\\. Copy `NetflixId` & `SecureNetflixId`\n"
-            "4\\. Kirim: `/setcookie email NetflixId SecureNetflixId`"
+            "1\. Login Netflix di browser\n"
+            "2\. DevTools → Application → Cookies\n"
+            "3\. Copy `NetflixId` & `SecureNetflixId`\n"
+            "4\. Kirim: `/setcookie email NetflixId SecureNetflixId`"
         )
     else:
         teks += "\n✅ Semua cookie masih valid!"
