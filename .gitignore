@@ -8,3 +8,7 @@ pin_admin.json
 # Node.js
 node_modules/
 npm-debug.log*
+
+# Cookie sessions (JANGAN commit — berisi data autentikasi sensitif)
+device-kicker/cookies.json
+cookies.json
