@@ -640,7 +640,8 @@ async def cmd_cekcookies(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     pesan = await update.message.reply_text("🔍 Mengecek cookie semua akun...")
 
-    import subprocess
+    import ssl
+    import urllib.request
     import os
     import json
 
@@ -668,46 +669,51 @@ async def cmd_cekcookies(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     await pesan.edit_text(f"🔍 Mengecek {len(emails)} akun... (bisa 1-2 menit)")
 
-    # Jalankan keep-alive.js via subprocess
-    try:
-        result = subprocess.run(
-            ["node", "keep-alive.js"],
-            cwd=ckpc_dir,
-            capture_output=True,
-            text=True,
-            timeout=120,
-        )
-        output = result.stdout + result.stderr
-    except subprocess.TimeoutExpired:
-        await pesan.edit_text("⚠️ Timeout saat cek cookie (>2 menit).")
-        return
-    except Exception as e:
-        await pesan.edit_text(f"⚠️ Gagal jalankan keep-alive.js: {e}")
-        return
+    # Jalankan cek cookie via HTTP (tanpa buka browser, jauh lebih cepat)
+    import ssl
+    import urllib.request
 
-    # Parse output untuk ringkasan
+    checking_msg = await pesan.edit_text(f"🔍 Mengecek {len(emails)} akun via HTTP...")
+
     ok_list      = []
     expired_list = []
-    failed_list  = []
 
-    for line in output.splitlines():
-        if "✓ Cookie diperbarui" in line or "✓ Sesi aktif" in line:
-            ok_list.append(line)
-        elif "✗ Expired" in line or "cookie_expired" in line:
-            expired_list.append(line)
-        elif "✗ Gagal" in line or "✗" in line:
-            failed_list.append(line)
+    for email, data in cookies.items():
+        netflix_id = data.get("netflixId", "")
+        secure_id  = data.get("secureNetflixId", "")
 
-    # Baca ulang cookies.json untuk lihat email mana yang hilang (dihapus karena expired)
-    try:
-        with open(cookies_file, "r") as f:
-            cookies_after = json.load(f)
-    except Exception:
-        cookies_after = cookies
+        if not netflix_id or not secure_id:
+            expired_list.append(email)
+            continue
 
-    expired_emails = [e for e in emails if e not in cookies_after]
-    ok_count       = len(cookies_after)
-    expired_count  = len(expired_emails)
+        # Cek via HTTP request ke Netflix
+        try:
+            cookie_str = f"NetflixId={netflix_id}; SecureNetflixId={secure_id}"
+            req = urllib.request.Request(
+                "https://www.netflix.com/browse",
+                headers={
+                    "Cookie": cookie_str,
+                    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/127.0.0.0 Safari/537.36",
+                }
+            )
+            ctx = ssl.create_default_context()
+            with urllib.request.urlopen(req, context=ctx, timeout=8) as resp:
+                final_url = resp.geturl()
+                if "/login" in final_url or "/LoginHelp" in final_url:
+                    expired_list.append(email)
+                else:
+                    ok_list.append(email)
+        except urllib.error.HTTPError as e:
+            # 200 redirect ke login berarti expired
+            if e.code in (301, 302):
+                expired_list.append(email)
+            else:
+                ok_list.append(email)  # error lain anggap masih valid
+        except Exception:
+            ok_list.append(email)  # timeout jaringan, anggap masih valid
+
+    ok_count      = len(ok_list)
+    expired_count = len(expired_list)
 
     teks  = "🍪 *STATUS COOKIE AKUN*\n"
     teks += "━━━━━━━━━━━━━━━━\n"
@@ -715,11 +721,17 @@ async def cmd_cekcookies(update: Update, context: ContextTypes.DEFAULT_TYPE):
     teks += f"❌ Expired : *{expired_count}*\n"
     teks += f"📊 Total   : *{len(emails)}*\n"
 
-    if expired_emails:
-        teks += "\n*Akun yang perlu harvest ulang:*\n"
-        for e in expired_emails:
+    if expired_list:
+        teks += "\n*Akun yang perlu update cookie:*\n"
+        for e in expired_list:
             teks += f"• `{e}`\n"
-        teks += "\nJalankan di lokal:\n`node harvest-cookies.js HARIAN`"
+        teks += (
+            "\n*Cara update:*\n"
+            "1\\. Login Netflix di browser\n"
+            "2\\. DevTools → Application → Cookies\n"
+            "3\\. Copy `NetflixId` & `SecureNetflixId`\n"
+            "4\\. Kirim: `/setcookie email NetflixId SecureNetflixId`"
+        )
     else:
         teks += "\n✅ Semua cookie masih valid!"
 
