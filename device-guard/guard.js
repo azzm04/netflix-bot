@@ -141,15 +141,16 @@ async function handleMfa(page, email) {
   console.log(`  [guard-mfa] Tunggu 10 detik...`);
   await sleep(10_000);
 
-  // Fetch kode via Mahesh bot (akun MEET = @mahesh domain)
+  // Fetch kode via nfpro.js (untuk semua akun MEET)
+  // Mahesh fetcher hanya dipakai jika email di domain Mahesh
   let code6 = null;
   try {
-    const { fetchFromMaheshBot } = require("../cookie-kicker-pin-changer/mahesh-fetcher");
-    console.log(`  [guard-mfa] Fetch kode via Mahesh Bot...`);
-    code6 = await fetchFromMaheshBot(email, "signin6", { retries: 2, retryDelay: 5000 });
+    const { fetchNetflixCode } = require("../cookie-kicker-pin-changer/nfpro");
+    console.log(`  [guard-mfa] Auto-fetch kode via nfpro...`);
+    code6 = await fetchNetflixCode(email, "signin6", { retries: 2, retryDelay: 5000 });
     console.log(`  [guard-mfa] Kode: ${code6}`);
   } catch (err) {
-    console.warn(`  [guard-mfa] Fetch gagal: ${err.message}`);
+    console.warn(`  [guard-mfa] nfpro gagal: ${err.message}`);
     // Fallback terminal
     const readline = require("readline");
     code6 = await new Promise(resolve => {
