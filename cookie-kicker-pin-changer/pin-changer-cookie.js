@@ -131,9 +131,41 @@ async function changePinsForProfilesCookie(email, password, targetProfiles) {
     if (await pwRestrict.isVisible({ timeout: 5000 }).catch(() => false)) {
       console.log("  [pin-cookie] Isi password Kontrol Orang Tua...");
       await pwRestrict.fill(password);
-      await sleep(300);
+      await sleep(500);
       await page.locator('[data-uia="btn-account-pin-submit"]').click();
-      await page.waitForSelector(".parental-control-profile", { timeout: 20000 });
+
+      // Tunggu network selesai dulu (Netflix sering ada redirect internal)
+      await page.waitForLoadState("networkidle", { timeout: 10_000 }).catch(() => {});
+      await sleep(500);
+
+      // Tunggu profil muncul
+      const loaded = await page.waitForFunction(
+        () => {
+          // Cek berbagai kemungkinan selector yang Netflix pakai
+          return (
+            document.querySelectorAll(".parental-control-profile").length > 0 ||
+            document.querySelectorAll('[data-uia^="pin-number-"]').length > 0 ||
+            document.querySelectorAll('[class*="profile-hub"]').length > 0 ||
+            document.querySelectorAll('[class*="parental"]').length > 0
+          );
+        },
+        { timeout: 30_000, polling: 1000 }
+      ).catch(() => null);
+
+      if (!loaded) {
+        // Screenshot untuk debug
+        const fs = require("fs");
+        const dir = process.env.DEBUG_SHOT_DIR ?? "/tmp/nfdebug";
+        try { fs.mkdirSync(dir, { recursive: true }); } catch {}
+        await page.screenshot({ path: `${dir}/pin_parental_fail_${Date.now()}.png`, fullPage: true }).catch(() => {});
+        console.warn("  [pin-cookie] Profil tidak muncul setelah submit password.");
+        console.warn(`  [pin-cookie] URL saat ini: ${page.url()}`);
+        // Coba navigate ulang ke halaman yang sama
+        console.log("  [pin-cookie] Coba navigate ulang...");
+        await page.goto(URL_PIN_SETTINGS, { waitUntil: "domcontentloaded", timeout: TIMEOUT_NAV });
+        await sleep(2000);
+      }
+
       await sleep(800);
     }
 
