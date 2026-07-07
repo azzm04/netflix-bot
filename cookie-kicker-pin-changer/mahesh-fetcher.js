@@ -1,21 +1,19 @@
 /**
  * mahesh-fetcher.js — Fetch kode Netflix dari @Maheshshoppiebot di Telegram
  *
- * SETUP AWAL (sekali saja, lakukan di lokal bukan server):
+ * SETUP AWAL (sekali saja):
  *   node mahesh-fetcher.js --setup
  *
- * TEST fetch kode:
- *   node mahesh-fetcher.js "jack01@maheshpro.com" "signin"
- *   node mahesh-fetcher.js "jack01@maheshpro.com" "signin6"
+ * TEST:
+ *   node mahesh-fetcher.js "jack01@maheshpro.com" signin
+ *   node mahesh-fetcher.js "jack01@maheshpro.com" signin6
  *
- * MAPPING tipe kode ke tombol bot Mahesh:
- *   signin    → "Sign-in Code"              (4 digit, untuk login)
- *   signin6   → "Verification code after login" (6 digit, untuk MFA)
+ * Tipe kode → label tombol bot:
+ *   signin    → "Sign-in Code"
+ *   signin6   → "Verification code after login"
  *   verify    → "Verify Email"
  *   household → "Household Code"
- *
- * Setelah setup, file mahesh.session akan tersimpan.
- * Copy file itu ke server bersama .env yang sudah diisi.
+ *   reset     → "Reset Password"
  */
 
 "use strict";
@@ -29,7 +27,7 @@ const readline           = require("readline");
 const fs                 = require("fs");
 const path               = require("path");
 
-// ── Config dari .env ──────────────────────────────────────
+// ── Config ────────────────────────────────────────────────
 const API_ID       = parseInt(process.env.MAHESH_API_ID   ?? "0");
 const API_HASH     = process.env.MAHESH_API_HASH           ?? "";
 const PHONE        = process.env.MAHESH_PHONE              ?? "";
@@ -37,7 +35,6 @@ const SESSION_FILE = path.resolve(__dirname, process.env.MAHESH_SESSION_FILE ?? 
 const BOT_USERNAME = process.env.MAHESH_BOT_USERNAME       ?? "Maheshshoppiebot";
 const TIMEOUT_MS   = parseInt(process.env.MAHESH_TIMEOUT   ?? "30000");
 
-// ── Mapping tipe → label tombol bot Mahesh ────────────────
 const BUTTON_MAP = {
   signin:    "Sign-in Code",
   signin6:   "Verification code after login",
@@ -48,280 +45,93 @@ const BUTTON_MAP = {
   vercode:   "Verification Code",
 };
 
-// ── Load / Save session ───────────────────────────────────
+// ── Session ───────────────────────────────────────────────
 function loadSession() {
-  if (fs.existsSync(SESSION_FILE)) {
-    return fs.readFileSync(SESSION_FILE, "utf-8").trim();
-  }
+  if (fs.existsSync(SESSION_FILE)) return fs.readFileSync(SESSION_FILE, "utf-8").trim();
   return "";
 }
 
-function saveSession(sessionStr) {
-  fs.writeFileSync(SESSION_FILE, sessionStr, "utf-8");
+function saveSession(str) {
+  fs.writeFileSync(SESSION_FILE, str, "utf-8");
   console.log(`[mahesh] Session tersimpan: ${SESSION_FILE}`);
 }
 
-// ── Buat client ───────────────────────────────────────────
+// ── Client ────────────────────────────────────────────────
 function createClient(sessionStr = "") {
   if (!API_ID || !API_HASH) {
-    throw new Error(
-      "MAHESH_API_ID dan MAHESH_API_HASH belum diset di .env\n" +
-      "Daftar di: https://my.telegram.org → API development tools"
-    );
+    throw new Error("MAHESH_API_ID dan MAHESH_API_HASH belum diset di .env");
   }
   return new TelegramClient(
     new StringSession(sessionStr),
-    API_ID,
-    API_HASH,
+    API_ID, API_HASH,
     { connectionRetries: 3 }
   );
 }
 
-// ── Input terminal helper ─────────────────────────────────
-function input(prompt) {
+// ── Input terminal ────────────────────────────────────────
+function prompt(text) {
   return new Promise(resolve => {
     const rl = readline.createInterface({ input: process.stdin, output: process.stdout });
-    rl.question(prompt, ans => { rl.close(); resolve(ans.trim()); });
+    rl.question(text, ans => { rl.close(); resolve(ans.trim()); });
   });
 }
 
-// ── Setup: login pertama kali ─────────────────────────────
+// ── Setup session ─────────────────────────────────────────
 async function setupSession() {
-  console.log("\n=== Setup Session Telegram ===");
-  console.log("Ini hanya perlu dilakukan SEKALI.\n");
-
-  if (!PHONE) {
-    console.error("Set MAHESH_PHONE di .env dulu (format: +628xxx)");
-    process.exit(1);
-  }
+  console.log("\n=== Setup Session Telegram ===\n");
+  if (!PHONE) { console.error("Set MAHESH_PHONE di .env dulu"); process.exit(1); }
 
   const client = createClient("");
   await client.start({
-    phoneNumber:  async () => PHONE,
-    password:     async () => input("Password 2FA (kosongkan jika tidak ada): "),
-    phoneCode:    async () => input("Kode OTP yang masuk ke Telegram kamu: "),
-    onError:      (err)   => console.error("[mahesh] Auth error:", err.message),
+    phoneNumber: async () => PHONE,
+    password:    async () => prompt("Password 2FA (Enter jika tidak ada): "),
+    phoneCode:   async () => prompt("Kode OTP Telegram: "),
+    onError:     (err) => console.error("[mahesh] Auth error:", err.message),
   });
 
-  const sessionStr = client.session.save();
-  saveSession(sessionStr);
-
-  console.log("\n✓ Setup berhasil!");
-  console.log(`✓ Session disimpan di: ${SESSION_FILE}`);
-  console.log("\nLangkah selanjutnya:");
-  console.log("  1. Copy mahesh.session ke server");
-  console.log("  2. Test: node mahesh-fetcher.js \"email@mahesh.co\" \"signin\"");
-
+  saveSession(client.session.save());
+  console.log("\n✓ Setup berhasil! Test dengan:");
+  console.log(`  node mahesh-fetcher.js "email@mahesh.co" signin`);
   await client.disconnect();
 }
 
-// ── Parse kode dari pesan bot Mahesh ─────────────────────
-/**
- * Ekstrak kode dari pesan balasan bot.
- * Format yang mungkin:
- *   "Login Code: 0254"
- *   "Verification Code: 123456"
- *   "Code: 4567"
- */
-function parseCodeFromMessage(text) {
+// ── Parse kode dari teks pesan ────────────────────────────
+function parseCode(text) {
   if (!text) return null;
+  if (text.includes("NOT FOUND") || text.includes("0 successful")) return null;
 
-  // Cek jika tidak ditemukan
-  if (
-    text.includes("EMAIL NOT FOUND") ||
-    text.includes("NOT FOUND") ||
-    text.includes("0 successful")
-  ) {
-    return null;
-  }
-
-  // Berbagai format kode
   const patterns = [
     /Login Code[:\s]+(\d{4,8})/i,
     /Verification Code[:\s]+(\d{4,8})/i,
     /Sign.in Code[:\s]+(\d{4,8})/i,
     /Code[:\s]+(\d{4,8})/i,
-    /\b(\d{6})\b/,   // 6 digit standalone
-    /\b(\d{4})\b/,   // 4 digit standalone
+    /\b(\d{6})\b/,
+    /\b(\d{4})\b/,
   ];
 
-  for (const pattern of patterns) {
-    const match = text.match(pattern);
-    if (match) return match[1];
+  for (const p of patterns) {
+    const m = text.match(p);
+    if (m) return m[1];
   }
-
   return null;
 }
 
-// ── Klik tombol inline keyboard ───────────────────────────
-/**
- * Klik tombol inline keyboard pada pesan menggunakan client.invoke
- * @param {TelegramClient} client
- * @param {import('telegram').Api.Message} message
- * @param {string} buttonText
- * @returns {Promise<boolean>}
- */
-async function clickButton(client, message, buttonText) {
-  if (!message.replyMarkup) return false;
-
-  const { Api } = require("telegram");
-  const rows = message.replyMarkup.rows ?? [];
-
-  for (const row of rows) {
-    for (const btn of row.buttons) {
-      const label = btn.text ?? "";
-      if (label.toLowerCase().includes(buttonText.toLowerCase())) {
-        console.log(`[mahesh] Klik tombol: "${label}"`);
-        try {
-          await client.invoke(
-            new Api.messages.GetBotCallbackAnswer({
-              peer:  message.peerId,
-              msgId: message.id,
-              data:  btn.data,
-            })
-          );
-        } catch (err) {
-          // BOT_RESPONSE_TIMEOUT normal — bot Mahesh balas via pesan baru, bukan callback answer
-          if (!err.message?.includes("BOT_RESPONSE_TIMEOUT") && !err.message?.includes("TIMEOUT")) {
-            console.warn(`[mahesh] Error klik tombol: ${err.message}`);
-          }
-        }
-        return true; // tombol berhasil diklik, lanjut tunggu pesan balasan
-      }
-    }
-  }
-  return false;
-}
-
-// ── Fetch kode utama ──────────────────────────────────────
-/**
- * Kirim email ke bot Mahesh, pilih kategori, ambil kode.
- *
- * @param {string} email       - email akun Netflix (misal: jack01@maheshpro.com)
- * @param {string} codeType    - tipe kode: "signin" | "signin6" | "verify" | dll
- * @param {object} opts
- *   - retries: jumlah retry (default 2)
- *   - retryDelay: jeda retry ms (default 5000)
- * @returns {Promise<string>}  kode yang ditemukan
- */
-async function fetchFromMaheshBot(email, codeType = "signin", opts = {}) {
-  const retries    = opts.retries    ?? 2;
-  const retryDelay = opts.retryDelay ?? 5000;
-
-  const buttonLabel = BUTTON_MAP[codeType];
-  if (!buttonLabel) {
-    throw new Error(`Tipe kode tidak dikenal: "${codeType}". Pilih: ${Object.keys(BUTTON_MAP).join(", ")}`);
-  }
-
-  const sessionStr = loadSession();
-  if (!sessionStr) {
-    throw new Error(
-      "Session belum ada. Jalankan setup dulu:\n" +
-      "  node mahesh-fetcher.js --setup"
-    );
-  }
-
-  const client = createClient(sessionStr);
-
-  try {
-    await client.connect();
-
-    // Simpan session terbaru setelah connect
-    const newSession = client.session.save();
-    if (newSession !== sessionStr) saveSession(newSession);
-
-    for (let attempt = 1; attempt <= retries + 1; attempt++) {
-      console.log(`[mahesh] Fetch "${codeType}" untuk ${email} (attempt ${attempt})...`);
-
-      // Kirim email ke bot
-      await client.sendMessage(BOT_USERNAME, { message: email });
-
-      // Tunggu balasan dengan tombol SELECT CATEGORY
-      const categoryMsg = await waitForMessage(client, BOT_USERNAME, {
-        contains:   "SELECT CATEGORY",
-        timeoutMs:  TIMEOUT_MS,
-      });
-
-      if (!categoryMsg) {
-        console.warn(`[mahesh] Bot tidak balas dengan SELECT CATEGORY — timeout.`);
-        if (attempt <= retries) {
-          console.log(`[mahesh] Retry dalam ${retryDelay / 1000}s...`);
-          await new Promise(r => setTimeout(r, retryDelay));
-          continue;
-        }
-        throw new Error(`Bot @${BOT_USERNAME} tidak merespons untuk ${email}`);
-      }
-
-      // Klik tombol kategori yang sesuai
-      const clicked = await clickButton(client, categoryMsg, buttonLabel);
-      if (!clicked) {
-        throw new Error(`Tombol "${buttonLabel}" tidak ditemukan di pesan bot. Cek nama tombol.`);
-      }
-
-      // Tunggu balasan dengan kode (bot balas via pesan baru)
-      console.log(`[mahesh] Menunggu balasan kode dari bot...`);
-      const resultMsg = await waitForMessage(client, BOT_USERNAME, {
-        contains:  "CODE",
-        timeoutMs: TIMEOUT_MS,
-      });
-
-      if (!resultMsg) {
-        console.warn(`[mahesh] Bot tidak balas dengan kode — timeout.`);
-        if (attempt <= retries) {
-          await new Promise(r => setTimeout(r, retryDelay));
-          continue;
-        }
-        throw new Error(`Kode tidak diterima dari bot untuk ${email}`);
-      }
-
-      const code = parseCodeFromMessage(resultMsg.text);
-
-      if (code) {
-        console.log(`[mahesh] ✓ Kode ditemukan: ${code}`);
-        return code;
-      }
-
-      // Kode tidak ditemukan (EMAIL NOT FOUND)
-      console.warn(`[mahesh] Kode tidak ditemukan di balasan bot.`);
-      console.warn(`[mahesh] Pesan bot: ${resultMsg.text?.slice(0, 150)}`);
-
-      if (attempt <= retries) {
-        console.log(`[mahesh] Retry dalam ${retryDelay / 1000}s...`);
-        await new Promise(r => setTimeout(r, retryDelay));
-      } else {
-        throw new Error(`Kode tidak ditemukan untuk ${email} (${codeType}) setelah ${retries + 1} percobaan`);
-      }
-    }
-
-  } finally {
-    await client.disconnect();
-  }
-}
-
 // ── Tunggu pesan dari bot ─────────────────────────────────
-/**
- * Tunggu pesan baru dari bot yang mengandung teks tertentu.
- * @param {TelegramClient} client
- * @param {string}         fromUsername  - username bot (tanpa @)
- * @param {{ contains: string, timeoutMs: number }} opts
- * @returns {Promise<import('telegram').Api.Message | null>}
- */
-function waitForMessage(client, fromUsername, opts) {
+function waitForBotMessage(client, botUsername, containsText, timeoutMs) {
   return new Promise((resolve) => {
     const timer = setTimeout(() => {
       client.removeEventHandler(handler, new NewMessage({}));
       resolve(null);
-    }, opts.timeoutMs);
+    }, timeoutMs);
 
     const handler = async (event) => {
       const msg    = event.message;
       const sender = await msg.getSender().catch(() => null);
-      const uname  = sender?.username?.toLowerCase() ?? "";
-
-      if (uname !== fromUsername.toLowerCase()) return;
+      const uname  = (sender?.username ?? "").toLowerCase();
+      if (uname !== botUsername.toLowerCase()) return;
 
       const text = msg.text ?? "";
-      if (!opts.contains || text.toUpperCase().includes(opts.contains.toUpperCase())) {
+      if (!containsText || text.toUpperCase().includes(containsText.toUpperCase())) {
         clearTimeout(timer);
         client.removeEventHandler(handler, new NewMessage({}));
         resolve(msg);
@@ -330,6 +140,105 @@ function waitForMessage(client, fromUsername, opts) {
 
     client.addEventHandler(handler, new NewMessage({}));
   });
+}
+
+// ── Klik tombol inline keyboard ───────────────────────────
+async function clickInlineButton(client, message, buttonText) {
+  if (!message.replyMarkup) return false;
+
+  const { Api } = require("telegram");
+  const rows = message.replyMarkup.rows ?? [];
+
+  for (const row of rows) {
+    for (const btn of row.buttons) {
+      if ((btn.text ?? "").toLowerCase().includes(buttonText.toLowerCase())) {
+        console.log(`[mahesh] Klik tombol: "${btn.text}"`);
+        // Fire-and-forget: bot Mahesh balas via pesan baru, bukan callback
+        // Timeout dari Telegram API diabaikan
+        client.invoke(new Api.messages.GetBotCallbackAnswer({
+          peer:  message.peerId,
+          msgId: message.id,
+          data:  btn.data,
+        })).catch(() => {});
+        return true;
+      }
+    }
+  }
+  return false;
+}
+
+// ── Fetch kode utama ──────────────────────────────────────
+async function fetchFromMaheshBot(email, codeType = "signin", opts = {}) {
+  const retries    = opts.retries    ?? 2;
+  const retryDelay = opts.retryDelay ?? 5000;
+
+  const buttonLabel = BUTTON_MAP[codeType];
+  if (!buttonLabel) {
+    throw new Error(`Tipe tidak dikenal: "${codeType}". Pilih: ${Object.keys(BUTTON_MAP).join(", ")}`);
+  }
+
+  const sessionStr = loadSession();
+  if (!sessionStr) {
+    throw new Error("Session belum ada. Jalankan: node mahesh-fetcher.js --setup");
+  }
+
+  const client = createClient(sessionStr);
+  await client.connect();
+
+  // Simpan session terbaru
+  const newSession = client.session.save();
+  if (newSession !== sessionStr) saveSession(newSession);
+
+  try {
+    for (let attempt = 1; attempt <= retries + 1; attempt++) {
+      console.log(`[mahesh] Fetch "${codeType}" untuk ${email} (attempt ${attempt})...`);
+
+      // Step 1: Kirim email
+      await client.sendMessage(BOT_USERNAME, { message: email });
+
+      // Step 2: Tunggu balasan SELECT CATEGORY
+      const categoryMsg = await waitForBotMessage(
+        client, BOT_USERNAME, "SELECT CATEGORY", TIMEOUT_MS
+      );
+
+      if (!categoryMsg) {
+        console.warn(`[mahesh] Tidak ada balasan SELECT CATEGORY.`);
+        if (attempt <= retries) { await new Promise(r => setTimeout(r, retryDelay)); continue; }
+        throw new Error(`Bot tidak merespons untuk ${email}`);
+      }
+
+      // Step 3: Klik tombol (non-blocking, bot balas via pesan baru)
+      const found = await clickInlineButton(client, categoryMsg, buttonLabel);
+      if (!found) {
+        throw new Error(`Tombol "${buttonLabel}" tidak ada. Cek nama tombol di bot.`);
+      }
+
+      // Step 4: Tunggu pesan balasan berisi kode
+      console.log(`[mahesh] Menunggu kode dari bot...`);
+      const resultMsg = await waitForBotMessage(
+        client, BOT_USERNAME, "CODE", TIMEOUT_MS
+      );
+
+      if (!resultMsg) {
+        console.warn(`[mahesh] Tidak ada balasan kode.`);
+        if (attempt <= retries) { await new Promise(r => setTimeout(r, retryDelay)); continue; }
+        throw new Error(`Kode tidak diterima dari bot untuk ${email}`);
+      }
+
+      // Step 5: Parse kode
+      const code = parseCode(resultMsg.text);
+      if (code) {
+        console.log(`[mahesh] ✓ Kode: ${code}`);
+        return code;
+      }
+
+      console.warn(`[mahesh] Kode tidak ditemukan. Pesan: ${resultMsg.text?.slice(0, 100)}`);
+      if (attempt <= retries) { await new Promise(r => setTimeout(r, retryDelay)); }
+      else { throw new Error(`Kode tidak ditemukan untuk ${email} setelah ${retries + 1} percobaan`); }
+    }
+  } finally {
+    await client.disconnect();
+  }
 }
 
 // ── CLI ───────────────────────────────────────────────────
@@ -342,40 +251,23 @@ async function main() {
   }
 
   if (args.length >= 1) {
-    const email    = args[0];
-    const codeType = args[1] ?? "signin";
-
+    const [email, codeType = "signin"] = args;
     try {
-      const code = await fetchFromMaheshBot(email, codeType, { retries: 2, retryDelay: 5000 });
+      const code = await fetchFromMaheshBot(email, codeType, { retries: 2 });
       console.log(`\nKode: ${code}`);
     } catch (err) {
-      console.error(`\n✗ Error: ${err.message}`);
+      console.error(`\n✗ ${err.message}`);
       process.exit(1);
     }
     return;
   }
 
   console.log(`
-Mahesh Bot Fetcher
-==================
-Setup (pertama kali):
-  node mahesh-fetcher.js --setup
+Mahesh Bot Fetcher — Cara pakai:
+  node mahesh-fetcher.js --setup                          Setup session (sekali saja)
+  node mahesh-fetcher.js <email> [tipe]                   Fetch kode
 
-Fetch kode:
-  node mahesh-fetcher.js <email> [tipe]
-
-Tipe yang tersedia:
-  signin    → Sign-in Code (4 digit)
-  signin6   → Verification code after login (6 digit)
-  verify    → Verify Email
-  household → Household Code
-  reset     → Reset Password
-  tvlogin   → TV Login Link
-  vercode   → Verification Code
-
-Contoh:
-  node mahesh-fetcher.js "jack01@maheshpro.com" signin
-  node mahesh-fetcher.js "jack01@maheshpro.com" signin6
+Tipe: signin | signin6 | verify | household | reset | tvlogin | vercode
   `);
 }
 
