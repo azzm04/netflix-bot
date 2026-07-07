@@ -145,6 +145,8 @@ function scanSheetForMeet(rows, sheetName) {
     if (!profile) continue;
 
     const maxDevices = parseMaxDevices(logoutText);
+    // Slot kosong = kolom E kosong → tidak boleh ada yang login
+    const hasCustomer = logoutText.length > 0;
 
     results.push({
       sheetName,
@@ -152,8 +154,9 @@ function scanSheetForMeet(rows, sheetName) {
       password,
       profile,
       allowedDevice,
-      maxDevices,    // null = tidak ada info, 1 = 1U, 2 = SEMIPRIVATE/2U
+      maxDevices,
       logoutText,
+      hasCustomer,   // false = slot kosong, kick semua device
     });
   }
 
@@ -206,8 +209,9 @@ async function getMeetAccounts() {
     emailGroups.get(key).profiles.push({
       name:          acc.profile,
       allowedDevice: acc.allowedDevice,
-      maxDevices:    acc.maxDevices,    // null | 1 | 2 | ...
+      maxDevices:    acc.maxDevices,
       logoutText:    acc.logoutText,
+      hasCustomer:   acc.hasCustomer,  // false = slot kosong
     });
   }
 

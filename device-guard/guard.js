@@ -358,11 +358,10 @@ async function guardAccount(email, profiles) {
 
     // ── Step 3: Cek rules per profil yang diizinkan ───────
     for (const prof of profiles) {
-      const profKey     = prof.name.toLowerCase();
-      const allowedDev  = prof.allowedDevice;
+      const profKey    = prof.name.toLowerCase();
+      const allowedDev = prof.allowedDevice;
 
       // Cari device yang menggunakan profil ini
-      // Matching: cek apakah nama profil dari Netflix ada di profileDevices
       let devicesForProfile = [];
       for (const [key, devs] of profileDevices.entries()) {
         if (key.includes(profKey) || profKey.includes(key)) {
@@ -376,19 +375,34 @@ async function guardAccount(email, profiles) {
         continue;
       }
 
+      // ── Slot kosong: tidak boleh ada yang login ──────────
+      if (prof.hasCustomer === false) {
+        console.log(`  [guard] Profil "${prof.name}" slot KOSONG (kolom E kosong) → kick semua device`);
+        for (const dev of devicesForProfile) {
+          if (dev.isCurrent || processedCards.has(dev.cardIndex)) continue;
+          const card      = cards.nth(dev.cardIndex);
+          const keluarBtn = card.locator('button:has-text("Keluar"), button:has-text("Sign Out")').first();
+          if (await keluarBtn.isVisible({ timeout: 1000 }).catch(() => false)) {
+            await keluarBtn.click();
+            totalKicked++;
+            processedCards.add(dev.cardIndex);
+            const msg = `Dikick: "${dev.deviceName}" dari profil kosong "${prof.name}"`;
+            details.push(msg);
+            console.log(`  [guard] ✓ ${msg}`);
+            await sleep(1500);
+          }
+        }
+        continue; // skip rules check, slot ini memang harus kosong
+      }
+
       console.log(`  [guard] Profil "${prof.name}" aktif di ${devicesForProfile.length} device:`);
       devicesForProfile.forEach((d, idx) => {
         console.log(`    [${idx}] ${d.deviceName} ${d.isCurrent ? "(SAAT INI)" : ""}`);
       });
 
       // Tentukan mana yang harus dikick
-      const toKick = [];
-
-      // Tentukan max device yang diizinkan
-      // Prioritas: maxDevices dari kolom E > fallback dari kolom G
+      const toKick     = [];
       const maxAllowed = prof.maxDevices ?? (allowedDev ? null : 1);
-      // maxDevices null + kolom G ada = cek tipe device, tidak ada limit jumlah
-      // maxDevices null + kolom G kosong = default 1 device
 
       console.log(`  [guard] Rules: maxDevice=${maxAllowed ?? "∞ (cek tipe)"}, allowedDev="${allowedDev || "kosong"}"`);
 
