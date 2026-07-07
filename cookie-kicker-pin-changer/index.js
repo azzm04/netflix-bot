@@ -117,7 +117,7 @@ async function processExpiredAccounts() {
 
         const t0 = Date.now();
         try {
-          const result  = await kickDevicesForProfilesCookie(email, profiles);
+          const result  = await kickDevicesForProfilesCookie(email, profiles, accountLabel === "MAHESH");
           const elapsed = ((Date.now() - t0) / 1000).toFixed(1);
 
           for (const account of group) {

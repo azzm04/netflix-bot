@@ -129,7 +129,7 @@ async function newCookiePage(browser, email, targetUrl) {
  * Strategi: klik "Email a code", fetch kode otomatis via nfpro.js, submit.
  * Auto-retry jika kode salah (klik "Kirim Ulang Kode").
  */
-async function checkForExtraVerification(page, email) {
+async function checkForExtraVerification(page, email, isMahesh = false) {
   await sleep(1000);
   const url      = page.url();
   const bodyText = await page.locator("body").innerText().catch(() => "");
@@ -173,9 +173,17 @@ async function checkForExtraVerification(page, email) {
     // Coba auto-fetch kode
     let code6 = null;
     try {
-      const { fetchNetflixCode } = require("./nfpro");
-      console.log(`  [mfa] Auto-fetch kode 6 digit...`);
-      code6 = await fetchNetflixCode(email, "signin6", { retries: 2, retryDelay: 5000 });
+      if (isMahesh) {
+        // Akun MAHESH: fetch via bot Telegram @Maheshshoppiebot
+        const { fetchFromMaheshBot } = require("./mahesh-fetcher");
+        console.log(`  [mfa] Fetch kode via Mahesh Bot...`);
+        code6 = await fetchFromMaheshBot(email, "signin6", { retries: 2, retryDelay: 5000 });
+      } else {
+        // Akun lain: fetch via nfpro.js
+        const { fetchNetflixCode } = require("./nfpro");
+        console.log(`  [mfa] Auto-fetch kode 6 digit via nfpro...`);
+        code6 = await fetchNetflixCode(email, "signin6", { retries: 2, retryDelay: 5000 });
+      }
       console.log(`  [mfa] Kode: ${code6}`);
     } catch (err) {
       console.warn(`  [mfa] Auto-fetch gagal: ${err.message}`);
@@ -444,20 +452,20 @@ async function refreshAndSaveCookies(ctx, email) {
   }
 }
 
-async function kickDevicesForProfilesCookie(email, profileNames) {
+async function kickDevicesForProfilesCookie(email, profileNames, isMahesh = false) {
   const browser = await launchBrowser();
   let totalKicked = 0;
 
   try {
     const page = await newCookiePage(browser, email, URL_DEVICES);
 
-    await checkForExtraVerification(page, email);
+    await checkForExtraVerification(page, email, isMahesh);
 
     // Jika halaman bukan manageaccountaccess, navigate ulang
     if (!page.url().includes("manageaccountaccess")) {
       console.log("  [kick] Redirect tidak terduga, navigate ulang...");
       await page.goto(URL_DEVICES, { waitUntil: "domcontentloaded", timeout: TIMEOUT_NAV });
-      await checkForExtraVerification(page, email);
+      await checkForExtraVerification(page, email, isMahesh);
     }
 
     totalKicked = await kickDevicesByProfiles(page, profileNames);
@@ -477,8 +485,8 @@ async function kickDevicesForProfilesCookie(email, profileNames) {
  * @param {string} email
  * @param {string} profileName
  */
-async function kickDevicesForProfileCookie(email, profileName) {
-  return kickDevicesForProfilesCookie(email, [profileName]);
+async function kickDevicesForProfileCookie(email, profileName, isMahesh = false) {
+  return kickDevicesForProfilesCookie(email, [profileName], isMahesh);
 }
 
 module.exports = {
