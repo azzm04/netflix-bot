@@ -154,15 +154,37 @@ function parseCodeFromMessage(text) {
 }
 
 // ── Klik tombol inline keyboard ───────────────────────────
+/**
+ * Klik tombol inline keyboard pada pesan menggunakan client.invoke
+ * @param {TelegramClient} client
+ * @param {import('telegram').Api.Message} message
+ * @param {string} buttonText
+ * @returns {Promise<boolean>}
+ */
 async function clickButton(client, message, buttonText) {
-  if (!message.buttons) return false;
+  if (!message.replyMarkup) return false;
 
-  for (const row of message.buttons) {
-    for (const btn of row) {
-      if (btn.text.toLowerCase().includes(buttonText.toLowerCase())) {
-        console.log(`[mahesh] Klik tombol: "${btn.text}"`);
-        await btn.click();
-        return true;
+  const { Api } = require("telegram");
+  const rows = message.replyMarkup.rows ?? [];
+
+  for (const row of rows) {
+    for (const btn of row.buttons) {
+      const label = btn.text ?? "";
+      if (label.toLowerCase().includes(buttonText.toLowerCase())) {
+        console.log(`[mahesh] Klik tombol: "${label}"`);
+        try {
+          await client.invoke(
+            new Api.messages.GetBotCallbackAnswer({
+              peer:  message.peerId,
+              msgId: message.id,
+              data:  btn.data,
+            })
+          );
+          return true;
+        } catch (err) {
+          console.warn(`[mahesh] Error klik tombol: ${err.message}`);
+          return false;
+        }
       }
     }
   }
