@@ -330,28 +330,73 @@ async function guardAccount(email, profiles) {
       // Tentukan mana yang harus dikick
       const toKick = [];
 
-      if (allowedDev) {
-        // Kolom G ada isi → kick yang tidak cocok dengan device yang diizinkan
+      // Tentukan max device yang diizinkan
+      // Prioritas: maxDevices dari kolom E > fallback dari kolom G
+      const maxAllowed = prof.maxDevices ?? (allowedDev ? null : 1);
+      // maxDevices null + kolom G ada = cek tipe device, tidak ada limit jumlah
+      // maxDevices null + kolom G kosong = default 1 device
+
+      console.log(`  [guard] Rules: maxDevice=${maxAllowed ?? "∞ (cek tipe)"}, allowedDev="${allowedDev || "kosong"}"`);
+
+      if (allowedDev && maxAllowed === null) {
+        // Hanya cek tipe device, tidak ada limit jumlah
         for (const dev of devicesForProfile) {
-          if (dev.isCurrent) continue; // jangan kick device saat ini
+          if (dev.isCurrent) continue;
           if (!isDeviceAllowed(dev.deviceName, allowedDev)) {
             toKick.push(dev);
-            console.log(`    → KICK: "${dev.deviceName}" (tidak cocok dengan "${allowedDev}")`);
+            console.log(`    → KICK: "${dev.deviceName}" (tipe tidak cocok dengan "${allowedDev}")`);
           } else {
-            console.log(`    → BIARKAN: "${dev.deviceName}" (cocok dengan "${allowedDev}")`);
+            console.log(`    → BIARKAN: "${dev.deviceName}" (tipe cocok)`);
           }
         }
+      } else if (allowedDev && maxAllowed !== null) {
+        // Ada limit jumlah DAN limit tipe
+        // Kick yang tidak cocok tipe, dan kick yang melebihi batas jumlah
+        const allowedDevices = devicesForProfile.filter(
+          d => !d.isCurrent && isDeviceAllowed(d.deviceName, allowedDev)
+        );
+        const notAllowedDevices = devicesForProfile.filter(
+          d => !d.isCurrent && !isDeviceAllowed(d.deviceName, allowedDev)
+        );
+
+        // Kick semua yang tidak cocok tipe
+        for (const dev of notAllowedDevices) {
+          toKick.push(dev);
+          console.log(`    → KICK: "${dev.deviceName}" (tipe tidak cocok)`);
+        }
+
+        // Dari yang cocok tipe, kick jika melebihi maxAllowed
+        // Hitung device saat ini (termasuk current) yang sudah cocok
+        const currentCount = devicesForProfile.filter(
+          d => d.isCurrent && isDeviceAllowed(d.deviceName, allowedDev)
+        ).length;
+        const alreadyUsed = maxAllowed - currentCount;
+
+        for (let i = alreadyUsed; i < allowedDevices.length; i++) {
+          toKick.push(allowedDevices[i]);
+          console.log(`    → KICK: "${allowedDevices[i].deviceName}" (melebihi limit ${maxAllowed})`);
+        }
+        for (let i = 0; i < Math.min(alreadyUsed, allowedDevices.length); i++) {
+          console.log(`    → BIARKAN: "${allowedDevices[i].deviceName}"`);
+        }
       } else {
-        // Kolom G kosong → izinkan hanya 1 device (index 0 = terbaru), kick sisanya
+        // Tidak ada info tipe (kolom G kosong) — gunakan limit jumlah saja
+        const effectiveMax = maxAllowed ?? 1; // default 1 jika tidak ada info
         const nonCurrentDevices = devicesForProfile.filter(d => !d.isCurrent);
-        if (nonCurrentDevices.length > 1) {
-          // Device pertama = terbaru (jangan kick), kick sisanya
-          for (let i = 1; i < nonCurrentDevices.length; i++) {
+
+        if (nonCurrentDevices.length >= effectiveMax) {
+          // Biarkan yang pertama (index 0 = terbaru), kick sisanya
+          for (let i = effectiveMax; i < nonCurrentDevices.length; i++) {
             toKick.push(nonCurrentDevices[i]);
-            console.log(`    → KICK: "${nonCurrentDevices[i].deviceName}" (lebih dari 1 device, kolom G kosong)`);
+            console.log(`    → KICK: "${nonCurrentDevices[i].deviceName}" (melebihi max ${effectiveMax})`);
+          }
+          for (let i = 0; i < effectiveMax; i++) {
+            if (nonCurrentDevices[i]) {
+              console.log(`    → BIARKAN: "${nonCurrentDevices[i].deviceName}" (posisi ${i + 1})`);
+            }
           }
         } else {
-          console.log(`    → OK: hanya ${devicesForProfile.length} device, tidak perlu kick`);
+          console.log(`    → OK: ${devicesForProfile.length} device, max ${effectiveMax}`);
         }
       }
 

@@ -82,7 +82,11 @@ async function runGuard() {
 
       console.log(`\n${"─".repeat(55)}`);
       console.log(`[guard] [${i + 1}/${meetAccounts.length}] ${email}`);
-      console.log(`  Profil: ${profiles.map(p => `${p.name}${p.allowedDevice ? ` (${p.allowedDevice})` : " (kosong)"}`).join(", ")}`);
+      console.log(`  Profil: ${profiles.map(p => {
+        const devInfo = p.allowedDevice ? `dev:${p.allowedDevice}` : "dev:bebas";
+        const maxInfo = p.maxDevices    ? `max:${p.maxDevices}U`  : "";
+        return `${p.name} (${[devInfo, maxInfo].filter(Boolean).join(", ")})`;
+      }).join(", ")}`);
       console.log("─".repeat(55));
 
       try {

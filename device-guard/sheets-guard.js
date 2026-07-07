@@ -14,7 +14,38 @@ const { google } = require("googleapis");
 const COL_EMAIL    = parseInt(process.env.COL_EMAIL    ?? "0"); // A
 const COL_PASSWORD = parseInt(process.env.COL_PASSWORD ?? "1"); // B
 const COL_PROFILE  = parseInt(process.env.COL_PROFILE  ?? "2"); // C
+const COL_LOGOUT   = parseInt(process.env.COL_LOGOUT   ?? "4"); // E
 const COL_DEVICE   = parseInt(process.env.COL_DEVICE   ?? "6"); // G
+
+// ── Parse max device dari kolom E ─────────────────────────
+/**
+ * Parse jumlah device maksimum dari teks kolom E.
+ *
+ * Rules:
+ *   - Mengandung "SEMIPRIVATE" atau "SEMPRIV" → 2 device
+ *   - Mengandung "1U" (misal "1U", "2B1U", "1 Bulan 1U") → 1 device
+ *   - Mengandung "2U" → 2 device
+ *   - Tidak ada keterangan → null (ikut kolom G saja)
+ *
+ * @param {string} logoutText - teks dari kolom E
+ * @returns {number|null} jumlah max device, atau null jika tidak ada info
+ */
+function parseMaxDevices(logoutText) {
+  if (!logoutText) return null;
+  const text = logoutText.toUpperCase();
+
+  if (text.includes("SEMIPRIVATE") || text.includes("SEMPRIV") || text.includes("SEMI PRIVATE")) {
+    return 2;
+  }
+
+  // Cari pola XU di mana X adalah angka (1U, 2U, 3B1U, dll)
+  const uMatch = text.match(/(\d+)U/);
+  if (uMatch) {
+    return parseInt(uMatch[1]);
+  }
+
+  return null; // tidak ada info
+}
 
 // ── Google Auth ───────────────────────────────────────────
 let _sheetsClient = null;
@@ -103,14 +134,17 @@ function scanSheetForMeet(rows, sheetName) {
 
     if (!inMeetBlock) continue;
 
-    const email = row[COL_EMAIL]?.trim() ?? "";
+    const email         = row[COL_EMAIL]?.trim()    ?? "";
     if (!email.includes("@") || email.toLowerCase() === "email") continue;
 
     const password      = row[COL_PASSWORD]?.trim() ?? "";
     const profile       = row[COL_PROFILE]?.trim()  ?? "";
+    const logoutText    = row[COL_LOGOUT]?.trim()   ?? "";
     const allowedDevice = row[COL_DEVICE]?.trim()   ?? "";
 
     if (!profile) continue;
+
+    const maxDevices = parseMaxDevices(logoutText);
 
     results.push({
       sheetName,
@@ -118,6 +152,8 @@ function scanSheetForMeet(rows, sheetName) {
       password,
       profile,
       allowedDevice,
+      maxDevices,    // null = tidak ada info, 1 = 1U, 2 = SEMIPRIVATE/2U
+      logoutText,
     });
   }
 
@@ -170,10 +206,12 @@ async function getMeetAccounts() {
     emailGroups.get(key).profiles.push({
       name:          acc.profile,
       allowedDevice: acc.allowedDevice,
+      maxDevices:    acc.maxDevices,    // null | 1 | 2 | ...
+      logoutText:    acc.logoutText,
     });
   }
 
   return [...emailGroups.values()];
 }
 
-module.exports = { getMeetAccounts, findSpreadsheetId };
+module.exports = { getMeetAccounts, findSpreadsheetId, parseMaxDevices };
