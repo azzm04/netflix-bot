@@ -14,9 +14,9 @@
 
 require("dotenv").config();
 const cron    = require("node-cron");
-const { execSync } = require("child_process");
 const path    = require("path");
 const fs      = require("fs");
+const { sendTelegram } = require("./notify");
 
 // Jadwal: sekali sehari jam 02:00 dini hari (saat traffic rendah)
 // Ganti via .env: KEEPALIVE_SCHEDULE="0 2 * * *"
@@ -121,6 +121,46 @@ async function runKeepAlive() {
     }
 
     log(`=== Selesai: ${ok} ok, ${expired} expired, ${failed} gagal ===`);
+
+    // ── Kirim notifikasi ke Telegram ──────────────────────
+    const waktu = new Date().toLocaleString("id-ID");
+
+    if (expired > 0) {
+      // Ada cookie expired — perlu tindakan manual
+      const expiredList = emails
+        .filter((e) => {
+          const d = loadAllCookies();
+          return !d[e]?.netflixId; // sudah dihapus = expired
+        })
+        .join("\n• ");
+
+      await sendTelegram(
+        `⚠️ *Keep-Alive — Cookie Expired!*\n\n` +
+        `📅 ${waktu}\n\n` +
+        `Cookie berikut sudah tidak valid dan perlu diperbarui:\n` +
+        `• ${expiredList || "(lihat log)"}\n\n` +
+        `*Cara memperbarui:*\n` +
+        `1. Di komputer lokal jalankan:\n` +
+        `\`node harvest-cookies.js HARIAN\`\n` +
+        `2. Login manual di browser yang terbuka\n` +
+        `3. Copy \`cookies.json\` terbaru ke server`
+      );
+    }
+
+    if (ok > 0 || failed > 0) {
+      // Ringkasan rutin — kirim hanya jika ada yang perlu diperhatikan
+      const adaMasalah = failed > 0 || expired > 0;
+      if (adaMasalah) {
+        await sendTelegram(
+          `📊 *Keep-Alive — Ringkasan*\n\n` +
+          `📅 ${waktu}\n` +
+          `✅ Berhasil  : *${ok}*\n` +
+          `⚠️ Expired   : *${expired}*\n` +
+          `❌ Gagal     : *${failed}*`
+        );
+      }
+      // Jika semua ok, tidak kirim notif (tidak perlu spam tiap hari)
+    }
   } catch (err) {
     log(`ERROR: ${err.message}`);
   }
