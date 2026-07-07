@@ -66,12 +66,16 @@ async function processExpiredAccounts() {
     }
 
     // 2. Pisahkan KICK vs PIN CHANGE
-    const toKick = expiredList.filter(a => !a.isSkipped);
-    const toPin  = expiredList.filter(a => a.isSkipped);
+    // - MAHESH/ROSE (isSkipped=true)  → hanya ganti PIN
+    // - MEET (isMeet=true)            → kick device LALU ganti PIN
+    // - Normal                        → hanya kick device
+    const toKick    = expiredList.filter(a => !a.isSkipped);           // semua kecuali MAHESH/ROSE
+    const toPin     = expiredList.filter(a => a.isSkipped);            // MAHESH/ROSE
+    const toPinMeet = expiredList.filter(a => !a.isSkipped && a.isMeet); // MEET: kick dulu, PIN setelahnya
 
     console.log(`\n[cookie-server] Total expired : ${expiredList.length}`);
     console.log(`[cookie-server] Kick device   : ${toKick.length}`);
-    console.log(`[cookie-server] Ganti PIN     : ${toPin.length} (MAHESH/ROSE)`);
+    console.log(`[cookie-server] Ganti PIN     : ${toPin.length} (MAHESH/ROSE) + ${toPinMeet.length} (MEET setelah kick)`);
 
     if (toKick.length === 0 && toPin.length === 0) return;
 
@@ -156,17 +160,20 @@ async function processExpiredAccounts() {
       }
     }
 
-    // ── SECTION B: GANTI PIN ──────────────────────────────
-    if (toPin.length > 0) {
+    // ── SECTION C: GANTI PIN AKUN MEET (setelah kick) ───────
+    // Gabungkan toPinMeet dengan toPin — pakai antrian yang sama
+    const toPinAll = [...toPin, ...toPinMeet];
+
+    if (toPinAll.length > 0) {
       const pinGroups = new Map();
-      for (const a of toPin) {
+      for (const a of toPinAll) {
         const key = a.email.toLowerCase();
         if (!pinGroups.has(key)) pinGroups.set(key, []);
         pinGroups.get(key).push(a);
       }
       const pinEmailGroups = [...pinGroups.values()];
 
-      console.log(`\n[cookie-server] == GANTI PIN (${pinEmailGroups.length} email, ${toPin.length} profil) ==`);
+      console.log(`\n[cookie-server] == GANTI PIN (${pinEmailGroups.length} email, ${toPinAll.length} profil) ==`);
 
       for (let gi = 0; gi < pinEmailGroups.length; gi++) {
         const group      = pinEmailGroups[gi];
