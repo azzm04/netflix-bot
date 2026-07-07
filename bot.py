@@ -51,7 +51,7 @@ from handlers.admin import (
     cmd_ganti_pin, terima_pin_lama, terima_pin_baru,
     cmd_ganti_pin_admin, terima_pin_admin_lama, terima_pin_admin_baru,
     cancel, timeout_handler, pesan_tidak_dikenal,
-    cmd_cekcookies,
+    cmd_cekcookies, cmd_setcookie,
 )
 from handlers.group import (
     cmd_feeadmin, callback_fee_pilih_tanggal, terima_tanggal_fee,
@@ -121,6 +121,7 @@ async def post_init(application):
                 BotCommand("removeuser", "Hapus user"),
                 BotCommand("listuser", "Lihat daftar user"),
                 BotCommand("cekcookies", "Cek status cookie semua akun"),
+                BotCommand("setcookie", "Simpan cookie akun expired"),
                 BotCommand("cancel", "Batalkan proses"),
             ],
             scope=BotCommandScopeChat(chat_id=ADMIN_ID)
@@ -294,6 +295,7 @@ def main():
     app.add_handler(CommandHandler("removeuser", removeuser, filters=PRIVATE))
     app.add_handler(CommandHandler("listuser", listuser, filters=PRIVATE))
     app.add_handler(CommandHandler("cekcookies", cmd_cekcookies, filters=PRIVATE))
+    app.add_handler(CommandHandler("setcookie", cmd_setcookie, filters=PRIVATE))
     app.add_handler(CommandHandler("cancel", cancel, filters=PRIVATE))
 
     # Command khusus GROUP (rekap, closing, feeadmin)

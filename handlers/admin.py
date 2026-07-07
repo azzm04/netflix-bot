@@ -731,6 +731,101 @@ async def cmd_cekcookies(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     await pesan.edit_text(teks, parse_mode="Markdown")
 
+# ─── /setcookie ────────────────────────────────────────────
+
+async def cmd_setcookie(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """
+    Simpan cookie Netflix untuk satu akun ke cookies.json di server.
+
+    Cara pakai:
+      /setcookie email@gmail.com NetflixId_value SecureNetflixId_value
+
+    Cara ambil nilai cookie:
+      1. Buka Netflix di browser → login
+      2. DevTools (F12) → Application → Cookies → https://www.netflix.com
+      3. Copy nilai NetflixId dan SecureNetflixId
+    """
+    if update.effective_user.id != ADMIN_ID:
+        await update.message.reply_text("⛔ Hanya admin utama.")
+        return
+
+    args = context.args
+    if not args or len(args) < 3:
+        await update.message.reply_text(
+            "⚠️ *Format salah*\n\n"
+            "Cara pakai:\n"
+            "`/setcookie email NetflixId SecureNetflixId`\n\n"
+            "Cara ambil cookie:\n"
+            "1. Buka Netflix di browser → login\n"
+            "2. DevTools (F12) → Application → Cookies → netflix.com\n"
+            "3. Copy nilai `NetflixId` dan `SecureNetflixId`",
+            parse_mode="Markdown"
+        )
+        return
+
+    email      = args[0].strip()
+    netflix_id = args[1].strip()
+    secure_id  = args[2].strip()
+
+    if "@" not in email:
+        await update.message.reply_text("⚠️ Email tidak valid.")
+        return
+
+    if len(netflix_id) < 20 or len(secure_id) < 20:
+        await update.message.reply_text(
+            "⚠️ Nilai cookie terlalu pendek. Pastikan copy nilai lengkap dari DevTools."
+        )
+        return
+
+    # Hapus pesan agar nilai cookie tidak terekspos di chat
+    try:
+        await update.message.delete()
+    except Exception:
+        pass
+
+    pesan = await update.effective_chat.send_message("⏳ Menyimpan cookie ke server...")
+
+    import os
+    import json
+    from datetime import datetime, timezone
+
+    base_dir     = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    cookies_file = os.path.join(base_dir, "cookie-kicker-pin-changer", "cookies.json")
+
+    try:
+        if os.path.exists(cookies_file):
+            with open(cookies_file, "r") as f:
+                cookies = json.load(f)
+        else:
+            cookies = {}
+
+        is_update = email.lower() in cookies
+
+        cookies[email.lower()] = {
+            "netflixId":       netflix_id,
+            "secureNetflixId": secure_id,
+            "memclid":         None,
+            "nfvdid":          None,
+            "savedAt":         datetime.now(timezone.utc).isoformat(),
+        }
+
+        with open(cookies_file, "w") as f:
+            json.dump(cookies, f, indent=2)
+
+        action = "diperbarui" if is_update else "ditambahkan"
+        await pesan.edit_text(
+            f"✅ *Cookie berhasil {action}!*\n\n"
+            f"📧 Email: `{email}`\n"
+            f"🍪 NetflixId: `{netflix_id[:15]}...`\n\n"
+            f"Cookie siap dipakai pada proses berikutnya.",
+            parse_mode="Markdown"
+        )
+
+    except Exception as e:
+        logger.error(f"Error setcookie: {e}", exc_info=True)
+        await pesan.edit_text(f"⚠️ Gagal menyimpan cookie: `{e}`", parse_mode="Markdown")
+
+
 async def cancel(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     """Batalkan proses."""
     await update.message.reply_text(
