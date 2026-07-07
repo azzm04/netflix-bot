@@ -180,11 +180,13 @@ async function clickButton(client, message, buttonText) {
               data:  btn.data,
             })
           );
-          return true;
         } catch (err) {
-          console.warn(`[mahesh] Error klik tombol: ${err.message}`);
-          return false;
+          // BOT_RESPONSE_TIMEOUT normal — bot Mahesh balas via pesan baru, bukan callback answer
+          if (!err.message?.includes("BOT_RESPONSE_TIMEOUT") && !err.message?.includes("TIMEOUT")) {
+            console.warn(`[mahesh] Error klik tombol: ${err.message}`);
+          }
         }
+        return true; // tombol berhasil diklik, lanjut tunggu pesan balasan
       }
     }
   }
@@ -253,10 +255,11 @@ async function fetchFromMaheshBot(email, codeType = "signin", opts = {}) {
       // Klik tombol kategori yang sesuai
       const clicked = await clickButton(client, categoryMsg, buttonLabel);
       if (!clicked) {
-        throw new Error(`Tombol "${buttonLabel}" tidak ditemukan. Pastikan akun sudah diberi akses.`);
+        throw new Error(`Tombol "${buttonLabel}" tidak ditemukan di pesan bot. Cek nama tombol.`);
       }
 
-      // Tunggu balasan dengan kode
+      // Tunggu balasan dengan kode (bot balas via pesan baru)
+      console.log(`[mahesh] Menunggu balasan kode dari bot...`);
       const resultMsg = await waitForMessage(client, BOT_USERNAME, {
         contains:  "CODE",
         timeoutMs: TIMEOUT_MS,
