@@ -28,6 +28,14 @@ const URL_PIN_SETTINGS = "https://www.netflix.com/settings/migration";
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
+class WrongPasswordError extends Error {
+  constructor(email) {
+    super(`Password salah untuk ${email} (Kontrol Orang Tua).`);
+    this.name  = "WrongPasswordError";
+    this.email = email;
+  }
+}
+
 // ── Generate PIN Baru ─────────────────────────────────────
 function generateNewPin(oldPin) {
   let pin;
@@ -137,6 +145,15 @@ async function changePinsForProfilesCookie(email, password, targetProfiles) {
       // Tunggu network selesai dulu (Netflix sering ada redirect internal)
       await page.waitForLoadState("networkidle", { timeout: 10_000 }).catch(() => {});
       await sleep(500);
+
+      // Cek apakah Netflix menolak password ("Sandi salah.")
+      const pwError = page.locator('[data-uia="input-message-error"]');
+      const hasPwError = await pwError.isVisible({ timeout: 3000 }).catch(() => false);
+      if (hasPwError) {
+        const errText = await pwError.innerText().catch(() => "Sandi salah.");
+        console.warn(`  [pin-cookie] ✗ Password ditolak: "${errText.trim()}"`);
+        throw new WrongPasswordError(email);
+      }
 
       // Tunggu profil muncul
       const loaded = await page.waitForFunction(
@@ -248,4 +265,4 @@ async function changePinsForProfilesCookie(email, password, targetProfiles) {
   return pinChanges;
 }
 
-module.exports = { changePinsForProfilesCookie, CookieExpiredError };
+module.exports = { changePinsForProfilesCookie, CookieExpiredError, WrongPasswordError  };

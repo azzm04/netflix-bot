@@ -12,7 +12,7 @@ require("dotenv").config();
 const cron = require("node-cron");
 const { getExpiredAccounts, markAsKicked, updatePin, findSpreadsheetId } = require("./sheets");
 const { kickDevicesForProfilesCookie, CookieExpiredError } = require("./kicker-cookie");
-const { changePinsForProfilesCookie } = require("./pin-changer-cookie");
+const { changePinsForProfilesCookie, WrongPasswordError } = require("./pin-changer-cookie");
 const { getCookieForEmail } = require("./cookie-helper");
 const { notifyKickDone, notifyPinChanged, notifyError, notifySummary, sendTelegram } = require("./notify");
 
@@ -71,7 +71,15 @@ async function processExpiredAccounts() {
     // - Normal                        → hanya kick device
     const toKick    = expiredList.filter(a => !a.isSkipped);           // semua kecuali MAHESH/ROSE
     const toPin     = expiredList.filter(a => a.isSkipped);            // MAHESH/ROSE
-    const toPinMeet = expiredList.filter(a => !a.isSkipped && a.isMeet); // MEET: kick dulu, PIN setelahnya
+    const toPinMeet = expiredList.filter(a => !a.isSkipped && a.isMeet && !a.noPassword); // MEET, punya password
+
+    const noPasswordSkipped = expiredList.filter(a => (a.isSkipped || a.isMeet) && a.noPassword);
+    if (noPasswordSkipped.length > 0) {
+      console.log(`\n[cookie-server] ⚠ ${noPasswordSkipped.length} akun di-skip (PAKE KODE, tidak ada password):`);
+      for (const a of noPasswordSkipped) {
+        console.log(`  - ${a.email} / ${a.profile} (${a.sheetName} baris ${a.rowIndex})`);
+      }
+    }
 
     console.log(`\n[cookie-server] Total expired : ${expiredList.length}`);
     console.log(`[cookie-server] Kick device   : ${toKick.length}`);
@@ -145,10 +153,19 @@ async function processExpiredAccounts() {
             })),
           });
 
-        } catch (err) {
+    } catch (err) {
           if (err instanceof CookieExpiredError || err.name === "CookieExpiredError") {
             console.warn(`[cookie-server]   ✗ Cookie expired — skip.`);
             await notifyCookieExpired(email, profiles);
+          } else if (err instanceof WrongPasswordError || err.name === "WrongPasswordError") {
+            console.warn(`[cookie-server]   ✗ Password salah — skip.`);
+            await sendTelegram(
+              `🔒 *Password Salah — Ganti PIN Gagal*\n\n` +
+              `📧 Akun: \`${email}\`\n` +
+              `👤 Profil: ${profiles.join(", ")}\n\n` +
+              `Netflix menolak password saat submit "Kontrol Orang Tua" (pesan: "Sandi salah.").\n` +
+              `Tolong cek/update password akun ini di spreadsheet.`
+            );
           } else {
             console.error(`[cookie-server]   ✗ Error: ${err.message}`);
             await notifyError(email, profiles, err.message);
@@ -156,7 +173,7 @@ async function processExpiredAccounts() {
           totalFailed += group.length;
         }
 
-        if (gi < kickGroups.length - 1) await sleep(4000);
+        if (gi < pinEmailGroups.length - 1) await sleep(4000);
       }
     }
 

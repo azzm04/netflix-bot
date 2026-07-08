@@ -232,6 +232,8 @@ function scanSheetForExpired(rows, sheetName) {
     const password   = row[COL_PASSWORD]?.trim() ?? "";
     const profile    = row[COL_PROFILE]?.trim()  ?? "";
     const logoutText = row[COL_LOGOUT]?.trim()   ?? "";
+    const noPassword = password.toUpperCase() === "PAKE KODE";
+
 
     // Skip jika kolom E kosong (slot belum terisi) atau sudah EXPIRED
     if (!logoutText || logoutText.toUpperCase() === "EXPIRED") continue;
@@ -253,6 +255,7 @@ function scanSheetForExpired(rows, sheetName) {
       logoutDate,
       isSkipped: currentBlockIsMaheshOrRose,   // MAHESH/ROSE → ganti PIN
       isMeet: currentBlockLabel === "MEET",     // MEET → auto-fetch 4-digit kode
+      noPassword,
       skipReason: currentBlockIsMaheshOrRose
         ? `Blok ${currentBlockLabel} — tidak punya akses ke email akun`
         : "",

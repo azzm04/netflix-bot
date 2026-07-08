@@ -18,6 +18,7 @@
 "use strict";
 
 require("dotenv").config();
+const { requestCodeFromTelegram } = require("./tg-bridge");
 const { chromium } = require("playwright");
 const { getCookieForEmail, buildPlaywrightCookies, deleteCookieForEmail } = require("./cookie-helper");
 const fs = require("fs");
@@ -187,15 +188,14 @@ async function checkForExtraVerification(page, email, isMahesh = false) {
       console.log(`  [mfa] Kode: ${code6}`);
     } catch (err) {
       console.warn(`  [mfa] Auto-fetch gagal: ${err.message}`);
-      // Fallback: minta input manual via terminal
-      const readline = require("readline");
-      code6 = await new Promise((resolve) => {
-        const rl = readline.createInterface({ input: process.stdin, output: process.stdout });
-        rl.question(`\n  [MFA] Masukkan kode 6 digit untuk ${email}: `, (ans) => {
-          rl.close();
-          resolve(ans.trim());
-        });
-      });
+      // Fallback: minta kode via Telegram bot (bukan terminal lagi)
+      console.log(`  [mfa] Minta kode manual via Telegram...`);
+      try {
+        code6 = await requestCodeFromTelegram(email, "6digit", isMahesh ? "MAHESH" : "");
+      } catch (tgErr) {
+        console.error(`  [mfa] Gagal dapat kode dari Telegram: ${tgErr.message}`);
+        throw new Error(`MFA gagal untuk ${email}: auto-fetch dan Telegram fallback sama-sama gagal.`);
+      }
     }
 
     if (!code6) {
