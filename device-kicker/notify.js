@@ -79,9 +79,9 @@ async function notifyKickDone(info) {
   const label  = blockLabel ? `[${blockLabel}] ` : "";
 
   const msg =
-    `🔓 *Device Kicker — Selesai*\n\n` +
+    `🔓 *Berhasil Kick Device - Detail Akun*\n\n` +
     `📧 Akun: \`${label}${email}\`\n` +
-    `🔢 Device dikick: *${kicked}*\n` +
+    `🔢 Device dikick ada: *${kicked}*\n` +
     `📋 Profil diproses:\n${profileList}\n\n` +
     `${status}\n` +
     `📝 Sheet: ${sheetUpdated ? "diupdate (kosong + hijau)" : "tidak diupdate"}\n` +
@@ -125,7 +125,7 @@ async function notifyPinChanged(info) {
   }).join("\n");
 
   const msg =
-    `🔑 *PIN Change — Berhasil*\n\n` +
+    `🔑 *Berhasil Ganti Pin*\n\n` +
     `📧 Akun: \`[${blockLabel}] ${email}\`\n` +
     `🔢 Profil diubah: *${pinChanges.size}*\n\n` +
     `${pinList}\n\n` +
@@ -140,7 +140,7 @@ async function notifyPinChanged(info) {
  */
 async function notifyError(email, profileNames, errorMessage) {
   const msg =
-    `❌ *Device Kicker — Error*\n\n` +
+    `❌ *Error - Tidak Mendapatkan 6 Digit Kode*\n\n` +
     `📧 Akun: \`${email}\`\n` +
     `👤 Profil: ${profileNames.join(", ")}\n\n` +
     `Error: \`${errorMessage.substring(0, 300)}\``;
@@ -155,7 +155,7 @@ async function notifySummary({ totalKick, totalPin, totalFailed, elapsed }) {
   if (totalKick === 0 && totalPin === 0 && totalFailed === 0) return;
 
   const msg =
-    `📊 *Device Kicker — Ringkasan*\n\n` +
+    `📊 *Ringkasan Bot Otomatis*\n\n` +
     `✅ Kick device : *${totalKick}* profil\n` +
     `🔑 Ganti PIN   : *${totalPin}* profil\n` +
     `❌ Gagal       : *${totalFailed}* profil\n` +
