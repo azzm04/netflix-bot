@@ -362,15 +362,15 @@ def _cek_masih_ada_hari_ini(sheet, tanggal_str: str, is_crack: bool = False):
     return masih_aktif
 
 
-def _ubah_warna_biru_besok(sheet, tanggal_besok_str: str, is_crack: bool = False):
+def _ubah_warna_biru_besok(sheet, tanggal_besok_str: str, is_crack: bool = False, is_bulanan: bool = False):
     """
-    Cari semua cell di kolom E yang mengandung tanggal besok,
-    lalu ubah format: font Netflix Sans, size 12, bold, warna biru.
-    Pakai batch format (1 API call) untuk hindari rate limit.
-    is_crack: True jika sheet CRACK (email di kolom A atau B)
+    Cari semua cell di kolom E yang mengandung tanggal besok.
+    Ubah format: font Netflix Sans, size 11, bold, warna biru.
+    Khusus sheet BULANAN, ubah juga teksnya menjadi format '{tanggal_besok} 10.00'.
     """
     semua_data = sheet.get_all_values()
     ranges_to_format = []
+    cells_to_update = []
 
     parts = tanggal_besok_str.split()
     if len(parts) < 2:
@@ -406,7 +406,15 @@ def _ubah_warna_biru_besok(sheet, tanggal_besok_str: str, is_crack: bool = False
                 cell_ref = gspread.utils.rowcol_to_a1(nomor_baris, COL_LOGOUT + 1)
                 ranges_to_format.append(cell_ref)
 
-    # Batch format: semua cell dalam 1 API call
+                # Jika ini sheet bulanan, siapkan teks baru "Tanggal Bulan 10.00"
+                if is_bulanan:
+                    teks_baru = f"{tanggal_besok_str} 10.00"
+                    cells_to_update.append({
+                        "range": cell_ref,
+                        "values": [[teks_baru]]
+                    })
+
+    # Batch format: semua cell dalam 1 API call dan ubah warna jadi biru
     if ranges_to_format:
         format_config = {
             "textFormat": {
@@ -456,14 +464,14 @@ def gantihari():
         sheets_to_check.append(("BULANAN", sheet_bulanan))
     except Exception:
         pass
+
+    CRACK_SHEETS = {"CRACK_1-160_PREMIUM", "CRACK_161-320_PREMIUM", "CRACK_1-250"}
     # CRACK sheets — ikut dicek dan diubah warna
     for nama_sheet in ["CRACK_1-160_PREMIUM", "CRACK_161-320_PREMIUM", "CRACK_1-250"]:
         try:
             sheets_to_check.append((nama_sheet, spreadsheet.worksheet(nama_sheet)))
         except Exception:
             pass
-
-    CRACK_SHEETS = {"CRACK_1-160_PREMIUM", "CRACK_161-320_PREMIUM", "CRACK_1-250"}
 
     # Step 1: Cek apakah masih ada akun hari ini yang belum lewat
     semua_masih_aktif = []
@@ -481,7 +489,8 @@ def gantihari():
     total_diubah = 0
     for nama_sheet, sheet in sheets_to_check:
         is_crack = nama_sheet in CRACK_SHEETS
-        jumlah = _ubah_warna_biru_besok(sheet, tanggal_besok, is_crack)
+        is_bulanan = (nama_sheet == "BULANAN") # Deteksi jika sheet adalah BULANAN
+        jumlah = _ubah_warna_biru_besok(sheet, tanggal_besok, is_crack, is_bulanan)
         total_diubah += jumlah
 
     return ("berhasil", total_diubah)
