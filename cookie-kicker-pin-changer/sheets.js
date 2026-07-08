@@ -376,9 +376,7 @@ async function markAsKicked(spreadsheetId, sheetName, rowIndex) {
               userEnteredFormat: {
                 backgroundColor: { red: 0.0, green: 1.0, blue: 0.0 },
                 textFormat: { 
-                  foregroundColorStyle: {
-                    rgbColor: {red: 1, green: 0, blue: 0} 
-                  }
+                  foregroundColor: { red: 1.0, green: 0.0, blue: 0.0 }
                 }
               },
             },
