@@ -31,7 +31,7 @@ async function notifyCookieExpired(email, profiles) {
     `👤 Profil: ${profiles.join(", ")}\n\n` +
     `Jalankan di lokal:\n` +
     `\`node cookie-helper.js save-interactive "${email}"\`\n` +
-    `Lalu copy \`cookies.json\` ke server.`
+    `Lalu masukkan dengan command \`setcookie\` ke bot.`
   );
 }
 

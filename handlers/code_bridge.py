@@ -77,7 +77,7 @@ async def check_and_notify_admin(context: ContextTypes.DEFAULT_TYPE):
     akun_info = f"[{label}] " if label else ""
 
     msg = (
-        f"🔑 *Device Kicker butuh kode OTP*\n\n"
+        f"🔑 *Butuh kode OTP 6 Digit*\n\n"
         f"Akun: `{akun_info}{email}`\n"
         f"Tipe: *{digits}-digit kode*\n\n"
         f"Balas pesan ini dengan kode {digits} digit dari email akun.\n"
