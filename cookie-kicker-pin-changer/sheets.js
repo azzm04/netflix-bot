@@ -380,7 +380,7 @@ async function markAsKicked(spreadsheetId, sheetName, rowIndex) {
                 }
               },
             },
-            fields: "userEnteredFormat.backgroundColor.textFormat",
+            fields: "userEnteredFormat.backgroundColor,userEnteredFormat.textFormat.foregroundColor",
           },
         },
         // Kolom F → kosongkan isi saja, JANGAN ubah warna background
