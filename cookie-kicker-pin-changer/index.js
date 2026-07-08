@@ -173,7 +173,7 @@ async function processExpiredAccounts() {
           totalFailed += group.length;
         }
 
-        if (gi < pinEmailGroups.length - 1) await sleep(4000);
+        if (gi < kickGroups.length - 1) await sleep(4000);
       }
     }
 
@@ -188,7 +188,7 @@ async function processExpiredAccounts() {
         if (!pinGroups.has(key)) pinGroups.set(key, []);
         pinGroups.get(key).push(a);
       }
-      pinEmailGroups = [...pinGroups.values()];
+      const pinEmailGroups = [...pinGroups.values()];
 
       console.log(`\n[cookie-server] == GANTI PIN (${pinEmailGroups.length} email, ${toPinAll.length} profil) ==`);
 
