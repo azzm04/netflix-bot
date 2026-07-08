@@ -188,7 +188,7 @@ async function processExpiredAccounts() {
         if (!pinGroups.has(key)) pinGroups.set(key, []);
         pinGroups.get(key).push(a);
       }
-      const pinEmailGroups = [...pinGroups.values()];
+      pinEmailGroups = [...pinGroups.values()];
 
       console.log(`\n[cookie-server] == GANTI PIN (${pinEmailGroups.length} email, ${toPinAll.length} profil) ==`);
 
