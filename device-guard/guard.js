@@ -16,14 +16,17 @@
 "use strict";
 
 require("dotenv").config();
-const path   = require("path");
-const fs     = require("fs");
+const path = require("path");
+const fs = require("fs");
 const { chromium } = require("playwright");
 
 // Pakai cookie dari cookie-kicker-pin-changer
-const COOKIE_FILE = path.resolve(__dirname, process.env.COOKIE_FILE ?? "../cookie-kicker-pin-changer/cookies.json");
+const COOKIE_FILE = path.resolve(
+  __dirname,
+  process.env.COOKIE_FILE ?? "../cookie-kicker-pin-changer/cookies.json",
+);
 
-const HEADLESS    = process.env.HEADLESS !== "false";
+const HEADLESS = process.env.HEADLESS !== "false";
 const TIMEOUT_NAV = 45_000;
 const URL_DEVICES = "https://www.netflix.com/manageaccountaccess";
 
@@ -32,7 +35,11 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 // ── Load cookie ───────────────────────────────────────────
 function loadAllCookies() {
   if (!fs.existsSync(COOKIE_FILE)) return {};
-  try { return JSON.parse(fs.readFileSync(COOKIE_FILE, "utf-8")); } catch { return {}; }
+  try {
+    return JSON.parse(fs.readFileSync(COOKIE_FILE, "utf-8"));
+  } catch {
+    return {};
+  }
 }
 
 function getCookieForEmail(email) {
@@ -42,18 +49,39 @@ function getCookieForEmail(email) {
 
 function saveCookieForEmail(email, cookieData) {
   const all = loadAllCookies();
-  all[email.toLowerCase()] = { ...cookieData, savedAt: new Date().toISOString() };
+  all[email.toLowerCase()] = {
+    ...cookieData,
+    savedAt: new Date().toISOString(),
+  };
   fs.writeFileSync(COOKIE_FILE, JSON.stringify(all, null, 2), "utf-8");
 }
 
 function buildPlaywrightCookies(cookieData) {
-  const base = { domain: ".netflix.com", path: "/", secure: true, httpOnly: true, sameSite: "None" };
+  const base = {
+    domain: ".netflix.com",
+    path: "/",
+    secure: true,
+    httpOnly: true,
+    sameSite: "None",
+  };
   const cookies = [
-    { ...base, name: "NetflixId",       value: cookieData.netflixId },
+    { ...base, name: "NetflixId", value: cookieData.netflixId },
     { ...base, name: "SecureNetflixId", value: cookieData.secureNetflixId },
   ];
-  if (cookieData.memclid) cookies.push({ ...base, name: "memclid", value: cookieData.memclid, httpOnly: false });
-  if (cookieData.nfvdid)  cookies.push({ ...base, name: "nfvdid",  value: cookieData.nfvdid,  httpOnly: false });
+  if (cookieData.memclid)
+    cookies.push({
+      ...base,
+      name: "memclid",
+      value: cookieData.memclid,
+      httpOnly: false,
+    });
+  if (cookieData.nfvdid)
+    cookies.push({
+      ...base,
+      name: "nfvdid",
+      value: cookieData.nfvdid,
+      httpOnly: false,
+    });
   return cookies;
 }
 
@@ -70,15 +98,40 @@ function buildPlaywrightCookies(cookieData) {
  *   "Samsung Smart TV" / "LG TV" / "[Merek] TV"
  */
 const DEVICE_KEYWORDS = [
-  { keywords: ["iphone", "apple"],         netflixMatch: ["apple", "iphone"] },
-  { keywords: ["android", "samsung", "xiaomi", "oppo", "vivo", "realme", "redmi", "hp"],
-                                            netflixMatch: ["android", "samsung", "xiaomi", "oppo", "vivo", "realme", "redmi", "mobile"] },
-  { keywords: ["laptop", "chrome", "pc", "chromebook"],
-                                            netflixMatch: ["chrome", "browser", "pc"] },
+  { keywords: ["iphone", "apple"], netflixMatch: ["apple", "iphone"] },
+  {
+    keywords: [
+      "android",
+      "samsung",
+      "xiaomi",
+      "oppo",
+      "vivo",
+      "realme",
+      "redmi",
+      "hp",
+    ],
+    netflixMatch: [
+      "android",
+      "samsung",
+      "xiaomi",
+      "oppo",
+      "vivo",
+      "realme",
+      "redmi",
+      "mobile",
+    ],
+  },
+  {
+    keywords: ["laptop", "chrome", "pc", "chromebook"],
+    netflixMatch: ["chrome", "browser", "pc"],
+  },
   { keywords: ["mac", "macbook", "safari"], netflixMatch: ["mac", "safari"] },
-  { keywords: ["edge"],                     netflixMatch: ["edge"] },
-  { keywords: ["tv", "smart tv", "televisi"], netflixMatch: ["tv", "television", "smart"] },
-  { keywords: ["ipad", "tablet"],           netflixMatch: ["ipad", "tablet"] },
+  { keywords: ["edge"], netflixMatch: ["edge"] },
+  {
+    keywords: ["tv", "smart tv", "televisi"],
+    netflixMatch: ["tv", "television", "smart"],
+  },
+  { keywords: ["ipad", "tablet"], netflixMatch: ["ipad", "tablet"] },
 ];
 
 /**
@@ -90,29 +143,32 @@ const DEVICE_KEYWORDS = [
 function isDeviceAllowed(netflixDeviceName, allowedDeviceHint) {
   if (!allowedDeviceHint) return false; // kolom G kosong: handle terpisah
 
-  const hint   = allowedDeviceHint.toLowerCase();
+  const hint = allowedDeviceHint.toLowerCase();
   const device = netflixDeviceName.toLowerCase();
 
   // Cari mapping yang cocok dengan hint dari kolom G
   for (const mapping of DEVICE_KEYWORDS) {
-    const hintMatch = mapping.keywords.some(k => hint.includes(k));
+    const hintMatch = mapping.keywords.some((k) => hint.includes(k));
     if (!hintMatch) continue;
 
     // Hint cocok dengan kategori ini — cek apakah device Netflix juga cocok
-    const deviceMatch = mapping.netflixMatch.some(k => device.includes(k));
+    const deviceMatch = mapping.netflixMatch.some((k) => device.includes(k));
     if (deviceMatch) return true;
   }
 
   // Fallback: cek langsung substring
-  const hintWords = hint.split(/\s+/).filter(w => w.length > 2);
-  return hintWords.some(w => device.includes(w));
+  const hintWords = hint.split(/\s+/).filter((w) => w.length > 2);
+  return hintWords.some((w) => device.includes(w));
 }
 
 // ── Handle MFA ────────────────────────────────────────────
 async function handleMfa(page, email) {
   await sleep(1000);
-  const url      = page.url();
-  const bodyText = await page.locator("body").innerText().catch(() => "");
+  const url = page.url();
+  const bodyText = await page
+    .locator("body")
+    .innerText()
+    .catch(() => "");
 
   const needsMfa =
     url.includes("/mfa") ||
@@ -125,18 +181,25 @@ async function handleMfa(page, email) {
   console.log(`  [guard-mfa] MFA terdeteksi untuk ${email}`);
 
   // Klik tombol kirim kode
-  const emailBtn = page.locator(
-    '[data-uia="account-mfa-button-OTP_EMAIL"] button, button:has-text("Email a code"), button:has-text("Kirim kode")'
-  ).first();
+  const emailBtn = page
+    .locator(
+      '[data-uia="account-mfa-button-OTP_EMAIL"] button, button:has-text("Email a code"), button:has-text("Kirim kode")',
+    )
+    .first();
 
   if (await emailBtn.isVisible({ timeout: 5000 }).catch(() => false)) {
     await emailBtn.click();
   }
 
-  await page.waitForFunction(
-    () => document.querySelectorAll('input[inputmode="numeric"], input[maxlength="1"]').length >= 1,
-    { timeout: 15_000, polling: 500 }
-  ).catch(() => {});
+  await page
+    .waitForFunction(
+      () =>
+        document.querySelectorAll(
+          'input[inputmode="numeric"], input[maxlength="1"]',
+        ).length >= 1,
+      { timeout: 15_000, polling: 500 },
+    )
+    .catch(() => {});
 
   console.log(`  [guard-mfa] Tunggu 10 detik...`);
   await sleep(10_000);
@@ -147,25 +210,39 @@ async function handleMfa(page, email) {
   try {
     const { fetchNetflixCode } = require("../cookie-kicker-pin-changer/nfpro");
     console.log(`  [guard-mfa] Auto-fetch kode via nfpro...`);
-    code6 = await fetchNetflixCode(email, "signin6", { retries: 2, retryDelay: 5000 });
+    code6 = await fetchNetflixCode(email, "signin6", {
+      retries: 2,
+      retryDelay: 5000,
+    });
     console.log(`  [guard-mfa] Kode: ${code6}`);
   } catch (err) {
     console.warn(`  [guard-mfa] nfpro gagal: ${err.message}`);
     // Fallback terminal
     const readline = require("readline");
-    code6 = await new Promise(resolve => {
-      const rl = readline.createInterface({ input: process.stdin, output: process.stdout });
-      rl.question(`\n  [MFA] Kode 6 digit untuk ${email}: `, ans => { rl.close(); resolve(ans.trim()); });
+    code6 = await new Promise((resolve) => {
+      const rl = readline.createInterface({
+        input: process.stdin,
+        output: process.stdout,
+      });
+      rl.question(`\n  [MFA] Kode 6 digit untuk ${email}: `, (ans) => {
+        rl.close();
+        resolve(ans.trim());
+      });
     });
   }
 
   if (!code6) throw new Error(`Kode MFA tidak tersedia untuk ${email}`);
 
   // Isi kode
-  const inputs = await page.$$('input[inputmode="numeric"], input[maxlength="1"], input[autocomplete="one-time-code"]');
+  const inputs = await page.$$(
+    'input[inputmode="numeric"], input[maxlength="1"], input[autocomplete="one-time-code"]',
+  );
   if (inputs.length === 1) {
     await inputs[0].evaluate((el, val) => {
-      const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value").set;
+      const setter = Object.getOwnPropertyDescriptor(
+        HTMLInputElement.prototype,
+        "value",
+      ).set;
       setter.call(el, val);
       el.dispatchEvent(new Event("input", { bubbles: true }));
       el.dispatchEvent(new Event("change", { bubbles: true }));
@@ -180,14 +257,18 @@ async function handleMfa(page, email) {
   }
 
   await sleep(300);
-  const submitBtn = page.locator('button[type="submit"], button:has-text("Kirim")').first();
+  const submitBtn = page
+    .locator('button[type="submit"], button:has-text("Kirim")')
+    .first();
   if (await submitBtn.isVisible({ timeout: 2000 }).catch(() => false)) {
     await submitBtn.click();
   } else {
     await page.keyboard.press("Enter");
   }
 
-  await page.waitForURL(u => !u.toString().includes("/mfa"), { timeout: 30_000 }).catch(() => {});
+  await page
+    .waitForURL((u) => !u.toString().includes("/mfa"), { timeout: 30_000 })
+    .catch(() => {});
   await sleep(1000);
   console.log(`  [guard-mfa] Selesai. URL: ${page.url()}`);
 }
@@ -208,18 +289,28 @@ async function guardAccount(email, profiles) {
 
   const browser = await chromium.launch({
     headless: HEADLESS,
-    args: ["--no-sandbox", "--disable-setuid-sandbox", "--disable-dev-shm-usage"],
+    args: [
+      "--no-sandbox",
+      "--disable-setuid-sandbox",
+      "--disable-dev-shm-usage",
+    ],
   });
 
   let totalKicked = 0;
-  const details   = [];
+  const details = [];
 
   try {
-    const ctx = await browser.newContext({ viewport: { width: 1280, height: 900 }, locale: "id-ID" });
+    const ctx = await browser.newContext({
+      viewport: { width: 1280, height: 900 },
+      locale: "id-ID",
+    });
     await ctx.addCookies(buildPlaywrightCookies(cookieData));
     const page = await ctx.newPage();
 
-    await page.goto(URL_DEVICES, { waitUntil: "domcontentloaded", timeout: TIMEOUT_NAV });
+    await page.goto(URL_DEVICES, {
+      waitUntil: "domcontentloaded",
+      timeout: TIMEOUT_NAV,
+    });
 
     // Cek expired
     if (page.url().includes("/login")) {
@@ -231,7 +322,10 @@ async function guardAccount(email, profiles) {
 
     // Navigate ulang jika perlu
     if (!page.url().includes("manageaccountaccess")) {
-      await page.goto(URL_DEVICES, { waitUntil: "domcontentloaded", timeout: TIMEOUT_NAV });
+      await page.goto(URL_DEVICES, {
+        waitUntil: "domcontentloaded",
+        timeout: TIMEOUT_NAV,
+      });
       await handleMfa(page, email);
     }
 
@@ -240,7 +334,9 @@ async function guardAccount(email, profiles) {
     // Expand "Tampilkan Lainnya"
     let more = true;
     while (more) {
-      const showMore = page.locator('[data-uia="device-list+show-more-button"]');
+      const showMore = page.locator(
+        '[data-uia="device-list+show-more-button"]',
+      );
       if (await showMore.isVisible({ timeout: 2000 }).catch(() => false)) {
         await showMore.click();
         await sleep(1200);
@@ -268,17 +364,26 @@ async function guardAccount(email, profiles) {
         await sleep(600);
       }
 
-      const isCurrent = (await card.locator('[data-uia$="+current-device-badge+ANNOUNCE"]').count()) > 0;
-      const cardText  = await card.innerText().catch(() => "");
+      const isCurrent =
+        (await card
+          .locator('[data-uia$="+current-device-badge+ANNOUNCE"]')
+          .count()) > 0;
+      const cardText = await card.innerText().catch(() => "");
 
       // Device name (baris pertama card biasanya nama device)
-      const lines      = cardText.split("\n").map(l => l.trim()).filter(Boolean);
+      const lines = cardText
+        .split("\n")
+        .map((l) => l.trim())
+        .filter(Boolean);
       const deviceName = lines[0] ?? "";
 
       // Profil yang sedang aktif di device ini
       let profileName = null;
       for (const line of lines) {
-        if (line.toLowerCase().includes("terakhir ditonton") || line.toLowerCase().includes("last watched")) {
+        if (
+          line.toLowerCase().includes("terakhir ditonton") ||
+          line.toLowerCase().includes("last watched")
+        ) {
           profileName = line
             .replace(/\(terakhir ditonton\)/i, "")
             .replace(/\(last watched\)/i, "")
@@ -288,9 +393,11 @@ async function guardAccount(email, profiles) {
       }
 
       // Skip "tidak ada aktivitas" — profile unknown
-      if (!profileName ||
-          profileName.toLowerCase().includes("tidak ada aktivitas") ||
-          profileName.toLowerCase().includes("no activity")) {
+      if (
+        !profileName ||
+        profileName.toLowerCase().includes("tidak ada aktivitas") ||
+        profileName.toLowerCase().includes("no activity")
+      ) {
         profileName = "__noactivity__";
       }
 
@@ -298,70 +405,63 @@ async function guardAccount(email, profiles) {
       if (!profileDevices.has(profileKey)) {
         profileDevices.set(profileKey, []);
       }
-      profileDevices.get(profileKey).push({ cardIndex: i, deviceName, isCurrent, profileName });
+      profileDevices
+        .get(profileKey)
+        .push({ cardIndex: i, deviceName, isCurrent, profileName });
     }
 
     // Evaluasi setiap profil yang perlu di-guard
     const processedCards = new Set();
+    const pendingKicks = []; // { cardIndex, deviceName, reason }
 
-    // ── Step 1: Kick device "tidak ada aktivitas" ─────────
-    // Device tanpa profil aktif tidak berguna dan harus selalu dikick
+    function queueKick(dev, reason) {
+      if (dev.isCurrent || processedCards.has(dev.cardIndex)) return;
+      processedCards.add(dev.cardIndex);
+      pendingKicks.push({
+        cardIndex: dev.cardIndex,
+        deviceName: dev.deviceName,
+        reason,
+      });
+    }
+
+    // ── Step 1: Tandai device "tidak ada aktivitas" untuk dikick ──
     const noActivityDevices = profileDevices.get("__noactivity__") ?? [];
     for (const dev of noActivityDevices) {
-      if (dev.isCurrent) continue;
-      const card      = cards.nth(dev.cardIndex);
-      const keluarBtn = card.locator('button:has-text("Keluar"), button:has-text("Sign Out")').first();
-      if (await keluarBtn.isVisible({ timeout: 1000 }).catch(() => false)) {
-        await keluarBtn.click();
-        totalKicked++;
-        processedCards.add(dev.cardIndex);
-        const msg = `Dikick: "${dev.deviceName}" (tidak ada aktivitas)`;
-        details.push(msg);
-        console.log(`  [guard] ✓ ${msg}`);
-        await sleep(1500);
-      }
+      queueKick(dev, "tidak ada aktivitas");
     }
     if (noActivityDevices.length > 0) {
-      console.log(`  [guard] ${noActivityDevices.length} device "tidak ada aktivitas" diproses.`);
+      console.log(
+        `  [guard] ${noActivityDevices.length} device "tidak ada aktivitas" dievaluasi.`,
+      );
     }
 
-    // ── Step 2: Kick device yang profilnya tidak ada di spreadsheet ──
-    // Profil yang diizinkan (dari spreadsheet)
-    const allowedProfileKeys = new Set(profiles.map(p => p.name.toLowerCase()));
+    // ── Step 2: Tandai device dari profil yang tidak ada di spreadsheet ──
+    const allowedProfileKeys = new Set(
+      profiles.map((p) => p.name.toLowerCase()),
+    );
 
     for (const [profKey, devs] of profileDevices.entries()) {
-      if (profKey === "__noactivity__") continue; // sudah dihandle di step 1
+      if (profKey === "__noactivity__") continue;
 
-      // Cek apakah profil ini ada di daftar spreadsheet
       const isKnownProfile = [...allowedProfileKeys].some(
-        k => profKey.includes(k) || k.includes(profKey)
+        (k) => profKey.includes(k) || k.includes(profKey),
       );
 
       if (!isKnownProfile) {
-        console.log(`  [guard] Profil "${devs[0]?.profileName}" tidak ada di spreadsheet → kick semua devicenya`);
+        console.log(
+          `  [guard] Profil "${devs[0]?.profileName}" tidak ada di spreadsheet → kick semua devicenya`,
+        );
         for (const dev of devs) {
-          if (dev.isCurrent || processedCards.has(dev.cardIndex)) continue;
-          const card      = cards.nth(dev.cardIndex);
-          const keluarBtn = card.locator('button:has-text("Keluar"), button:has-text("Sign Out")').first();
-          if (await keluarBtn.isVisible({ timeout: 1000 }).catch(() => false)) {
-            await keluarBtn.click();
-            totalKicked++;
-            processedCards.add(dev.cardIndex);
-            const msg = `Dikick: "${dev.deviceName}" dari profil tidak dikenal "${devs[0]?.profileName}"`;
-            details.push(msg);
-            console.log(`  [guard] ✓ ${msg}`);
-            await sleep(1500);
-          }
+          queueKick(dev, `profil tidak dikenal "${devs[0]?.profileName}"`);
         }
       }
     }
 
     // ── Step 3: Cek rules per profil yang diizinkan ───────
     for (const prof of profiles) {
-      const profKey    = prof.name.toLowerCase();
+      const profKey = prof.name.toLowerCase();
       const allowedDev = prof.allowedDevice;
 
-      // Cari device yang menggunakan profil ini
       let devicesForProfile = [];
       for (const [key, devs] of profileDevices.entries()) {
         if (key.includes(profKey) || profKey.includes(key)) {
@@ -371,135 +471,153 @@ async function guardAccount(email, profiles) {
       }
 
       if (devicesForProfile.length === 0) {
-        console.log(`  [guard] Profil "${prof.name}" tidak aktif di device manapun — skip`);
+        console.log(
+          `  [guard] Profil "${prof.name}" tidak aktif di device manapun — skip`,
+        );
         continue;
       }
 
       // ── Slot kosong: tidak boleh ada yang login ──────────
       if (prof.hasCustomer === false) {
-        console.log(`  [guard] Profil "${prof.name}" slot KOSONG (kolom E kosong) → kick semua device`);
+        console.log(
+          `  [guard] Profil "${prof.name}" slot KOSONG (kolom E kosong) → kick semua device`,
+        );
         for (const dev of devicesForProfile) {
-          if (dev.isCurrent || processedCards.has(dev.cardIndex)) continue;
-          const card      = cards.nth(dev.cardIndex);
-          const keluarBtn = card.locator('button:has-text("Keluar"), button:has-text("Sign Out")').first();
-          if (await keluarBtn.isVisible({ timeout: 1000 }).catch(() => false)) {
-            await keluarBtn.click();
-            totalKicked++;
-            processedCards.add(dev.cardIndex);
-            const msg = `Dikick: "${dev.deviceName}" dari profil kosong "${prof.name}"`;
-            details.push(msg);
-            console.log(`  [guard] ✓ ${msg}`);
-            await sleep(1500);
-          }
+          queueKick(dev, `profil kosong "${prof.name}"`);
         }
-        continue; // skip rules check, slot ini memang harus kosong
+        continue;
       }
 
-      console.log(`  [guard] Profil "${prof.name}" aktif di ${devicesForProfile.length} device:`);
+      console.log(
+        `  [guard] Profil "${prof.name}" aktif di ${devicesForProfile.length} device:`,
+      );
       devicesForProfile.forEach((d, idx) => {
-        console.log(`    [${idx}] ${d.deviceName} ${d.isCurrent ? "(SAAT INI)" : ""}`);
+        console.log(
+          `    [${idx}] ${d.deviceName} ${d.isCurrent ? "(SAAT INI)" : ""}`,
+        );
       });
 
-      // Tentukan mana yang harus dikick
-      const toKick     = [];
+      const toKick = [];
       const maxAllowed = prof.maxDevices ?? (allowedDev ? null : 1);
 
-      console.log(`  [guard] Rules: maxDevice=${maxAllowed ?? "∞ (cek tipe)"}, allowedDev="${allowedDev || "kosong"}"`);
+      console.log(
+        `  [guard] Rules: maxDevice=${maxAllowed ?? "∞ (cek tipe)"}, allowedDev="${allowedDev || "kosong"}"`,
+      );
 
       if (allowedDev && maxAllowed === null) {
-        // Hanya cek tipe device, tidak ada limit jumlah
         for (const dev of devicesForProfile) {
           if (dev.isCurrent) continue;
           if (!isDeviceAllowed(dev.deviceName, allowedDev)) {
             toKick.push(dev);
-            console.log(`    → KICK: "${dev.deviceName}" (tipe tidak cocok dengan "${allowedDev}")`);
+            console.log(
+              `    → KICK: "${dev.deviceName}" (tipe tidak cocok dengan "${allowedDev}")`,
+            );
           } else {
             console.log(`    → BIARKAN: "${dev.deviceName}" (tipe cocok)`);
           }
         }
       } else if (allowedDev && maxAllowed !== null) {
-        // Ada limit jumlah DAN limit tipe
-        // Kick yang tidak cocok tipe, dan kick yang melebihi batas jumlah
         const allowedDevices = devicesForProfile.filter(
-          d => !d.isCurrent && isDeviceAllowed(d.deviceName, allowedDev)
+          (d) => !d.isCurrent && isDeviceAllowed(d.deviceName, allowedDev),
         );
         const notAllowedDevices = devicesForProfile.filter(
-          d => !d.isCurrent && !isDeviceAllowed(d.deviceName, allowedDev)
+          (d) => !d.isCurrent && !isDeviceAllowed(d.deviceName, allowedDev),
         );
 
-        // Kick semua yang tidak cocok tipe
         for (const dev of notAllowedDevices) {
           toKick.push(dev);
           console.log(`    → KICK: "${dev.deviceName}" (tipe tidak cocok)`);
         }
 
-        // Dari yang cocok tipe, kick jika melebihi maxAllowed
         const currentMatchCount = devicesForProfile.filter(
-          d => d.isCurrent && isDeviceAllowed(d.deviceName, allowedDev)
+          (d) => d.isCurrent && isDeviceAllowed(d.deviceName, allowedDev),
         ).length;
-        // Sisa slot = maxAllowed dikurangi device current yang sudah cocok
         const remainingSlots = Math.max(0, maxAllowed - currentMatchCount);
 
         for (let i = remainingSlots; i < allowedDevices.length; i++) {
           toKick.push(allowedDevices[i]);
-          console.log(`    → KICK: "${allowedDevices[i].deviceName}" (melebihi limit ${maxAllowed})`);
+          console.log(
+            `    → KICK: "${allowedDevices[i].deviceName}" (melebihi limit ${maxAllowed})`,
+          );
         }
-        for (let i = 0; i < Math.min(remainingSlots, allowedDevices.length); i++) {
+        for (
+          let i = 0;
+          i < Math.min(remainingSlots, allowedDevices.length);
+          i++
+        ) {
           console.log(`    → BIARKAN: "${allowedDevices[i].deviceName}"`);
         }
       } else {
-        // Tidak ada info tipe (kolom G kosong) — gunakan limit jumlah saja
-        const effectiveMax = maxAllowed ?? 1; // default 1 jika tidak ada info
-        const nonCurrentDevices = devicesForProfile.filter(d => !d.isCurrent);
+        const effectiveMax = maxAllowed ?? 1;
+        const nonCurrentDevices = devicesForProfile.filter((d) => !d.isCurrent);
 
         if (nonCurrentDevices.length >= effectiveMax) {
-          // Biarkan yang pertama (index 0 = terbaru), kick sisanya
           for (let i = effectiveMax; i < nonCurrentDevices.length; i++) {
             toKick.push(nonCurrentDevices[i]);
-            console.log(`    → KICK: "${nonCurrentDevices[i].deviceName}" (melebihi max ${effectiveMax})`);
+            console.log(
+              `    → KICK: "${nonCurrentDevices[i].deviceName}" (melebihi max ${effectiveMax})`,
+            );
           }
           for (let i = 0; i < effectiveMax; i++) {
             if (nonCurrentDevices[i]) {
-              console.log(`    → BIARKAN: "${nonCurrentDevices[i].deviceName}" (posisi ${i + 1})`);
+              console.log(
+                `    → BIARKAN: "${nonCurrentDevices[i].deviceName}" (posisi ${i + 1})`,
+              );
             }
           }
         } else {
-          console.log(`    → OK: ${devicesForProfile.length} device, max ${effectiveMax}`);
+          console.log(
+            `    → OK: ${devicesForProfile.length} device, max ${effectiveMax}`,
+          );
         }
       }
 
-      // Eksekusi kick
       for (const dev of toKick) {
-        if (processedCards.has(dev.cardIndex)) continue;
+        queueKick(dev, `rules profil "${prof.name}"`);
+      }
+    }
 
-        const card     = cards.nth(dev.cardIndex);
-        const keluarBtn = card.locator('button:has-text("Keluar"), button:has-text("Sign Out")').first();
+    // ── Eksekusi SEMUA kick sekaligus, urutan index BESAR → KECIL ──
+    // Ini penting: begitu satu card dihapus dari DOM, index card lain yang
+    // BELUM diproses (index lebih kecil) tetap valid karena belum "dilewati".
+    pendingKicks.sort((a, b) => b.cardIndex - a.cardIndex);
 
-        if (await keluarBtn.isVisible({ timeout: 1000 }).catch(() => false)) {
-          await keluarBtn.click();
-          totalKicked++;
-          processedCards.add(dev.cardIndex);
-          const msg = `Dikick: "${dev.deviceName}" dari profil "${prof.name}"`;
-          details.push(msg);
-          console.log(`  [guard] ✓ ${msg}`);
-          await sleep(1500);
-        }
+    console.log(
+      `  [guard] Total ${pendingKicks.length} device diantrikan untuk dikick.`,
+    );
+
+    for (const kick of pendingKicks) {
+      const card = cards.nth(kick.cardIndex);
+      const keluarBtn = card
+        .locator('button:has-text("Keluar"), button:has-text("Sign Out")')
+        .first();
+
+      if (await keluarBtn.isVisible({ timeout: 1000 }).catch(() => false)) {
+        await keluarBtn.click();
+        totalKicked++;
+        const msg = `Dikick: "${kick.deviceName}" (${kick.reason})`;
+        details.push(msg);
+        console.log(`  [guard] ✓ ${msg}`);
+        await sleep(1500);
+      } else {
+        console.warn(
+          `  [guard] ⚠ Tombol Keluar tidak ditemukan untuk "${kick.deviceName}" (index ${kick.cardIndex}) — mungkin sudah terhapus dari DOM.`,
+        );
       }
     }
 
     // Dynamic Update cookie
     const allCookies = await ctx.cookies("https://www.netflix.com");
-    const cm = Object.fromEntries(allCookies.map(c => [c.name, c.value]));
+    const cm = Object.fromEntries(allCookies.map((c) => [c.name, c.value]));
     if (cm["NetflixId"]) {
       saveCookieForEmail(email, {
-        netflixId:       cm["NetflixId"],
+        netflixId: cm["NetflixId"],
         secureNetflixId: cm["SecureNetflixId"] ?? cookieData.secureNetflixId,
-        memclid:         cm["memclid"] ?? null,
-        nfvdid:          cm["nfvdid"]  ?? null,
+        memclid: cm["memclid"] ?? null,
+        nfvdid: cm["nfvdid"] ?? null,
       });
       console.log(`  [guard] ✓ Cookie diperbarui.`);
     }
-
   } finally {
     await browser.close();
   }
