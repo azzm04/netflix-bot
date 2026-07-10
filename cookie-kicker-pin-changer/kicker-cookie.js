@@ -20,10 +20,14 @@
 require("dotenv").config();
 const { requestCodeFromTelegram } = require("./tg-bridge");
 const { chromium } = require("playwright");
-const { getCookieForEmail, buildPlaywrightCookies, deleteCookieForEmail } = require("./cookie-helper");
+const {
+  getCookieForEmail,
+  buildPlaywrightCookies,
+  deleteCookieForEmail,
+} = require("./cookie-helper");
 const fs = require("fs");
 
-const HEADLESS    = process.env.HEADLESS !== "false";
+const HEADLESS = process.env.HEADLESS !== "false";
 const TIMEOUT_NAV = 45_000;
 
 const URL_DEVICES = "https://www.netflix.com/manageaccountaccess";
@@ -31,8 +35,10 @@ const URL_DEVICES = "https://www.netflix.com/manageaccountaccess";
 // ── Custom Errors ─────────────────────────────────────────
 class CookieExpiredError extends Error {
   constructor(email) {
-    super(`Cookie expired untuk ${email}. Jalankan: node cookie-helper.js save-interactive "${email}"`);
-    this.name  = "CookieExpiredError";
+    super(
+      `Cookie expired untuk ${email}. Jalankan: node cookie-helper.js save-interactive "${email}"`,
+    );
+    this.name = "CookieExpiredError";
     this.email = email;
   }
 }
@@ -42,15 +48,19 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 // ── Debug Screenshot ──────────────────────────────────────
 function debugShot(page, name) {
   const dir = process.env.DEBUG_SHOT_DIR ?? "/tmp/nfdebug";
-  try { fs.mkdirSync(dir, { recursive: true }); } catch {}
-  return page.screenshot({ path: `${dir}/${name}_${Date.now()}.png`, fullPage: true }).catch(() => {});
+  try {
+    fs.mkdirSync(dir, { recursive: true });
+  } catch {}
+  return page
+    .screenshot({ path: `${dir}/${name}_${Date.now()}.png`, fullPage: true })
+    .catch(() => {});
 }
 
 // ── Launch Browser ────────────────────────────────────────
 async function launchBrowser() {
   const proxyConfig = process.env.PROXY_SERVER
     ? {
-        server:   process.env.PROXY_SERVER,
+        server: process.env.PROXY_SERVER,
         username: process.env.PROXY_USERNAME,
         password: process.env.PROXY_PASSWORD,
       }
@@ -87,7 +97,7 @@ async function newCookiePage(browser, email, targetUrl) {
 
   const proxyConfig = process.env.PROXY_SERVER
     ? {
-        server:   process.env.PROXY_SERVER,
+        server: process.env.PROXY_SERVER,
         username: process.env.PROXY_USERNAME,
         password: process.env.PROXY_PASSWORD,
       }
@@ -107,7 +117,10 @@ async function newCookiePage(browser, email, targetUrl) {
 
   // Langsung ke halaman target
   console.log(`  [cookie] Membuka ${targetUrl} ...`);
-  await page.goto(targetUrl, { waitUntil: "domcontentloaded", timeout: TIMEOUT_NAV });
+  await page.goto(targetUrl, {
+    waitUntil: "domcontentloaded",
+    timeout: TIMEOUT_NAV,
+  });
 
   // Cek apakah Netflix redirect ke login (cookie expired)
   const url = page.url();
@@ -132,8 +145,11 @@ async function newCookiePage(browser, email, targetUrl) {
  */
 async function checkForExtraVerification(page, email, isMahesh = false) {
   await sleep(1000);
-  const url      = page.url();
-  const bodyText = await page.locator("body").innerText().catch(() => "");
+  const url = page.url();
+  const bodyText = await page
+    .locator("body")
+    .innerText()
+    .catch(() => "");
 
   const needsMfa =
     url.includes("/mfa") ||
@@ -151,9 +167,11 @@ async function checkForExtraVerification(page, email, isMahesh = false) {
     console.log(`  [mfa] Attempt ${attempt}/3`);
 
     // Klik tombol kirim kode via email (atau "Kirim Ulang" jika retry)
-    const emailCodeBtn = page.locator(
-      'button:has-text("Email a code"), button:has-text("Kirim kode"), button:has-text("Kirim Ulang Kode"), [data-uia="account-mfa-button-OTP_EMAIL"] button'
-    ).first();
+    const emailCodeBtn = page
+      .locator(
+        'button:has-text("Email a code"), button:has-text("Kirim kode"), button:has-text("Kirim Ulang Kode"), [data-uia="account-mfa-button-OTP_EMAIL"] button',
+      )
+      .first();
 
     if (await emailCodeBtn.isVisible({ timeout: 5000 }).catch(() => false)) {
       console.log(`  [mfa] Klik tombol kirim kode...`);
@@ -161,12 +179,19 @@ async function checkForExtraVerification(page, email, isMahesh = false) {
     }
 
     // Tunggu form OTP muncul
-    await page.waitForFunction(
-      () => document.querySelectorAll('input[inputmode="numeric"], input[maxlength="1"]').length >= 4 ||
-            document.body.innerText.toLowerCase().includes("code will expire") ||
-            document.body.innerText.toLowerCase().includes("kode tersebut akan kedaluwarsa"),
-      { timeout: 15_000, polling: 500 }
-    ).catch(() => {});
+    await page
+      .waitForFunction(
+        () =>
+          document.querySelectorAll(
+            'input[inputmode="numeric"], input[maxlength="1"]',
+          ).length >= 4 ||
+          document.body.innerText.toLowerCase().includes("code will expire") ||
+          document.body.innerText
+            .toLowerCase()
+            .includes("kode tersebut akan kedaluwarsa"),
+        { timeout: 15_000, polling: 500 },
+      )
+      .catch(() => {});
 
     console.log(`  [mfa] Tunggu 10 detik agar email terkirim...`);
     await sleep(10_000);
@@ -178,12 +203,18 @@ async function checkForExtraVerification(page, email, isMahesh = false) {
         // Akun MAHESH: fetch via bot Telegram @Maheshshoppiebot
         const { fetchFromMaheshBot } = require("./mahesh-fetcher");
         console.log(`  [mfa] Fetch kode via Mahesh Bot...`);
-        code6 = await fetchFromMaheshBot(email, "signin6", { retries: 2, retryDelay: 5000 });
+        code6 = await fetchFromMaheshBot(email, "signin6", {
+          retries: 2,
+          retryDelay: 5000,
+        });
       } else {
         // Akun lain: fetch via nfpro.js
         const { fetchNetflixCode } = require("./nfpro");
         console.log(`  [mfa] Auto-fetch kode 6 digit via nfpro...`);
-        code6 = await fetchNetflixCode(email, "signin6", { retries: 2, retryDelay: 5000 });
+        code6 = await fetchNetflixCode(email, "signin6", {
+          retries: 2,
+          retryDelay: 5000,
+        });
       }
       console.log(`  [mfa] Kode: ${code6}`);
     } catch (err) {
@@ -191,10 +222,18 @@ async function checkForExtraVerification(page, email, isMahesh = false) {
       // Fallback: minta kode via Telegram bot (bukan terminal lagi)
       console.log(`  [mfa] Minta kode manual via Telegram...`);
       try {
-        code6 = await requestCodeFromTelegram(email, "6digit", isMahesh ? "MAHESH" : "");
+        code6 = await requestCodeFromTelegram(
+          email,
+          "6digit",
+          isMahesh ? "MAHESH" : "",
+        );
       } catch (tgErr) {
-        console.error(`  [mfa] Gagal dapat kode dari Telegram: ${tgErr.message}`);
-        throw new Error(`MFA gagal untuk ${email}: auto-fetch dan Telegram fallback sama-sama gagal.`);
+        console.error(
+          `  [mfa] Gagal dapat kode dari Telegram: ${tgErr.message}`,
+        );
+        throw new Error(
+          `MFA gagal untuk ${email}: auto-fetch dan Telegram fallback sama-sama gagal.`,
+        );
       }
     }
 
@@ -224,7 +263,9 @@ async function checkForExtraVerification(page, email, isMahesh = false) {
     if (inputs.length === 0) {
       // Fallback: satu input field
       console.log(`  [mfa] Fallback ke single input...`);
-      const single = page.locator('input[type="text"], input[type="number"]').first();
+      const single = page
+        .locator('input[type="text"], input[type="number"]')
+        .first();
       if (await single.isVisible({ timeout: 2000 }).catch(() => false)) {
         await single.fill(code6);
       }
@@ -234,12 +275,17 @@ async function checkForExtraVerification(page, email, isMahesh = false) {
       await inputs[0].click();
       await sleep(100);
       // Clear dulu
-      await inputs[0].evaluate((el) => { el.value = ""; });
+      await inputs[0].evaluate((el) => {
+        el.value = "";
+      });
       // Set value via React-compatible setter
       await inputs[0].evaluate((el, val) => {
-        const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value").set;
+        const setter = Object.getOwnPropertyDescriptor(
+          HTMLInputElement.prototype,
+          "value",
+        ).set;
         setter.call(el, val);
-        el.dispatchEvent(new Event("input",  { bubbles: true }));
+        el.dispatchEvent(new Event("input", { bubbles: true }));
         el.dispatchEvent(new Event("change", { bubbles: true }));
       }, code6);
       await sleep(300);
@@ -256,7 +302,9 @@ async function checkForExtraVerification(page, email, isMahesh = false) {
     await sleep(500);
 
     // Submit
-    const submitBtn = page.locator('button[type="submit"], button:has-text("Kirim")').first();
+    const submitBtn = page
+      .locator('button[type="submit"], button:has-text("Kirim")')
+      .first();
     if (await submitBtn.isVisible({ timeout: 2000 }).catch(() => false)) {
       console.log(`  [mfa] Klik tombol Kirim...`);
       await submitBtn.click();
@@ -268,8 +316,11 @@ async function checkForExtraVerification(page, email, isMahesh = false) {
     await sleep(3000);
 
     // ── Cek apakah kode salah ──────────────────────────────
-    const bodyAfter = await page.locator("body").innerText().catch(() => "");
-    const urlAfter  = page.url();
+    const bodyAfter = await page
+      .locator("body")
+      .innerText()
+      .catch(() => "");
+    const urlAfter = page.url();
 
     // Sukses: keluar dari /mfa
     if (!urlAfter.includes("/mfa")) {
@@ -325,7 +376,7 @@ async function kickDevicesByProfiles(page, profileNames) {
 
     let foundUnprocessed = false;
     for (let i = 0; i < count; i++) {
-      const card     = cards.nth(i);
+      const card = cards.nth(i);
       const deviceId = await card.getAttribute("data-uia");
       const uniqueKey = `${deviceId}::${i}`;
       if (processedIds.has(uniqueKey)) continue;
@@ -333,32 +384,49 @@ async function kickDevicesByProfiles(page, profileNames) {
       foundUnprocessed = true;
 
       // Skip PERANGKAT SAAT INI
-      const isCurrent = (await card.locator('[data-uia$="+current-device-badge+ANNOUNCE"]').count()) > 0;
+      const isCurrent =
+        (await card
+          .locator('[data-uia$="+current-device-badge+ANNOUNCE"]')
+          .count()) > 0;
       if (isCurrent) {
         processedIds.add(uniqueKey);
         continue;
       }
 
       // Expand card jika belum ada tombol Keluar
-      const keluarBtn = card.locator('button:has-text("Keluar"), button:has-text("Sign Out")').first();
-      const isExpanded = await keluarBtn.isVisible({ timeout: 500 }).catch(() => false);
+      const keluarBtn = card
+        .locator('button:has-text("Keluar"), button:has-text("Sign Out")')
+        .first();
+      let isExpanded = await keluarBtn
+        .isVisible({ timeout: 500 })
+        .catch(() => false);
       if (!isExpanded) {
         const dropBtn = card.locator('[data-uia$="+dropdown-button"]').first();
-        if (await dropBtn.isVisible({ timeout: 500 }).catch(() => false)) {
+        if (await dropBtn.isVisible({ timeout: 1500 }).catch(() => false)) {
           await dropBtn.click();
-          await sleep(800);
-        } else {
+          await sleep(1000);
+          isExpanded = await keluarBtn
+            .isVisible({ timeout: 1500 })
+            .catch(() => false);
+        }
+        if (!isExpanded) {
+          console.warn(
+            `  [kick] ⚠ Gagal expand card ${deviceId} — dilewati (button tidak muncul).`,
+          );
           processedIds.add(uniqueKey);
           continue;
         }
       }
 
       // Baca teks card untuk deteksi nama profil
-      const cardText  = await card.innerText().catch(() => "");
+      const cardText = await card.innerText().catch(() => "");
       const lowerText = cardText.toLowerCase();
 
       let profileText = null;
-      const lines = cardText.split("\n").map((l) => l.trim()).filter(Boolean);
+      const lines = cardText
+        .split("\n")
+        .map((l) => l.trim())
+        .filter(Boolean);
       for (const line of lines) {
         if (
           line.toLowerCase().includes("terakhir ditonton") ||
@@ -383,7 +451,7 @@ async function kickDevicesByProfiles(page, profileNames) {
 
       // Skip jika profil tidak cocok dengan target
       const matchedTarget = targets.find(
-        (t) => profileText && profileText.toLowerCase().includes(t)
+        (t) => profileText && profileText.toLowerCase().includes(t),
       );
       if (profileText && !matchedTarget) {
         processedIds.add(uniqueKey);
@@ -391,20 +459,26 @@ async function kickDevicesByProfiles(page, profileNames) {
       }
 
       // Kick!
-      const keluarVisible = await keluarBtn.isVisible({ timeout: 1000 }).catch(() => false);
+      const keluarVisible = await keluarBtn
+        .isVisible({ timeout: 2000 })
+        .catch(() => false);
       if (keluarVisible) {
-        const display = profileText ?? (noActivity ? "tidak ada aktivitas" : "no profile");
+        const display =
+          profileText ?? (noActivity ? "tidak ada aktivitas" : "no profile");
         await keluarBtn.click();
         totalKicked++;
         console.log(`  [kick] Dikick: "${display}" (${deviceId})`);
         processedIds.add(uniqueKey);
         await sleep(1500);
       } else {
+        const display =
+          profileText ?? (noActivity ? "tidak ada aktivitas" : "no profile");
+        console.warn(
+          `  [kick] ⚠ MISS: "${display}" (${deviceId}) — tombol Keluar tidak muncul, mungkin belum ter-kick!`,
+        );
         processedIds.add(uniqueKey);
       }
-      break; // proses satu card per round
     }
-
     if (!foundUnprocessed) break;
   }
 
@@ -430,11 +504,13 @@ async function refreshAndSaveCookies(ctx, email) {
     const allCookies = await ctx.cookies("https://www.netflix.com");
     const cm = Object.fromEntries(allCookies.map((c) => [c.name, c.value]));
 
-    const netflixId       = cm["NetflixId"];
+    const netflixId = cm["NetflixId"];
     const secureNetflixId = cm["SecureNetflixId"];
 
     if (!netflixId || !secureNetflixId) {
-      console.log("  [cookie] Dynamic update: cookie baru tidak ditemukan, skip.");
+      console.log(
+        "  [cookie] Dynamic update: cookie baru tidak ditemukan, skip.",
+      );
       return;
     }
 
@@ -442,9 +518,9 @@ async function refreshAndSaveCookies(ctx, email) {
     saveCookieForEmail(email, {
       netflixId,
       secureNetflixId,
-      memclid:         cm["memclid"]         ?? null,
-      nfvdid:          cm["nfvdid"]           ?? null,
-      clSharedContext: cm["clSharedContext"]  ?? null,
+      memclid: cm["memclid"] ?? null,
+      nfvdid: cm["nfvdid"] ?? null,
+      clSharedContext: cm["clSharedContext"] ?? null,
     });
     console.log("  [cookie] ✓ Dynamic update: cookie terbaru disimpan.");
   } catch (err) {
@@ -452,7 +528,11 @@ async function refreshAndSaveCookies(ctx, email) {
   }
 }
 
-async function kickDevicesForProfilesCookie(email, profileNames, isMahesh = false) {
+async function kickDevicesForProfilesCookie(
+  email,
+  profileNames,
+  isMahesh = false,
+) {
   const browser = await launchBrowser();
   let totalKicked = 0;
 
@@ -464,7 +544,10 @@ async function kickDevicesForProfilesCookie(email, profileNames, isMahesh = fals
     // Jika halaman bukan manageaccountaccess, navigate ulang
     if (!page.url().includes("manageaccountaccess")) {
       console.log("  [kick] Redirect tidak terduga, navigate ulang...");
-      await page.goto(URL_DEVICES, { waitUntil: "domcontentloaded", timeout: TIMEOUT_NAV });
+      await page.goto(URL_DEVICES, {
+        waitUntil: "domcontentloaded",
+        timeout: TIMEOUT_NAV,
+      });
       await checkForExtraVerification(page, email, isMahesh);
     }
 
@@ -485,7 +568,11 @@ async function kickDevicesForProfilesCookie(email, profileNames, isMahesh = fals
  * @param {string} email
  * @param {string} profileName
  */
-async function kickDevicesForProfileCookie(email, profileName, isMahesh = false) {
+async function kickDevicesForProfileCookie(
+  email,
+  profileName,
+  isMahesh = false,
+) {
   return kickDevicesForProfilesCookie(email, [profileName], isMahesh);
 }
 
