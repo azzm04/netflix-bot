@@ -1,0 +1,16 @@
+{
+  "name": "netflix-status-checker",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Cek status cookie Netflix (BISA/MATI) langsung dari Google Sheets",
+  "main": "check-status.js",
+  "scripts": {
+    "check": "node index.js",
+    "run-now": "node index.js --run-now"
+  },
+  "dependencies": {
+    "dotenv": "^16.4.5",
+    "googleapis": "^140.0.1",
+    "playwright": "^1.46.0"
+  }
+}
