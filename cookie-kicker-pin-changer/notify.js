@@ -140,7 +140,7 @@ async function notifyPinChanged(info) {
  */
 async function notifyError(email, profileNames, errorMessage) {
   const msg =
-    `❌ *Error - Tidak Mendapatkan 6 Digit Kode*\n\n` +
+    `❌ *Error Saat Proses Akun*\n\n` +
     `📧 Akun: \`${email}\`\n` +
     `👤 Profil: ${profileNames.join(", ")}\n\n` +
     `Error: \`${errorMessage.substring(0, 300)}\``;

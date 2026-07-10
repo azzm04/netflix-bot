@@ -377,7 +377,17 @@ async function kickDevicesByProfiles(page, profileNames) {
     let foundUnprocessed = false;
     for (let i = 0; i < count; i++) {
       const card = cards.nth(i);
-      const deviceId = await card.getAttribute("data-uia");
+
+      let deviceId;
+      try {
+        deviceId = await card.getAttribute("data-uia", { timeout: 5000 });
+      } catch (err) {
+        console.warn(
+          `  [kick] ⚠ Card index ${i} sudah hilang dari DOM (mungkin ke-refresh) — skip.`,
+        );
+        continue; // jangan tandai processedIds karena deviceId tidak diketahui, biar round berikutnya re-scan fresh
+      }
+
       const uniqueKey = `${deviceId}::${i}`;
       if (processedIds.has(uniqueKey)) continue;
 
