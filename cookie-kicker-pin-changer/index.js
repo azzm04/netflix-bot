@@ -94,7 +94,7 @@ async function processExpiredAccounts() {
       (a) => !a.isSkipped || a.blockLabel === "MAHESH",
     ); // semua + MAHESH (ROSE tetap PIN-only)
 
-    const toPin = expiredList.filter((a) => a.isSkipped); // MAHESH/ROSE
+    const toPin = expiredList.filter((a) => a.isSkipped && !a.noPassword); // MAHESH DAN ROSE UNTUK YANG TIDAK ADA PASSWORD DI SKIP
     const toPinMeet = expiredList.filter(
       (a) => !a.isSkipped && a.isMeet && !a.noPassword,
     ); // MEET, punya password
