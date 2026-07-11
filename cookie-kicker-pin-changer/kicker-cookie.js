@@ -202,8 +202,10 @@ async function checkForExtraVerification(page, email, isMahesh = false) {
       if (isMahesh) {
         // Akun MAHESH: fetch via bot Telegram @Maheshshoppiebot
         const { fetchFromMaheshBot } = require("./mahesh-fetcher");
-        console.log(`  [mfa] Fetch kode via Mahesh Bot...`);
-        code6 = await fetchFromMaheshBot(email, "signin6", {
+        console.log(
+          `  [mfa] Fetch kode via Mahesh Bot (tombol "Verification Code")...`,
+        );
+        code6 = await fetchFromMaheshBot(email, "vercode", {
           retries: 2,
           retryDelay: 5000,
         });

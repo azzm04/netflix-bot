@@ -10,15 +10,32 @@
 
 require("dotenv").config();
 const cron = require("node-cron");
-const { getExpiredAccounts, markAsKicked, updatePin, findSpreadsheetId } = require("./sheets");
-const { kickDevicesForProfilesCookie, CookieExpiredError } = require("./kicker-cookie");
-const { changePinsForProfilesCookie, WrongPasswordError } = require("./pin-changer-cookie");
+const {
+  getExpiredAccounts,
+  markAsKicked,
+  updatePin,
+  findSpreadsheetId,
+} = require("./sheets");
+const {
+  kickDevicesForProfilesCookie,
+  CookieExpiredError,
+} = require("./kicker-cookie");
+const {
+  changePinsForProfilesCookie,
+  WrongPasswordError,
+} = require("./pin-changer-cookie");
 const { getCookieForEmail } = require("./cookie-helper");
-const { notifyKickDone, notifyPinChanged, notifyError, notifySummary, sendTelegram } = require("./notify");
+const {
+  notifyKickDone,
+  notifyPinChanged,
+  notifyError,
+  notifySummary,
+  sendTelegram,
+} = require("./notify");
 
 const CRON_SCHEDULE = process.env.CRON_SCHEDULE ?? "*/15 * * * *";
-const RUN_NOW       = process.argv.includes("--run-now");
-const sleep         = (ms) => new Promise((r) => setTimeout(r, ms));
+const RUN_NOW = process.argv.includes("--run-now");
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
 // Lock agar tidak overlap antar cron tick
 let _isRunning = false;
@@ -27,11 +44,11 @@ let _isRunning = false;
 async function notifyCookieExpired(email, profiles) {
   await sendTelegram(
     `🍪 *Cookie Expired — Perlu Update Manual*\n\n` +
-    `📧 Akun: \`${email}\`\n` +
-    `👤 Profil: ${profiles.join(", ")}\n\n` +
-    `Jalankan di lokal:\n` +
-    `\`node cookie-helper.js save-interactive "${email}"\`\n` +
-    `Lalu masukkan dengan command \`setcookie\` ke bot.`
+      `📧 Akun: \`${email}\`\n` +
+      `👤 Profil: ${profiles.join(", ")}\n\n` +
+      `Jalankan di lokal:\n` +
+      `\`node cookie-helper.js save-interactive "${email}"\`\n` +
+      `Lalu masukkan dengan command \`setcookie\` ke bot.`,
   );
 }
 
@@ -44,11 +61,15 @@ async function processExpiredAccounts() {
   _isRunning = true;
 
   const startTime = Date.now();
-  let totalKicked = 0, totalPinChanged = 0, totalFailed = 0;
+  let totalKicked = 0,
+    totalPinChanged = 0,
+    totalFailed = 0;
 
   try {
     console.log(`\n${"=".repeat(60)}`);
-    console.log(`[cookie-server] [${new Date().toLocaleString("id-ID")}] Mulai proses...`);
+    console.log(
+      `[cookie-server] [${new Date().toLocaleString("id-ID")}] Mulai proses...`,
+    );
     console.log("=".repeat(60));
 
     // 1. Baca expired dari sheets
@@ -69,21 +90,34 @@ async function processExpiredAccounts() {
     // - MAHESH/ROSE (isSkipped=true)  → hanya ganti PIN
     // - MEET (isMeet=true)            → kick device LALU ganti PIN
     // - Normal                        → hanya kick device
-    const toKick    = expiredList.filter(a => !a.isSkipped);           // semua kecuali MAHESH/ROSE
-    const toPin     = expiredList.filter(a => a.isSkipped);            // MAHESH/ROSE
-    const toPinMeet = expiredList.filter(a => !a.isSkipped && a.isMeet && !a.noPassword); // MEET, punya password
+    const toKick = expiredList.filter(
+      (a) => !a.isSkipped || a.blockLabel === "MAHESH",
+    ); // semua + MAHESH (ROSE tetap PIN-only)
 
-    const noPasswordSkipped = expiredList.filter(a => (a.isSkipped || a.isMeet) && a.noPassword);
+    const toPin = expiredList.filter((a) => a.isSkipped); // MAHESH/ROSE
+    const toPinMeet = expiredList.filter(
+      (a) => !a.isSkipped && a.isMeet && !a.noPassword,
+    ); // MEET, punya password
+
+    const noPasswordSkipped = expiredList.filter(
+      (a) => (a.isSkipped || a.isMeet) && a.noPassword,
+    );
     if (noPasswordSkipped.length > 0) {
-      console.log(`\n[cookie-server] ⚠ ${noPasswordSkipped.length} akun di-skip (PAKE KODE, tidak ada password):`);
+      console.log(
+        `\n[cookie-server] ⚠ ${noPasswordSkipped.length} akun di-skip (PAKE KODE, tidak ada password):`,
+      );
       for (const a of noPasswordSkipped) {
-        console.log(`  - ${a.email} / ${a.profile} (${a.sheetName} baris ${a.rowIndex})`);
+        console.log(
+          `  - ${a.email} / ${a.profile} (${a.sheetName} baris ${a.rowIndex})`,
+        );
       }
     }
 
     console.log(`\n[cookie-server] Total expired : ${expiredList.length}`);
     console.log(`[cookie-server] Kick device   : ${toKick.length}`);
-    console.log(`[cookie-server] Ganti PIN     : ${toPin.length} (MAHESH/ROSE) + ${toPinMeet.length} (MEET setelah kick)`);
+    console.log(
+      `[cookie-server] Ganti PIN     : ${toPin.length} (MAHESH/ROSE) + ${toPinMeet.length} (MEET setelah kick)`,
+    );
 
     if (toKick.length === 0 && toPin.length === 0) return;
 
@@ -107,16 +141,20 @@ async function processExpiredAccounts() {
       }
       const kickGroups = [...emailGroups.values()];
 
-      console.log(`\n[cookie-server] == KICK DEVICE (${kickGroups.length} email, ${toKick.length} profil) ==`);
+      console.log(
+        `\n[cookie-server] == KICK DEVICE (${kickGroups.length} email, ${toKick.length} profil) ==`,
+      );
 
       for (let gi = 0; gi < kickGroups.length; gi++) {
-        const group        = kickGroups[gi];
-        const email        = group[0].email;
+        const group = kickGroups[gi];
+        const email = group[0].email;
         const accountLabel = group[0].blockLabel ?? "";
-        const profiles     = group.map(a => a.profile);
+        const profiles = group.map((a) => a.profile);
 
         console.log(`\n${"─".repeat(60)}`);
-        console.log(`[cookie-server] [${gi + 1}/${kickGroups.length}] ${email}`);
+        console.log(
+          `[cookie-server] [${gi + 1}/${kickGroups.length}] ${email}`,
+        );
         console.log(`  Profil : ${profiles.join(", ")}`);
         console.log("─".repeat(60));
 
@@ -129,42 +167,58 @@ async function processExpiredAccounts() {
 
         const t0 = Date.now();
         try {
-          const result  = await kickDevicesForProfilesCookie(email, profiles, accountLabel === "MAHESH");
+          const result = await kickDevicesForProfilesCookie(
+            email,
+            profiles,
+            accountLabel === "MAHESH",
+          );
           const elapsed = ((Date.now() - t0) / 1000).toFixed(1);
 
           for (const account of group) {
-            await markAsKicked(spreadsheetId, account.sheetName, account.rowIndex);
+            await markAsKicked(
+              spreadsheetId,
+              account.sheetName,
+              account.rowIndex,
+            );
           }
 
-          console.log(`[cookie-server]   ✓ ${result.kicked} dikick (${elapsed}s)`);
+          console.log(
+            `[cookie-server]   ✓ ${result.kicked} dikick (${elapsed}s)`,
+          );
           totalKicked += group.length;
 
           await notifyKickDone({
-            email, profiles,
+            email,
+            profiles,
             kicked: result.kicked,
             sheetUpdated: true,
             elapsed,
             blockLabel: accountLabel,
-            rows: group.map(a => ({
+            rows: group.map((a) => ({
               profile: a.profile,
               sheetName: a.sheetName,
               rowIndex: a.rowIndex,
               logoutText: a.logoutText,
             })),
           });
-
-    } catch (err) {
-          if (err instanceof CookieExpiredError || err.name === "CookieExpiredError") {
+        } catch (err) {
+          if (
+            err instanceof CookieExpiredError ||
+            err.name === "CookieExpiredError"
+          ) {
             console.warn(`[cookie-server]   ✗ Cookie expired — skip.`);
             await notifyCookieExpired(email, profiles);
-          } else if (err instanceof WrongPasswordError || err.name === "WrongPasswordError") {
+          } else if (
+            err instanceof WrongPasswordError ||
+            err.name === "WrongPasswordError"
+          ) {
             console.warn(`[cookie-server]   ✗ Password salah — skip.`);
             await sendTelegram(
               `🔒 *Password Salah — Ganti PIN Gagal*\n\n` +
-              `📧 Akun: \`${email}\`\n` +
-              `👤 Profil: ${profiles.join(", ")}\n\n` +
-              `Netflix menolak password saat submit "Kontrol Orang Tua" (pesan: "Sandi salah.").\n` +
-              `Tolong cek/update password akun ini di spreadsheet.`
+                `📧 Akun: \`${email}\`\n` +
+                `👤 Profil: ${profiles.join(", ")}\n\n` +
+                `Netflix menolak password saat submit "Kontrol Orang Tua" (pesan: "Sandi salah.").\n` +
+                `Tolong cek/update password akun ini di spreadsheet.`,
             );
           } else {
             console.error(`[cookie-server]   ✗ Error: ${err.message}`);
@@ -190,17 +244,21 @@ async function processExpiredAccounts() {
       }
       const pinEmailGroups = [...pinGroups.values()];
 
-      console.log(`\n[cookie-server] == GANTI PIN (${pinEmailGroups.length} email, ${toPinAll.length} profil) ==`);
+      console.log(
+        `\n[cookie-server] == GANTI PIN (${pinEmailGroups.length} email, ${toPinAll.length} profil) ==`,
+      );
 
       for (let gi = 0; gi < pinEmailGroups.length; gi++) {
-        const group      = pinEmailGroups[gi];
-        const email      = group[0].email;
-        const password   = group[0].password;
+        const group = pinEmailGroups[gi];
+        const email = group[0].email;
+        const password = group[0].password;
         const blockLabel = group[0].blockLabel;
-        const profiles   = group.map(a => a.profile);
+        const profiles = group.map((a) => a.profile);
 
         console.log(`\n${"─".repeat(60)}`);
-        console.log(`[cookie-server] [${gi + 1}/${pinEmailGroups.length}] ${email} [${blockLabel}]`);
+        console.log(
+          `[cookie-server] [${gi + 1}/${pinEmailGroups.length}] ${email} [${blockLabel}]`,
+        );
         console.log(`  Profil : ${profiles.join(", ")}`);
         console.log("─".repeat(60));
 
@@ -213,15 +271,21 @@ async function processExpiredAccounts() {
 
         const t0 = Date.now();
         try {
-          const pinChanges = await changePinsForProfilesCookie(email, password, profiles);
-          const elapsed    = ((Date.now() - t0) / 1000).toFixed(1);
+          const pinChanges = await changePinsForProfilesCookie(
+            email,
+            password,
+            profiles,
+          );
+          const elapsed = ((Date.now() - t0) / 1000).toFixed(1);
 
           // Update spreadsheet dengan PIN yang baru-baru ini di-return
           for (const account of group) {
             let newPin = null;
             for (const [profName, pin] of pinChanges.entries()) {
               if (
-                account.profile.toLowerCase().includes(profName.toLowerCase()) ||
+                account.profile
+                  .toLowerCase()
+                  .includes(profName.toLowerCase()) ||
                 profName.toLowerCase().includes(account.profile.toLowerCase())
               ) {
                 newPin = pin;
@@ -230,28 +294,46 @@ async function processExpiredAccounts() {
             }
 
             if (newPin) {
-              await updatePin(spreadsheetId, account.sheetName, account.rowIndex, newPin);
-              await markAsKicked(spreadsheetId, account.sheetName, account.rowIndex);
-              console.log(`[cookie-server]   ✓ PIN "${account.profile}" → ${newPin}`);
+              await updatePin(
+                spreadsheetId,
+                account.sheetName,
+                account.rowIndex,
+                newPin,
+              );
+              await markAsKicked(
+                spreadsheetId,
+                account.sheetName,
+                account.rowIndex,
+              );
+              console.log(
+                `[cookie-server]   ✓ PIN "${account.profile}" → ${newPin}`,
+              );
             } else {
-              console.warn(`[cookie-server]   ⚠ PIN tidak ditemukan untuk "${account.profile}"`);
+              console.warn(
+                `[cookie-server]   ⚠ PIN tidak ditemukan untuk "${account.profile}"`,
+              );
             }
           }
 
           totalPinChanged += group.length;
 
           await notifyPinChanged({
-            email, blockLabel, pinChanges,
-            sheetUpdated: true, elapsed,
-            rows: group.map(a => ({
+            email,
+            blockLabel,
+            pinChanges,
+            sheetUpdated: true,
+            elapsed,
+            rows: group.map((a) => ({
               profile: a.profile,
               sheetName: a.sheetName,
               rowIndex: a.rowIndex,
             })),
           });
-
         } catch (err) {
-          if (err instanceof CookieExpiredError || err.name === "CookieExpiredError") {
+          if (
+            err instanceof CookieExpiredError ||
+            err.name === "CookieExpiredError"
+          ) {
             console.warn(`[cookie-server]   ✗ Cookie expired — skip.`);
             await notifyCookieExpired(email, profiles);
           } else {
@@ -269,11 +351,17 @@ async function processExpiredAccounts() {
     const elapsed = ((Date.now() - startTime) / 1000).toFixed(1);
     console.log(`\n${"=".repeat(60)}`);
     console.log(`[cookie-server] SELESAI dalam ${elapsed}s`);
-    console.log(`  Kick : ${totalKicked} | PIN : ${totalPinChanged} | Gagal : ${totalFailed}`);
+    console.log(
+      `  Kick : ${totalKicked} | PIN : ${totalPinChanged} | Gagal : ${totalFailed}`,
+    );
     console.log("=".repeat(60) + "\n");
 
-    await notifySummary({ totalKick: totalKicked, totalPin: totalPinChanged, totalFailed, elapsed });
-
+    await notifySummary({
+      totalKick: totalKicked,
+      totalPin: totalPinChanged,
+      totalFailed,
+      elapsed,
+    });
   } catch (fatalErr) {
     console.error("[cookie-server] Fatal error:", fatalErr.message);
   } finally {
