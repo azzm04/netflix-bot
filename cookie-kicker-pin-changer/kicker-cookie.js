@@ -209,7 +209,7 @@ async function checkForExtraVerification(page, email, isMahesh = false) {
           console.log(`  [mfa] Fetch kode via Mahesh Bot (percobaan ${mAttempt}/${maheshExtraRetries + 1})...`);
           try {
             code6 = await fetchFromMaheshBot(email, "vercode", {
-              retries: 2,
+              retries: 0,
               retryDelay: 5000,
             });
             break; // sukses, keluar dari loop mahesh
