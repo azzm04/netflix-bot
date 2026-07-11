@@ -201,14 +201,39 @@ async function checkForExtraVerification(page, email, isMahesh = false) {
     try {
       if (isMahesh) {
         // Akun MAHESH: fetch via bot Telegram @Maheshshoppiebot
+        // Tombol "Verification Code" (vercode) — bukan "Verification code after login" (signin6)
         const { fetchFromMaheshBot } = require("./mahesh-fetcher");
-        console.log(
-          `  [mfa] Fetch kode via Mahesh Bot (tombol "Verification Code")...`,
-        );
-        code6 = await fetchFromMaheshBot(email, "vercode", {
-          retries: 2,
-          retryDelay: 5000,
-        });
+
+        const maheshExtraRetries = 2; // percobaan tambahan: kirim ulang di Netflix + tunggu 5s + minta lagi
+        for (let mAttempt = 1; mAttempt <= maheshExtraRetries + 1; mAttempt++) {
+          console.log(`  [mfa] Fetch kode via Mahesh Bot (percobaan ${mAttempt}/${maheshExtraRetries + 1})...`);
+          try {
+            code6 = await fetchFromMaheshBot(email, "vercode", {
+              retries: 2,
+              retryDelay: 5000,
+            });
+            break; // sukses, keluar dari loop mahesh
+          } catch (maheshErr) {
+            console.warn(`  [mfa] Mahesh Bot gagal (percobaan ${mAttempt}): ${maheshErr.message}`);
+
+            if (mAttempt <= maheshExtraRetries) {
+              // Kirim ulang kode di halaman Netflix
+              const resendBtn = page.locator(
+                'button:has-text("Kirim Ulang Kode"), button:has-text("Resend"), button:has-text("Email a code"), button:has-text("Kirim kode")'
+              ).first();
+              if (await resendBtn.isVisible({ timeout: 3000 }).catch(() => false)) {
+                console.log(`  [mfa] Klik kirim ulang kode di Netflix...`);
+                await resendBtn.click();
+              } else {
+                console.warn(`  [mfa] Tombol kirim ulang tidak ditemukan di halaman Netflix.`);
+              }
+              console.log(`  [mfa] Tunggu 5 detik sebelum minta kode lagi ke Mahesh Bot...`);
+              await sleep(5000);
+            } else {
+              throw maheshErr; // habis semua percobaan, lempar ke catch luar → fallback Telegram
+            }
+          }
+        }
       } else {
         // Akun lain: fetch via nfpro.js
         const { fetchNetflixCode } = require("./nfpro");

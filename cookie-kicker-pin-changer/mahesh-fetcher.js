@@ -193,6 +193,11 @@ async function fetchFromMaheshBot(email, codeType = "signin", opts = {}) {
     for (let attempt = 1; attempt <= retries + 1; attempt++) {
       console.log(`[mahesh] Fetch "${codeType}" untuk ${email} (attempt ${attempt})...`);
 
+      // Step 0: Kirim /start dulu untuk reset state bot
+      console.log(`[mahesh] Kirim /start untuk reset state bot...`);
+      await client.sendMessage(BOT_USERNAME, { message: "/start" });
+      await new Promise((r) => setTimeout(r, 1500));
+      
       // Step 1: Kirim email
       await client.sendMessage(BOT_USERNAME, { message: email });
 
