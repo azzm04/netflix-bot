@@ -10,28 +10,43 @@
 "use strict";
 
 require("dotenv").config();
-const cron  = require("node-cron");
+const cron = require("node-cron");
 const https = require("https");
 const { getMeetAccounts } = require("./sheets-guard");
-const { guardAccount }    = require("./guard");
+const { guardAccount } = require("./guard");
 
 // Jam 08:00 dan 20:00 setiap hari
 const GUARD_SCHEDULE = process.env.GUARD_SCHEDULE ?? "0 8,20 * * *";
-const RUN_NOW        = process.argv.includes("--run-now");
-const sleep          = (ms) => new Promise(r => setTimeout(r, ms));
+const RUN_NOW = process.argv.includes("--run-now");
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
 const BOT_TOKEN = process.env.BOT_TOKEN ?? "";
-const ADMIN_ID  = process.env.ADMIN_ID  ?? "";
+const ADMIN_ID = process.env.ADMIN_ID ?? "";
 
 // ── Kirim notifikasi Telegram ─────────────────────────────
 function sendTelegram(text) {
   if (!BOT_TOKEN || !ADMIN_ID) return Promise.resolve();
   return new Promise((resolve) => {
-    const body = JSON.stringify({ chat_id: ADMIN_ID, text, parse_mode: "Markdown", disable_notification: false });
-    const req  = https.request(
-      { hostname: "api.telegram.org", path: `/bot${BOT_TOKEN}/sendMessage`, method: "POST",
-        headers: { "Content-Type": "application/json", "Content-Length": Buffer.byteLength(body) } },
-      (res) => { res.resume(); res.on("end", resolve); }
+    const body = JSON.stringify({
+      chat_id: ADMIN_ID,
+      text,
+      parse_mode: "Markdown",
+      disable_notification: false,
+    });
+    const req = https.request(
+      {
+        hostname: "api.telegram.org",
+        path: `/bot${BOT_TOKEN}/sendMessage`,
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "Content-Length": Buffer.byteLength(body),
+        },
+      },
+      (res) => {
+        res.resume();
+        res.on("end", resolve);
+      },
     );
     req.on("error", () => resolve());
     req.write(body);
@@ -50,14 +65,16 @@ async function runGuard() {
   }
   _isRunning = true;
 
-  const startTime  = Date.now();
-  let totalKicked  = 0;
-  let totalFailed  = 0;
+  const startTime = Date.now();
+  let totalKicked = 0;
+  let totalFailed = 0;
   const kickDetails = [];
 
   try {
     console.log(`\n${"=".repeat(55)}`);
-    console.log(`[guard] [${new Date().toLocaleString("id-ID")}] Device Guard mulai...`);
+    console.log(
+      `[guard] [${new Date().toLocaleString("id-ID")}] Device Guard mulai...`,
+    );
     console.log("=".repeat(55));
 
     // 1. Baca semua akun MEET dari spreadsheet
@@ -78,19 +95,27 @@ async function runGuard() {
 
     // 2. Proses tiap email
     for (let i = 0; i < meetAccounts.length; i++) {
-      const { email, profiles } = meetAccounts[i];
+      const { email, profiles, isMahesh } = meetAccounts[i];
 
       console.log(`\n${"─".repeat(55)}`);
-      console.log(`[guard] [${i + 1}/${meetAccounts.length}] ${email}`);
-      console.log(`  Profil: ${profiles.map(p => {
-        const devInfo = p.allowedDevice ? `dev:${p.allowedDevice}` : "dev:bebas";
-        const maxInfo = p.maxDevices    ? `max:${p.maxDevices}U`  : "";
-        return `${p.name} (${[devInfo, maxInfo].filter(Boolean).join(", ")})`;
-      }).join(", ")}`);
+      console.log(
+        `[guard] [${i + 1}/${meetAccounts.length}] ${email}${isMahesh ? " [MAHESH]" : ""}`,
+      );
+      console.log(
+        `  Profil: ${profiles
+          .map((p) => {
+            const devInfo = p.allowedDevice
+              ? `dev:${p.allowedDevice}`
+              : "dev:bebas";
+            const maxInfo = p.maxDevices ? `max:${p.maxDevices}U` : "";
+            return `${p.name} (${[devInfo, maxInfo].filter(Boolean).join(", ")})`;
+          })
+          .join(", ")}`,
+      );
       console.log("─".repeat(55));
 
       try {
-        const result = await guardAccount(email, profiles);
+        const result = await guardAccount(email, profiles, isMahesh);
         totalKicked += result.kicked;
         if (result.kicked > 0) {
           kickDetails.push({ email, details: result.details });
@@ -124,7 +149,9 @@ async function runGuard() {
         teks += `🔓 *Device dikick: ${totalKicked}*\n`;
         for (const { email, details } of kickDetails) {
           teks += `\n📧 \`${email}\`\n`;
-          details.forEach(d => { teks += `  • ${d}\n`; });
+          details.forEach((d) => {
+            teks += `  • ${d}\n`;
+          });
         }
       }
 
@@ -134,7 +161,6 @@ async function runGuard() {
 
       await sendTelegram(teks);
     }
-
   } catch (fatalErr) {
     console.error("[guard] Fatal error:", fatalErr.message);
   } finally {

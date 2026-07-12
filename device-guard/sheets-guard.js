@@ -97,9 +97,12 @@ function isMeetBlock(row) {
   return row.join(" ").toUpperCase().includes("MEET");
 }
 
-function isMaheshOrRoseBlock(row) {
-  const text = row.join(" ").toUpperCase();
-  return text.includes("MAHESH") || text.includes("ROSE");
+function isMaheshBlock(row) {
+  return row.join(" ").toUpperCase().includes("MAHESH");
+}
+
+function isRoseBlock(row) {
+  return row.join(" ").toUpperCase().includes("ROSE");
 }
 
 // ── Scan sheet untuk akun MEET ────────────────────────────
@@ -115,24 +118,30 @@ function isMaheshOrRoseBlock(row) {
  */
 function scanSheetForMeet(rows, sheetName) {
   const results       = [];
-  let inMeetBlock     = false;
+  let inGuardBlock     = false; // MEET atau MAHESH — sama-sama di-guard
+  let currentIsMahesh  = false;
 
   for (let i = 0; i < rows.length; i++) {
     const row = rows[i];
 
     if (isHeaderRow(row)) {
-      if (isMaheshOrRoseBlock(row)) {
-        inMeetBlock = false;
+      if (isRoseBlock(row)) {
+        inGuardBlock = false; // ROSE tetap dikecualikan
+      } else if (isMaheshBlock(row)) {
+        inGuardBlock = true;
+        currentIsMahesh = true;
+        console.log(`  [guard-scan:${sheetName}] Blok MAHESH: "${row.join(" ").trim().substring(0, 50)}"`);
       } else if (isMeetBlock(row)) {
-        inMeetBlock = true;
+        inGuardBlock = true;
+        currentIsMahesh = false;
         console.log(`  [guard-scan:${sheetName}] Blok MEET: "${row.join(" ").trim().substring(0, 50)}"`);
       } else {
-        inMeetBlock = false;
+        inGuardBlock = false;
       }
       continue;
     }
 
-    if (!inMeetBlock) continue;
+    if (!inGuardBlock) continue;
 
     const email         = row[COL_EMAIL]?.trim()    ?? "";
     if (!email.includes("@") || email.toLowerCase() === "email") continue;
@@ -157,6 +166,8 @@ function scanSheetForMeet(rows, sheetName) {
       maxDevices,
       logoutText,
       hasCustomer,   // false = slot kosong, kick semua device
+      isMahesh: currentIsMahesh,
+
     });
   }
 
@@ -204,7 +215,7 @@ async function getMeetAccounts() {
   for (const acc of allAccounts) {
     const key = acc.email.toLowerCase();
     if (!emailGroups.has(key)) {
-      emailGroups.set(key, { email: acc.email, password: acc.password, profiles: [] });
+      emailGroups.set(key, { email: acc.email, password: acc.password, isMahesh: acc.isMahesh, profiles: [] });
     }
     emailGroups.get(key).profiles.push({
       name:          acc.profile,

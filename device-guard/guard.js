@@ -19,6 +19,8 @@ require("dotenv").config();
 const path = require("path");
 const fs = require("fs");
 const { chromium } = require("playwright");
+const { requestCodeFromTelegram } = require("../cookie-kicker-pin-changer/tg-bridge");
+
 
 // Pakai cookie dari cookie-kicker-pin-changer
 const COOKIE_FILE = path.resolve(
@@ -162,7 +164,7 @@ function isDeviceAllowed(netflixDeviceName, allowedDeviceHint) {
 }
 
 // ── Handle MFA ────────────────────────────────────────────
-async function handleMfa(page, email) {
+async function handleMfa(page, email, isMahesh = false) {
   await sleep(1000);
   const url = page.url();
   const bodyText = await page
@@ -206,29 +208,52 @@ async function handleMfa(page, email) {
 
   // Fetch kode via nfpro.js (untuk semua akun MEET)
   // Mahesh fetcher hanya dipakai jika email di domain Mahesh
-  let code6 = null;
-  try {
-    const { fetchNetflixCode } = require("../cookie-kicker-pin-changer/nfpro");
-    console.log(`  [guard-mfa] Auto-fetch kode via nfpro...`);
-    code6 = await fetchNetflixCode(email, "signin6", {
-      retries: 2,
-      retryDelay: 5000,
-    });
-    console.log(`  [guard-mfa] Kode: ${code6}`);
-  } catch (err) {
-    console.warn(`  [guard-mfa] nfpro gagal: ${err.message}`);
-    // Fallback terminal
-    const readline = require("readline");
-    code6 = await new Promise((resolve) => {
-      const rl = readline.createInterface({
-        input: process.stdin,
-        output: process.stdout,
-      });
-      rl.question(`\n  [MFA] Kode 6 digit untuk ${email}: `, (ans) => {
-        rl.close();
-        resolve(ans.trim());
-      });
-    });
+let code6 = null;
+
+  if (isMahesh) {
+    // Akun MAHESH: fetch via bot Telegram, tombol "Verification Code"
+    const { fetchFromMaheshBot } = require("../cookie-kicker-pin-changer/mahesh-fetcher");
+    const maheshExtraRetries = 2; // total 3x coba: kirim ulang di Netflix + tunggu 5s antar percobaan
+
+    for (let mAttempt = 1; mAttempt <= maheshExtraRetries + 1; mAttempt++) {
+      console.log(`  [guard-mfa] Fetch kode via Mahesh Bot (percobaan ${mAttempt}/${maheshExtraRetries + 1})...`);
+      try {
+        code6 = await fetchFromMaheshBot(email, "vercode", { retries: 0, retryDelay: 5000 });
+        console.log(`  [guard-mfa] Kode: ${code6}`);
+        break;
+      } catch (maheshErr) {
+        console.warn(`  [guard-mfa] Mahesh Bot gagal (percobaan ${mAttempt}): ${maheshErr.message}`);
+        if (mAttempt <= maheshExtraRetries) {
+          const resendBtn = page.locator(
+            'button:has-text("Kirim Ulang Kode"), button:has-text("Resend"), button:has-text("Email a code"), button:has-text("Kirim kode")'
+          ).first();
+          if (await resendBtn.isVisible({ timeout: 3000 }).catch(() => false)) {
+            console.log(`  [guard-mfa] Klik kirim ulang kode di Netflix...`);
+            await resendBtn.click();
+          }
+          console.log(`  [guard-mfa] Tunggu 5 detik sebelum minta kode lagi...`);
+          await sleep(5000);
+        }
+      }
+    }
+
+    if (!code6) {
+      // Fallback ke Telegram manual
+      console.log(`  [guard-mfa] Minta kode manual via Telegram...`);
+      code6 = await requestCodeFromTelegram(email, "6digit", "MAHESH");
+    }
+  } else {
+    // Akun MEET: fetch via nfpro.js
+    try {
+      const { fetchNetflixCode } = require("../cookie-kicker-pin-changer/nfpro");
+      console.log(`  [guard-mfa] Auto-fetch kode via nfpro...`);
+      code6 = await fetchNetflixCode(email, "signin6", { retries: 2, retryDelay: 5000 });
+      console.log(`  [guard-mfa] Kode: ${code6}`);
+    } catch (err) {
+      console.warn(`  [guard-mfa] nfpro gagal: ${err.message}`);
+      console.log(`  [guard-mfa] Minta kode manual via Telegram...`);
+      code6 = await requestCodeFromTelegram(email, "6digit", "MEET");
+    }
   }
 
   if (!code6) throw new Error(`Kode MFA tidak tersedia untuk ${email}`);
@@ -281,7 +306,7 @@ async function handleMfa(page, email) {
  * @param {Array<{name: string, allowedDevice: string}>} profiles
  * @returns {Promise<{ kicked: number, details: string[] }>}
  */
-async function guardAccount(email, profiles) {
+async function guardAccount(email, profiles, isMahesh = false) {
   const cookieData = getCookieForEmail(email);
   if (!cookieData) {
     throw new Error(`Cookie tidak ada untuk ${email}`);
@@ -318,7 +343,7 @@ async function guardAccount(email, profiles) {
     }
 
     // Handle MFA
-    await handleMfa(page, email);
+    await handleMfa(page, email, isMahesh);
 
     // Navigate ulang jika perlu
     if (!page.url().includes("manageaccountaccess")) {
@@ -326,7 +351,7 @@ async function guardAccount(email, profiles) {
         waitUntil: "domcontentloaded",
         timeout: TIMEOUT_NAV,
       });
-      await handleMfa(page, email);
+      await handleMfa(page, email, isMahesh);
     }
 
     await sleep(1500);
