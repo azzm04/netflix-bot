@@ -3,24 +3,20 @@
 # ============================================================
 
 import os
+from dotenv import load_dotenv
 
-# Token dari @BotFather Telegram
-BOT_TOKEN = os.getenv("BOT_TOKEN", "8976693990:AAF4tkZE5p2W-tRqd3bgyfPCN02X7tBKdc8")
+BOT_TOKEN = os.getenv("BOT_TOKEN")
+ADMIN_ID = int(os.getenv("ADMIN_ID"))
+
+SPREADSHEET_MODAL_ID = os.getenv("SPREADSHEET_MODAL_ID")
+SPREADSHEET_INVEST_ID = os.getenv("SPREADSHEET_INVEST_ID")
+
+if not BOT_TOKEN:
+    raise ValueError("BOT_TOKEN belum di-set di .env!")
 
 # Nama file credentials Google Service Account
 CREDENTIALS_FILE = "credentials.json"
-
-# Nama spreadsheet Google Sheets (harus sama persis)
-SPREADSHEET_NAME = "netflix account jaeminies's"
-
-# Spreadsheet REKAPAN MODAL (untuk /closing)
-SPREADSHEET_MODAL_ID = "1-o6jOoE3rH2SOlH9975HODC7MpzDBg8zD8Z1RLnRK7g"
-
-# Spreadsheet invest_netflix (rekapan terpisah per pemilik akun)
-SPREADSHEET_INVEST_ID = "1NU1sqWyxzJ4c_FjaNTBAxVN0d0J-v0cxw5EwIMJkAJw"
-
-# Mapping: email akun Netflix → nama sheet di invest_netflix
-# Cocokkan dengan contains (email di kolom E bisa ada ", lokasi" di belakangnya)
+SPREADSHEET_NAME = netflix account jaeminies's
 INVEST_EMAIL_SHEET_MAP = {
     # Sheet rekapan_ena
     "cresser.gb@mahesh.co":           "rekapan_ena",
