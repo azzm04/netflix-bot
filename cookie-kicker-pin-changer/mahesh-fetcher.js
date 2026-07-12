@@ -162,11 +162,23 @@ async function clickInlineButton(client, message, buttonText) {
 
   const { Api } = require("telegram");
   const rows = message.replyMarkup.rows ?? [];
-  const target = buttonText.toLowerCase().trim();
+
+  // Bersihkan emoji/simbol non-huruf di depan/belakang teks
+  function cleanText(s) {
+    return (s ?? "")
+      .replace(/[^\p{L}\p{N}\s]/gu, "")   // buang semua yang bukan huruf/angka/spasi (termasuk emoji)
+      .trim()
+      .toLowerCase()
+      .replace(/\s+/g, " ");              // rapikan spasi ganda jadi 1
+  }
+
+  const target = cleanText(buttonText);
+
   // Pass 1: cari exact match dulu (hindari "Verification Code" ke-match
+  // dengan "Verification Code After Login" karena sama-sama mengandung substring itu)
   for (const row of rows) {
     for (const btn of row.buttons) {
-      const btnText = (btn.text ?? "").toLowerCase().trim();
+      const btnText = cleanText(btn.text);
       if (btnText === target) {
         console.log(`[mahesh] Klik tombol (exact match): "${btn.text}"`);
         client
@@ -185,7 +197,7 @@ async function clickInlineButton(client, message, buttonText) {
   // Pass 2: fallback ke substring match kalau tidak ada exact match
   for (const row of rows) {
     for (const btn of row.buttons) {
-      if ((btn.text ?? "").toLowerCase().includes(target)) {
+      if (cleanText(btn.text).includes(target)) {
         console.log(`[mahesh] Klik tombol (substring match): "${btn.text}"`);
         client
           .invoke(
