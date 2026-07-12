@@ -515,6 +515,7 @@ async function kickDevicesByProfiles(page, profileNames) {
         );
         processedIds.add(uniqueKey);
       }
+      break;
     }
     if (!foundUnprocessed) break;
   }
