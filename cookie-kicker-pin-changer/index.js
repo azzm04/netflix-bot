@@ -33,7 +33,7 @@ const {
   sendTelegram,
 } = require("./notify");
 
-const CRON_SCHEDULE = process.env.CRON_SCHEDULE ?? "*/15 * * * *";
+const CRON_SCHEDULE = process.env.CRON_SCHEDULE;
 const RUN_NOW = process.argv.includes("--run-now");
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 

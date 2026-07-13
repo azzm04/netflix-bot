@@ -35,6 +35,12 @@ INVEST_EMAIL_SHEET_MAP = {
     "ournapapt@stayhome.li":          "rekapan_UMI_rose",
     "wagmug733@fuwari.be":            "rekapan_UMI_rose",
     "pielidlid@stayhome.li":          "rekapan_UMI_rose",
+
+    "markbronston@ramaco.tech":          "rekapan_ena_5",
+    "skmiller11@ramaco.tech":          "rekapan_ena_5",
+    "rogersadam8198@ramaco.tech":          "rekapan_ena_5",
+    "kcherie86@ramaco.tech":          "rekapan_ena_5",
+    "joehelton13@ramaco.tech":          "rekapan_ena_5",
 }
 # SHEET_MODAL dibuat dinamis per bulan di sheets_handler: "modal netflix_Juni", dst.
 SHEET_GESTUN = "rekapan"   # Sheet PENDAPATAN GESTUN di spreadsheet REKAPAN MODAL
