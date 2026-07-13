@@ -701,6 +701,5 @@ module.exports = {
   CookieExpiredError,
   checkForExtraVerification,
   refreshAndSaveCookies,
-  cleanupNoActivityDevices,
   waitForKickToastMatch,
 };
