@@ -32,6 +32,69 @@ function log(msg) {
   } catch {}
 }
 
+async function cleanupNoActivityDevices(page, email) {
+  let cleaned = 0;
+  try {
+    await page.goto("https://www.netflix.com/manageaccountaccess", {
+      waitUntil: "domcontentloaded",
+      timeout: 30_000,
+    });
+
+    if (page.url().includes("/login") || page.url().includes("/mfa")) {
+      // Cookie expired atau butuh MFA — jangan urus di sini, biarkan proses lain yang handle
+      return 0;
+    }
+
+    for (let round = 0; round < 20; round++) {
+      const cards = page.locator('li[data-uia^="device-list+"]');
+      const count = await cards.count();
+      if (count === 0) break;
+
+      let didKick = false;
+      for (let i = 0; i < count; i++) {
+        const card = cards.nth(i);
+
+        const isCurrent =
+          (await card.locator('[data-uia$="+current-device-badge+ANNOUNCE"]').count()) > 0;
+        if (isCurrent) continue;
+
+        const cardText = await card.innerText().catch(() => "");
+        const isNoActivity =
+          cardText.toLowerCase().includes("tidak ada aktivitas") ||
+          cardText.toLowerCase().includes("no activity");
+        if (!isNoActivity) continue;
+
+        const keluarBtn = card.locator('button:has-text("Keluar"), button:has-text("Sign Out")').first();
+        let visible = await keluarBtn.isVisible({ timeout: 500 }).catch(() => false);
+        if (!visible) {
+          const dropBtn = card.locator('[data-uia$="+dropdown-button"]').first();
+          if (await dropBtn.isVisible({ timeout: 1000 }).catch(() => false)) {
+            await dropBtn.click();
+            await new Promise((r) => setTimeout(r, 800));
+            visible = await keluarBtn.isVisible({ timeout: 1000 }).catch(() => false);
+          }
+        }
+
+        if (visible) {
+          await keluarBtn.click();
+          cleaned++;
+          didKick = true;
+          await new Promise((r) => setTimeout(r, 1500));
+          break; // 1 kick per round, cegah index basi
+        }
+      }
+      if (!didKick) break;
+    }
+
+    if (cleaned > 0) {
+      log(`  🧹 ${email}: ${cleaned} device "tidak ada aktivitas" dibersihkan`);
+    }
+  } catch (err) {
+    log(`  ⚠ ${email}: cleanup gagal — ${err.message}`);
+  }
+  return cleaned;
+}
+
 async function runKeepAlive() {
   log("=== Keep-Alive mulai ===");
   try {
@@ -92,6 +155,9 @@ async function runKeepAlive() {
         await new Promise((r) => setTimeout(r, 1000));
         await page.evaluate(() => window.scrollBy(0, -200));
         await new Promise((r) => setTimeout(r, 500));
+        
+        await cleanupNoActivityDevices(page, email);
+
 
         // Simpan cookie yang di-refresh
         const allCookies = await ctx.cookies("https://www.netflix.com");

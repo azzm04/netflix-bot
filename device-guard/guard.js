@@ -19,8 +19,12 @@ require("dotenv").config();
 const path = require("path");
 const fs = require("fs");
 const { chromium } = require("playwright");
-const { requestCodeFromTelegram } = require("../cookie-kicker-pin-changer/tg-bridge");
-
+const {
+  requestCodeFromTelegram,
+} = require("../cookie-kicker-pin-changer/tg-bridge");
+const {
+  waitForKickToastMatch,
+} = require("../cookie-kicker-pin-changer/kicker-cookie");
 
 // Pakai cookie dari cookie-kicker-pin-changer
 const COOKIE_FILE = path.resolve(
@@ -208,30 +212,43 @@ async function handleMfa(page, email, isMahesh = false) {
 
   // Fetch kode via nfpro.js (untuk semua akun MEET)
   // Mahesh fetcher hanya dipakai jika email di domain Mahesh
-let code6 = null;
+  let code6 = null;
 
   if (isMahesh) {
     // Akun MAHESH: fetch via bot Telegram, tombol "Verification Code"
-    const { fetchFromMaheshBot } = require("../cookie-kicker-pin-changer/mahesh-fetcher");
+    const {
+      fetchFromMaheshBot,
+    } = require("../cookie-kicker-pin-changer/mahesh-fetcher");
     const maheshExtraRetries = 2; // total 3x coba: kirim ulang di Netflix + tunggu 5s antar percobaan
 
     for (let mAttempt = 1; mAttempt <= maheshExtraRetries + 1; mAttempt++) {
-      console.log(`  [guard-mfa] Fetch kode via Mahesh Bot (percobaan ${mAttempt}/${maheshExtraRetries + 1})...`);
+      console.log(
+        `  [guard-mfa] Fetch kode via Mahesh Bot (percobaan ${mAttempt}/${maheshExtraRetries + 1})...`,
+      );
       try {
-        code6 = await fetchFromMaheshBot(email, "vercode", { retries: 0, retryDelay: 5000 });
+        code6 = await fetchFromMaheshBot(email, "vercode", {
+          retries: 0,
+          retryDelay: 5000,
+        });
         console.log(`  [guard-mfa] Kode: ${code6}`);
         break;
       } catch (maheshErr) {
-        console.warn(`  [guard-mfa] Mahesh Bot gagal (percobaan ${mAttempt}): ${maheshErr.message}`);
+        console.warn(
+          `  [guard-mfa] Mahesh Bot gagal (percobaan ${mAttempt}): ${maheshErr.message}`,
+        );
         if (mAttempt <= maheshExtraRetries) {
-          const resendBtn = page.locator(
-            'button:has-text("Kirim Ulang Kode"), button:has-text("Resend"), button:has-text("Email a code"), button:has-text("Kirim kode")'
-          ).first();
+          const resendBtn = page
+            .locator(
+              'button:has-text("Kirim Ulang Kode"), button:has-text("Resend"), button:has-text("Email a code"), button:has-text("Kirim kode")',
+            )
+            .first();
           if (await resendBtn.isVisible({ timeout: 3000 }).catch(() => false)) {
             console.log(`  [guard-mfa] Klik kirim ulang kode di Netflix...`);
             await resendBtn.click();
           }
-          console.log(`  [guard-mfa] Tunggu 5 detik sebelum minta kode lagi...`);
+          console.log(
+            `  [guard-mfa] Tunggu 5 detik sebelum minta kode lagi...`,
+          );
           await sleep(5000);
         }
       }
@@ -245,9 +262,14 @@ let code6 = null;
   } else {
     // Akun MEET: fetch via nfpro.js
     try {
-      const { fetchNetflixCode } = require("../cookie-kicker-pin-changer/nfpro");
+      const {
+        fetchNetflixCode,
+      } = require("../cookie-kicker-pin-changer/nfpro");
       console.log(`  [guard-mfa] Auto-fetch kode via nfpro...`);
-      code6 = await fetchNetflixCode(email, "signin6", { retries: 2, retryDelay: 5000 });
+      code6 = await fetchNetflixCode(email, "signin6", {
+        retries: 2,
+        retryDelay: 5000,
+      });
       console.log(`  [guard-mfa] Kode: ${code6}`);
     } catch (err) {
       console.warn(`  [guard-mfa] nfpro gagal: ${err.message}`);
@@ -468,8 +490,8 @@ async function guardAccount(email, profiles, isMahesh = false) {
     for (const [profKey, devs] of profileDevices.entries()) {
       if (profKey === "__noactivity__") continue;
 
-      const isKnownProfile = [...allowedProfileKeys].some(
-        (k) => wordMatch(profKey, k),
+      const isKnownProfile = [...allowedProfileKeys].some((k) =>
+        wordMatch(profKey, k),
       );
 
       if (!isKnownProfile) {
@@ -619,10 +641,22 @@ async function guardAccount(email, profiles, isMahesh = false) {
 
       if (await keluarBtn.isVisible({ timeout: 1000 }).catch(() => false)) {
         await keluarBtn.click();
-        totalKicked++;
-        const msg = `Dikick: "${kick.deviceName}" (${kick.reason})`;
-        details.push(msg);
-        console.log(`  [guard] ✓ ${msg}`);
+
+        const toastText = await waitForKickToastMatch(
+          page,
+          kick.deviceName,
+          10000,
+        );
+        if (toastText) {
+          totalKicked++;
+          const msg = `Dikick & terverifikasi: "${kick.deviceName}" (${kick.reason}) — toast: "${toastText}"`;
+          details.push(msg);
+          console.log(`  [guard] ✅ ${msg}`);
+        } else {
+          console.warn(
+            `  [guard] ⚠ "${kick.deviceName}" — toast tidak muncul atau device tidak cocok, kemungkinan gagal!`,
+          );
+        }
         await sleep(1500);
       } else {
         console.warn(

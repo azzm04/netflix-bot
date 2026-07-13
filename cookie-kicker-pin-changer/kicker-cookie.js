@@ -206,7 +206,9 @@ async function checkForExtraVerification(page, email, isMahesh = false) {
 
         const maheshExtraRetries = 2; // percobaan tambahan: kirim ulang di Netflix + tunggu 5s + minta lagi
         for (let mAttempt = 1; mAttempt <= maheshExtraRetries + 1; mAttempt++) {
-          console.log(`  [mfa] Fetch kode via Mahesh Bot (percobaan ${mAttempt}/${maheshExtraRetries + 1})...`);
+          console.log(
+            `  [mfa] Fetch kode via Mahesh Bot (percobaan ${mAttempt}/${maheshExtraRetries + 1})...`,
+          );
           try {
             code6 = await fetchFromMaheshBot(email, "vercode", {
               retries: 0,
@@ -214,20 +216,30 @@ async function checkForExtraVerification(page, email, isMahesh = false) {
             });
             break; // sukses, keluar dari loop mahesh
           } catch (maheshErr) {
-            console.warn(`  [mfa] Mahesh Bot gagal (percobaan ${mAttempt}): ${maheshErr.message}`);
+            console.warn(
+              `  [mfa] Mahesh Bot gagal (percobaan ${mAttempt}): ${maheshErr.message}`,
+            );
 
             if (mAttempt <= maheshExtraRetries) {
               // Kirim ulang kode di halaman Netflix
-              const resendBtn = page.locator(
-                'button:has-text("Kirim Ulang Kode"), button:has-text("Resend"), button:has-text("Email a code"), button:has-text("Kirim kode")'
-              ).first();
-              if (await resendBtn.isVisible({ timeout: 3000 }).catch(() => false)) {
+              const resendBtn = page
+                .locator(
+                  'button:has-text("Kirim Ulang Kode"), button:has-text("Resend"), button:has-text("Email a code"), button:has-text("Kirim kode")',
+                )
+                .first();
+              if (
+                await resendBtn.isVisible({ timeout: 3000 }).catch(() => false)
+              ) {
                 console.log(`  [mfa] Klik kirim ulang kode di Netflix...`);
                 await resendBtn.click();
               } else {
-                console.warn(`  [mfa] Tombol kirim ulang tidak ditemukan di halaman Netflix.`);
+                console.warn(
+                  `  [mfa] Tombol kirim ulang tidak ditemukan di halaman Netflix.`,
+                );
               }
-              console.log(`  [mfa] Tunggu 5 detik sebelum minta kode lagi ke Mahesh Bot...`);
+              console.log(
+                `  [mfa] Tunggu 5 detik sebelum minta kode lagi ke Mahesh Bot...`,
+              );
               await sleep(5000);
             } else {
               throw maheshErr; // habis semua percobaan, lempar ke catch luar → fallback Telegram
@@ -373,6 +385,47 @@ async function checkForExtraVerification(page, email, isMahesh = false) {
   }
 }
 
+/**
+ * Tunggu toast konfirmasi dari Netflix setelah klik "Keluar",
+ * DAN pastikan toast tersebut menyebut nama device yang SAMA
+ * dengan yang barusan kita proses — bukan toast lama/device lain.
+ *
+ * @param {import('playwright').Page} page
+ * @param {string} deviceName  - nama device yang diharapkan (misal "PC Chrome - Browser Web")
+ * @param {number} timeoutMs
+ * @returns {Promise<string|null>} teks toast jika cocok, null jika tidak
+ */
+async function waitForKickToastMatch(page, deviceName, timeoutMs = 10000) {
+  try {
+    const toast = page.locator('div[role="alert"]').last();
+    await toast.waitFor({ state: "visible", timeout: timeoutMs });
+    const text = await toast.innerText().catch(() => "");
+    const lower = text.toLowerCase();
+
+    const isKickPhrase =
+      lower.includes("dihentikan aksesnya") ||
+      lower.includes("kini telah dihentikan") ||
+      (lower.includes("device") && lower.includes("signed out")) ||
+      lower.includes("is now signed out");
+
+    const nameMatches = deviceName && text.includes(deviceName);
+
+    if (isKickPhrase && nameMatches) {
+      return text.trim();
+    }
+
+    if (isKickPhrase && !nameMatches) {
+      console.warn(
+        `  [kick-verify] ⚠ Toast muncul tapi NAMA DEVICE TIDAK COCOK. Toast: "${text.trim()}" | Diharapkan: "${deviceName}"`,
+      );
+    }
+
+    return null;
+  } catch {
+    return null;
+  }
+}
+
 // ── Kick Device Logic ─────────────────────────────────────
 // (Sama persis dengan kicker.js — dipindah ke sini agar file ini standalone)
 async function kickDevicesByProfiles(page, profileNames) {
@@ -395,11 +448,16 @@ async function kickDevicesByProfiles(page, profileNames) {
     }
   }
 
-  // Iterasi semua card device
-  for (let round = 0; round < 30; round++) {
+  const MAX_ROUNDS = 100; 
+  let hitRoundLimit = true;
+
+  for (let round = 0; round < MAX_ROUNDS; round++) {
     const cards = page.locator('li[data-uia^="device-list+"]');
     const count = await cards.count();
-    if (count === 0) break;
+    if (count === 0) {
+      hitRoundLimit = false;
+      break;
+    }
 
     let foundUnprocessed = false;
     for (let i = 0; i < count; i++) {
@@ -464,6 +522,7 @@ async function kickDevicesByProfiles(page, profileNames) {
         .split("\n")
         .map((l) => l.trim())
         .filter(Boolean);
+      const deviceName = lines[0] ?? "";
       for (const line of lines) {
         if (
           line.toLowerCase().includes("terakhir ditonton") ||
@@ -501,25 +560,45 @@ async function kickDevicesByProfiles(page, profileNames) {
       const keluarVisible = await keluarBtn
         .isVisible({ timeout: 2000 })
         .catch(() => false);
+      const display =
+        profileText ?? (noActivity ? "tidak ada aktivitas" : "no profile");
+
       if (keluarVisible) {
-        const display =
-          profileText ?? (noActivity ? "tidak ada aktivitas" : "no profile");
         await keluarBtn.click();
-        totalKicked++;
-        console.log(`  [kick] Dikick: "${display}" (${deviceId})`);
+
+        // Verifikasi: toast HARUS muncul DAN sebut nama device yang SAMA
+        const toastText = await waitForKickToastMatch(page, deviceName, 10000);
+        if (toastText) {
+          totalKicked++;
+          console.log(
+            `  [kick] ✅ Dikick & terverifikasi: "${deviceName}" (profil: ${display}) — toast: "${toastText}"`,
+          );
+        } else {
+          console.warn(
+            `  [kick] ⚠ MISS: "${deviceName}" (profil: ${display}) — toast tidak muncul atau device tidak cocok!`,
+          );
+        }
         processedIds.add(uniqueKey);
         await sleep(1500);
       } else {
-        const display =
-          profileText ?? (noActivity ? "tidak ada aktivitas" : "no profile");
         console.warn(
-          `  [kick] ⚠ MISS: "${display}" (${deviceId}) — tombol Keluar tidak muncul, mungkin belum ter-kick!`,
+          `  [kick] ⚠ MISS: "${deviceName}" (profil: ${display}) — tombol Keluar tidak muncul!`,
         );
         processedIds.add(uniqueKey);
       }
       break;
     }
-    if (!foundUnprocessed) break;
+    if (!foundUnprocessed) {
+      hitRoundLimit = false;
+      break;
+    }
+  }
+
+  if (hitRoundLimit) {
+    console.warn(
+      `  [kick] ⚠ Mencapai batas ${MAX_ROUNDS} round — mungkin masih ada device tersisa yang belum diproses. ` +
+        `Pertimbangkan menjalankan ulang untuk akun ini.`,
+    );
   }
 
   return totalKicked;
@@ -622,4 +701,6 @@ module.exports = {
   CookieExpiredError,
   checkForExtraVerification,
   refreshAndSaveCookies,
+  cleanupNoActivityDevices,
+  waitForKickToastMatch,
 };
