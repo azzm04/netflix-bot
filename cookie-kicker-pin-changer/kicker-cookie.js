@@ -486,10 +486,12 @@ async function kickDevicesByProfiles(page, profileNames) {
         lowerText.includes("tidak ada aktivitas") ||
         lowerText.includes("no activity");
 
-      // Skip jika profil tidak cocok dengan target
-      const matchedTarget = targets.find(
-        (t) => profileText && profileText.toLowerCase().includes(t),
-      );
+      const matchedTarget = targets.find((t) => {
+        if (!profileText) return false;
+        const escaped = t.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+        const re = new RegExp(`\\b${escaped}\\b`, "i");
+        return re.test(profileText);
+      });
       if (profileText && !matchedTarget) {
         processedIds.add(uniqueKey);
         continue;

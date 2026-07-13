@@ -22,7 +22,7 @@ const {
 } = require("./cookie-helper");
 const { CookieExpiredError } = require("./kicker-cookie");
 
-const HEADLESS    = process.env.HEADLESS !== "false";
+const HEADLESS = process.env.HEADLESS !== "false";
 const TIMEOUT_NAV = 45_000;
 const URL_PIN_SETTINGS = "https://www.netflix.com/settings/migration";
 
@@ -31,7 +31,7 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 class WrongPasswordError extends Error {
   constructor(email) {
     super(`Password salah untuk ${email} (Kontrol Orang Tua).`);
-    this.name  = "WrongPasswordError";
+    this.name = "WrongPasswordError";
     this.email = email;
   }
 }
@@ -49,7 +49,7 @@ function generateNewPin(oldPin) {
 async function launchBrowser() {
   const proxyConfig = process.env.PROXY_SERVER
     ? {
-        server:   process.env.PROXY_SERVER,
+        server: process.env.PROXY_SERVER,
         username: process.env.PROXY_USERNAME,
         password: process.env.PROXY_PASSWORD,
       }
@@ -77,7 +77,7 @@ async function newCookiePage(browser, email, targetUrl) {
 
   const proxyConfig = process.env.PROXY_SERVER
     ? {
-        server:   process.env.PROXY_SERVER,
+        server: process.env.PROXY_SERVER,
         username: process.env.PROXY_USERNAME,
         password: process.env.PROXY_PASSWORD,
       }
@@ -94,7 +94,10 @@ async function newCookiePage(browser, email, targetUrl) {
   const page = await ctx.newPage();
 
   console.log(`  [pin-cookie] Membuka ${targetUrl} ...`);
-  await page.goto(targetUrl, { waitUntil: "domcontentloaded", timeout: TIMEOUT_NAV });
+  await page.goto(targetUrl, {
+    waitUntil: "domcontentloaded",
+    timeout: TIMEOUT_NAV,
+  });
 
   const url = page.url();
   if (url.includes("/login") || url.includes("/LoginHelp")) {
@@ -108,7 +111,10 @@ async function newCookiePage(browser, email, targetUrl) {
     const { checkForExtraVerification } = require("./kicker-cookie");
     await checkForExtraVerification(page, email);
     // Navigate ulang ke target setelah MFA selesai
-    await page.goto(targetUrl, { waitUntil: "domcontentloaded", timeout: TIMEOUT_NAV });
+    await page.goto(targetUrl, {
+      waitUntil: "domcontentloaded",
+      timeout: TIMEOUT_NAV,
+    });
   }
 
   console.log(`  [pin-cookie] Berhasil akses: ${page.url()}`);
@@ -127,7 +133,7 @@ async function newCookiePage(browser, email, targetUrl) {
  * @throws {CookieExpiredError} jika cookie tidak ada / expired
  */
 async function changePinsForProfilesCookie(email, password, targetProfiles) {
-  const browser    = await launchBrowser();
+  const browser = await launchBrowser();
   const pinChanges = new Map();
 
   try {
@@ -135,7 +141,9 @@ async function changePinsForProfilesCookie(email, password, targetProfiles) {
     await sleep(1500);
 
     // Form Kontrol Orang Tua (muncul jika parent control aktif)
-    const pwRestrict = page.locator('[data-uia="input-account-content-restrictions"]').first();
+    const pwRestrict = page
+      .locator('[data-uia="input-account-content-restrictions"]')
+      .first();
     if (await pwRestrict.isVisible({ timeout: 5000 }).catch(() => false)) {
       console.log("  [pin-cookie] Isi password Kontrol Orang Tua...");
       await pwRestrict.fill(password);
@@ -143,12 +151,16 @@ async function changePinsForProfilesCookie(email, password, targetProfiles) {
       await page.locator('[data-uia="btn-account-pin-submit"]').click();
 
       // Tunggu network selesai dulu (Netflix sering ada redirect internal)
-      await page.waitForLoadState("networkidle", { timeout: 10_000 }).catch(() => {});
+      await page
+        .waitForLoadState("networkidle", { timeout: 10_000 })
+        .catch(() => {});
       await sleep(500);
 
       // Cek apakah Netflix menolak password ("Sandi salah.")
       const pwError = page.locator('[data-uia="input-message-error"]');
-      const hasPwError = await pwError.isVisible({ timeout: 3000 }).catch(() => false);
+      const hasPwError = await pwError
+        .isVisible({ timeout: 3000 })
+        .catch(() => false);
       if (hasPwError) {
         const errText = await pwError.innerText().catch(() => "Sandi salah.");
         console.warn(`  [pin-cookie] ✗ Password ditolak: "${errText.trim()}"`);
@@ -156,30 +168,46 @@ async function changePinsForProfilesCookie(email, password, targetProfiles) {
       }
 
       // Tunggu profil muncul
-      const loaded = await page.waitForFunction(
-        () => {
-          // Cek berbagai kemungkinan selector yang Netflix pakai
-          return (
-            document.querySelectorAll(".parental-control-profile").length > 0 ||
-            document.querySelectorAll('[data-uia^="pin-number-"]').length > 0 ||
-            document.querySelectorAll('[class*="profile-hub"]').length > 0 ||
-            document.querySelectorAll('[class*="parental"]').length > 0
-          );
-        },
-        { timeout: 30_000, polling: 1000 }
-      ).catch(() => null);
+      const loaded = await page
+        .waitForFunction(
+          () => {
+            // Cek berbagai kemungkinan selector yang Netflix pakai
+            return (
+              document.querySelectorAll(".parental-control-profile").length >
+                0 ||
+              document.querySelectorAll('[data-uia^="pin-number-"]').length >
+                0 ||
+              document.querySelectorAll('[class*="profile-hub"]').length > 0 ||
+              document.querySelectorAll('[class*="parental"]').length > 0
+            );
+          },
+          { timeout: 30_000, polling: 1000 },
+        )
+        .catch(() => null);
 
       if (!loaded) {
         // Screenshot untuk debug
         const fs = require("fs");
         const dir = process.env.DEBUG_SHOT_DIR ?? "/tmp/nfdebug";
-        try { fs.mkdirSync(dir, { recursive: true }); } catch {}
-        await page.screenshot({ path: `${dir}/pin_parental_fail_${Date.now()}.png`, fullPage: true }).catch(() => {});
-        console.warn("  [pin-cookie] Profil tidak muncul setelah submit password.");
+        try {
+          fs.mkdirSync(dir, { recursive: true });
+        } catch {}
+        await page
+          .screenshot({
+            path: `${dir}/pin_parental_fail_${Date.now()}.png`,
+            fullPage: true,
+          })
+          .catch(() => {});
+        console.warn(
+          "  [pin-cookie] Profil tidak muncul setelah submit password.",
+        );
         console.warn(`  [pin-cookie] URL saat ini: ${page.url()}`);
         // Coba navigate ulang ke halaman yang sama
         console.log("  [pin-cookie] Coba navigate ulang...");
-        await page.goto(URL_PIN_SETTINGS, { waitUntil: "domcontentloaded", timeout: TIMEOUT_NAV });
+        await page.goto(URL_PIN_SETTINGS, {
+          waitUntil: "domcontentloaded",
+          timeout: TIMEOUT_NAV,
+        });
         await sleep(2000);
       }
 
@@ -188,46 +216,63 @@ async function changePinsForProfilesCookie(email, password, targetProfiles) {
 
     // Baca semua profil + PIN lama
     const profiles = await page.evaluate(() =>
-      Array.from(document.querySelectorAll(".parental-control-profile")).map((li) => {
-        const name = li.querySelector("h3")?.textContent?.trim() ?? "";
-        const pins = Array.from(li.querySelectorAll('[data-uia^="pin-number-"]'))
-          .sort(
-            (a, b) =>
-              +a.getAttribute("data-uia").slice(-1) -
-              +b.getAttribute("data-uia").slice(-1)
+      Array.from(document.querySelectorAll(".parental-control-profile")).map(
+        (li) => {
+          const name = li.querySelector("h3")?.textContent?.trim() ?? "";
+          const pins = Array.from(
+            li.querySelectorAll('[data-uia^="pin-number-"]'),
           )
-          .map((inp) => inp.value ?? "");
-        return { name, oldPin: pins.join("") };
-      })
+            .sort(
+              (a, b) =>
+                +a.getAttribute("data-uia").slice(-1) -
+                +b.getAttribute("data-uia").slice(-1),
+            )
+            .map((inp) => inp.value ?? "");
+          return { name, oldPin: pins.join("") };
+        },
+      ),
     );
 
     console.log(
-      `  [pin-cookie] Profil: ${profiles.map((p) => `${p.name}(${p.oldPin})`).join(", ")}`
+      `  [pin-cookie] Profil: ${profiles.map((p) => `${p.name}(${p.oldPin})`).join(", ")}`,
     );
 
     const targets = targetProfiles.map((t) => t.trim().toLowerCase());
 
+    function isExactProfileMatch(profileName, target) {
+      const escaped = target.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+      const re = new RegExp(`\\b${escaped}\\b`, "i");
+      return re.test(profileName);
+    }
+
     for (const prof of profiles) {
-      if (!targets.some((t) => prof.name.toLowerCase().includes(t))) continue;
+      if (!targets.some((t) => isExactProfileMatch(prof.name, t))) continue;
 
       const newPin = generateNewPin(prof.oldPin);
       console.log(`  [pin-cookie] "${prof.name}": ${prof.oldPin} → ${newPin}`);
 
       await page.evaluate(
         ({ profileName, newPin }) => {
-          for (const li of document.querySelectorAll(".parental-control-profile")) {
+          const escaped = profileName.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+          const re = new RegExp(`\\b${escaped}\\b`, "i");
+
+          for (const li of document.querySelectorAll(
+            ".parental-control-profile",
+          )) {
             const h3 = li.querySelector("h3");
-            if (!h3?.textContent?.toLowerCase().includes(profileName.toLowerCase())) continue;
-            const inputs = Array.from(li.querySelectorAll('[data-uia^="pin-number-"]')).sort(
+            if (!h3?.textContent || !re.test(h3.textContent)) continue;
+            const inputs = Array.from(
+              li.querySelectorAll('[data-uia^="pin-number-"]'),
+            ).sort(
               (a, b) =>
                 +a.getAttribute("data-uia").slice(-1) -
-                +b.getAttribute("data-uia").slice(-1)
+                +b.getAttribute("data-uia").slice(-1),
             );
             newPin.split("").forEach((d, i) => {
               if (!inputs[i]) return;
               const setter = Object.getOwnPropertyDescriptor(
                 HTMLInputElement.prototype,
-                "value"
+                "value",
               ).set;
               setter.call(inputs[i], d);
               inputs[i].dispatchEvent(new Event("input", { bubbles: true }));
@@ -236,7 +281,7 @@ async function changePinsForProfilesCookie(email, password, targetProfiles) {
             return;
           }
         },
-        { profileName: prof.name, newPin }
+        { profileName: prof.name, newPin },
       );
 
       await sleep(400);
@@ -247,10 +292,14 @@ async function changePinsForProfilesCookie(email, password, targetProfiles) {
       console.log("  [pin-cookie] Klik Terapkan...");
       await page.locator('[data-uia="profile-hub-migration-apply"]').click();
       await page
-        .waitForURL((url) => !url.toString().includes("/settings/migration"), { timeout: TIMEOUT_NAV })
+        .waitForURL((url) => !url.toString().includes("/settings/migration"), {
+          timeout: TIMEOUT_NAV,
+        })
         .catch(() => {});
       await sleep(1500);
-      console.log(`  [pin-cookie] Selesai! ${[...pinChanges.keys()].join(", ")}`);
+      console.log(
+        `  [pin-cookie] Selesai! ${[...pinChanges.keys()].join(", ")}`,
+      );
 
       // Dynamic Update: simpan cookie terbaru dari server
       const { refreshAndSaveCookies } = require("./kicker-cookie");
@@ -265,4 +314,8 @@ async function changePinsForProfilesCookie(email, password, targetProfiles) {
   return pinChanges;
 }
 
-module.exports = { changePinsForProfilesCookie, CookieExpiredError, WrongPasswordError  };
+module.exports = {
+  changePinsForProfilesCookie,
+  CookieExpiredError,
+  WrongPasswordError,
+};

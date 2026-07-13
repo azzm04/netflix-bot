@@ -469,7 +469,7 @@ async function guardAccount(email, profiles, isMahesh = false) {
       if (profKey === "__noactivity__") continue;
 
       const isKnownProfile = [...allowedProfileKeys].some(
-        (k) => profKey.includes(k) || k.includes(profKey),
+        (k) => wordMatch(profKey, k),
       );
 
       if (!isKnownProfile) {
@@ -489,7 +489,7 @@ async function guardAccount(email, profiles, isMahesh = false) {
 
       let devicesForProfile = [];
       for (const [key, devs] of profileDevices.entries()) {
-        if (key.includes(profKey) || profKey.includes(key)) {
+        if (wordMatch(key, profKey)) {
           devicesForProfile = devs;
           break;
         }
