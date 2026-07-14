@@ -1,18 +1,3 @@
-/**
- * guard.js — Smart Device Guard logic
- *
- * Untuk setiap akun MEET:
- *   1. Buka halaman /manageaccountaccess via cookie
- *   2. Untuk setiap profil, cek device yang sedang login
- *   3. Bandingkan dengan device yang diizinkan (dari kolom G spreadsheet)
- *   4. Kick device yang tidak sesuai rules
- *
- * Rules:
- *   - Kolom G ada isi  → kick semua device yang TIDAK cocok dengan kata kunci device
- *   - Kolom G kosong   → izinkan hanya 1 device (yang paling atas = terbaru), kick sisanya
- *   - Device "PERANGKAT SAAT INI" → JANGAN dikick
- */
-
 "use strict";
 
 require("dotenv").config();

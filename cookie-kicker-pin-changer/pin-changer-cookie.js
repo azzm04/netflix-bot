@@ -1,16 +1,3 @@
-/**
- * pin-changer-cookie.js — Ganti PIN profil Netflix via Cookie Injection
- *
- * Perbedaan dari pin-changer.js:
- *  - TIDAK ada proses login
- *  - Cookie di-inject langsung
- *  - Jika cookie expired → throw CookieExpiredError
- *  - Logic ganti PIN SAMA persis
- *
- * SETUP AWAL:
- *   node cookie-helper.js save-interactive "email@gmail.com"
- */
-
 "use strict";
 
 require("dotenv").config();
