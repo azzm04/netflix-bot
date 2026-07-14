@@ -137,8 +137,38 @@ async function changePinsForProfilesCookie(email, password, targetProfiles) {
   const pinChanges = new Map();
 
   try {
-    const page = await newCookiePage(browser, email, URL_PIN_SETTINGS);
+const page = await newCookiePage(browser, email, URL_PIN_SETTINGS);
     await sleep(1500);
+
+    // Sanity check: pastikan masih di halaman PIN settings, bukan ke-redirect
+    if (!page.url().includes("/settings/migration")) {
+      console.warn(
+        `  [pin-cookie] ⚠ Redirect terdeteksi: diharapkan /settings/migration, tapi berada di ${page.url()}`,
+      );
+      console.log("  [pin-cookie] Coba navigate ulang langsung...");
+      await page.goto(URL_PIN_SETTINGS, {
+        waitUntil: "domcontentloaded",
+        timeout: TIMEOUT_NAV,
+      });
+      await sleep(2000);
+
+      if (!page.url().includes("/settings/migration")) {
+        // Masih redirect setelah dicoba ulang — screenshot untuk diagnosis
+        const fs = require("fs");
+        const dir = process.env.DEBUG_SHOT_DIR ?? "/tmp/nfdebug";
+        try { fs.mkdirSync(dir, { recursive: true }); } catch {}
+        const shotPath = `${dir}/pin_redirect_${email.split("@")[0]}_${Date.now()}.png`;
+        await page.screenshot({ path: shotPath, fullPage: true }).catch(() => {});
+        console.error(
+          `  [pin-cookie] ✗ Tetap ke-redirect ke ${page.url()} setelah retry. ` +
+          `Screenshot: ${shotPath}. Kemungkinan akun ini tidak punya Kontrol Orang Tua aktif ` +
+          `di /settings/migration, atau strukturnya beda.`,
+        );
+        throw new Error(
+          `Redirect tidak terduga untuk ${email}: diharapkan /settings/migration, dapat ${page.url()}`,
+        );
+      }
+    }
 
     // Form Kontrol Orang Tua (muncul jika parent control aktif)
     const pwRestrict = page
