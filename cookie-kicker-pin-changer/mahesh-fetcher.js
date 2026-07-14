@@ -70,6 +70,51 @@ function createClient(sessionStr = "") {
   });
 }
 
+// ── Singleton client (reuse koneksi, hindari connect-disconnect berulang) ──
+let _client = null;
+let _connecting = null;
+
+async function getClient() {
+  if (_client && _client.connected) return _client;
+  if (_connecting) return _connecting;
+
+  _connecting = (async () => {
+    const sessionStr = loadSession();
+    if (!sessionStr) {
+      throw new Error(
+        "Session belum ada. Jalankan: node mahesh-fetcher.js --setup",
+      );
+    }
+    const client = createClient(sessionStr);
+    await client.connect();
+
+    const newSession = client.session.save();
+    if (newSession !== sessionStr) saveSession(newSession);
+
+    _client = client;
+    return client;
+  })();
+
+  try {
+    const client = await _connecting;
+    return client;
+  } finally {
+    _connecting = null;
+  }
+}
+
+async function closeMaheshClient() {
+  if (_client) {
+    try {
+      await _client.disconnect();
+    } catch {}
+    _client = null;
+  }
+}
+
+process.on("SIGTERM", closeMaheshClient);
+process.on("SIGINT", closeMaheshClient);
+
 // ── Input terminal ────────────────────────────────────────
 function prompt(text) {
   return new Promise((resolve) => {
@@ -166,10 +211,10 @@ async function clickInlineButton(client, message, buttonText) {
   // Bersihkan emoji/simbol non-huruf di depan/belakang teks
   function cleanText(s) {
     return (s ?? "")
-      .replace(/[^\p{L}\p{N}\s]/gu, "")   // buang semua yang bukan huruf/angka/spasi (termasuk emoji)
+      .replace(/[^\p{L}\p{N}\s]/gu, "") // buang semua yang bukan huruf/angka/spasi (termasuk emoji)
       .trim()
       .toLowerCase()
-      .replace(/\s+/g, " ");              // rapikan spasi ganda jadi 1
+      .replace(/\s+/g, " "); // rapikan spasi ganda jadi 1
   }
 
   const target = cleanText(buttonText);
@@ -234,12 +279,7 @@ async function fetchFromMaheshBot(email, codeType = "signin", opts = {}) {
     );
   }
 
-  const client = createClient(sessionStr);
-  await client.connect();
-
-  // Simpan session terbaru
-  const newSession = client.session.save();
-  if (newSession !== sessionStr) saveSession(newSession);
+  const client = await getClient();
 
   try {
     for (let attempt = 1; attempt <= retries + 1; attempt++) {
@@ -316,8 +356,8 @@ async function fetchFromMaheshBot(email, codeType = "signin", opts = {}) {
         );
       }
     }
-  } finally {
-    await client.disconnect();
+  } catch (err) {
+    throw err;
   }
 }
 
@@ -355,4 +395,4 @@ if (require.main === module) {
   main().catch(console.error);
 }
 
-module.exports = { fetchFromMaheshBot };
+module.exports = { fetchFromMaheshBot, closeMaheshClient };
