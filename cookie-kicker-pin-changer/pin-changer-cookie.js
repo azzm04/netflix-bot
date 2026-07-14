@@ -132,210 +132,192 @@ async function newCookiePage(browser, email, targetUrl) {
  * @returns {Promise<Map<string, string>>} map nama profil → PIN baru
  * @throws {CookieExpiredError} jika cookie tidak ada / expired
  */
+
+/**
+ * Ganti PIN untuk profil tertentu menggunakan cookie.
+ * Menggunakan iterasi per-profil dari https://www.netflix.com/account/profiles
+ */
 async function changePinsForProfilesCookie(email, password, targetProfiles) {
   const browser = await launchBrowser();
   const pinChanges = new Map();
 
   try {
-const page = await newCookiePage(browser, email, URL_PIN_SETTINGS);
-    await sleep(1500);
+    const startUrl = "https://www.netflix.com/account/profiles";
+    const page = await newCookiePage(browser, email, startUrl);
+    await sleep(2000);
 
-    // Sanity check: pastikan masih di halaman PIN settings, bukan ke-redirect
-    if (!page.url().includes("/settings/migration")) {
-      console.warn(
-        `  [pin-cookie] ⚠ Redirect terdeteksi: diharapkan /settings/migration, tapi berada di ${page.url()}`,
-      );
-      console.log("  [pin-cookie] Coba navigate ulang langsung...");
-      await page.goto(URL_PIN_SETTINGS, {
-        waitUntil: "domcontentloaded",
-        timeout: TIMEOUT_NAV,
-      });
-      await sleep(2000);
+    const targets = targetProfiles.map((t) => t.trim().toLowerCase());
 
-      if (!page.url().includes("/settings/migration")) {
-        // Masih redirect setelah dicoba ulang — screenshot untuk diagnosis
-        const fs = require("fs");
-        const dir = process.env.DEBUG_SHOT_DIR ?? "/tmp/nfdebug";
-        try { fs.mkdirSync(dir, { recursive: true }); } catch {}
-        const shotPath = `${dir}/pin_redirect_${email.split("@")[0]}_${Date.now()}.png`;
-        await page.screenshot({ path: shotPath, fullPage: true }).catch(() => {});
-        console.error(
-          `  [pin-cookie] ✗ Tetap ke-redirect ke ${page.url()} setelah retry. ` +
-          `Screenshot: ${shotPath}. Kemungkinan akun ini tidak punya Kontrol Orang Tua aktif ` +
-          `di /settings/migration, atau strukturnya beda.`,
-        );
-        throw new Error(
-          `Redirect tidak terduga untuk ${email}: diharapkan /settings/migration, dapat ${page.url()}`,
-        );
-      }
-    }
+    for (const target of targets) {
+      console.log(`\n  [pin-cookie] ➔ Memproses profil target: "${target}"`);
 
-    // Form Kontrol Orang Tua (muncul jika parent control aktif)
-    const pwRestrict = page
-      .locator('[data-uia="input-account-content-restrictions"]')
-      .first();
-    if (await pwRestrict.isVisible({ timeout: 5000 }).catch(() => false)) {
-      console.log("  [pin-cookie] Isi password Kontrol Orang Tua...");
-      await pwRestrict.fill(password);
-      await sleep(500);
-      await page.locator('[data-uia="btn-account-pin-submit"]').click();
-
-      // Tunggu network selesai dulu (Netflix sering ada redirect internal)
-      await page
-        .waitForLoadState("networkidle", { timeout: 10_000 })
-        .catch(() => {});
-      await sleep(500);
-
-      // Cek apakah Netflix menolak password ("Sandi salah.")
-      const pwError = page.locator('[data-uia="input-message-error"]');
-      const hasPwError = await pwError
-        .isVisible({ timeout: 3000 })
-        .catch(() => false);
-      if (hasPwError) {
-        const errText = await pwError.innerText().catch(() => "Sandi salah.");
-        console.warn(`  [pin-cookie] ✗ Password ditolak: "${errText.trim()}"`);
-        throw new WrongPasswordError(email);
-      }
-
-      // Tunggu profil muncul
-      const loaded = await page
-        .waitForFunction(
-          () => {
-            // Cek berbagai kemungkinan selector yang Netflix pakai
-            return (
-              document.querySelectorAll(".parental-control-profile").length >
-                0 ||
-              document.querySelectorAll('[data-uia^="pin-number-"]').length >
-                0 ||
-              document.querySelectorAll('[class*="profile-hub"]').length > 0 ||
-              document.querySelectorAll('[class*="parental"]').length > 0
-            );
-          },
-          { timeout: 30_000, polling: 1000 },
-        )
-        .catch(() => null);
-
-      if (!loaded) {
-        // Screenshot untuk debug
-        const fs = require("fs");
-        const dir = process.env.DEBUG_SHOT_DIR ?? "/tmp/nfdebug";
-        try {
-          fs.mkdirSync(dir, { recursive: true });
-        } catch {}
-        await page
-          .screenshot({
-            path: `${dir}/pin_parental_fail_${Date.now()}.png`,
-            fullPage: true,
-          })
-          .catch(() => {});
-        console.warn(
-          "  [pin-cookie] Profil tidak muncul setelah submit password.",
-        );
-        console.warn(`  [pin-cookie] URL saat ini: ${page.url()}`);
-        // Coba navigate ulang ke halaman yang sama
-        console.log("  [pin-cookie] Coba navigate ulang...");
-        await page.goto(URL_PIN_SETTINGS, {
+      // 1. Pastikan selalu mulai dari halaman daftar profil di setiap iterasi
+      if (!page.url().includes("/account/profiles")) {
+        await page.goto(startUrl, {
           waitUntil: "domcontentloaded",
           timeout: TIMEOUT_NAV,
         });
         await sleep(2000);
       }
 
-      await sleep(800);
-    }
+      // Cari tombol profil yang namanya persis dengan target
+      const profileButtons = page.locator(
+        'button[data-uia^="menu-card+account-profiles-page+profiles-menu-card+"]',
+      );
+      const count = await profileButtons.count();
+      let targetBtn = null;
 
-    // Baca semua profil + PIN lama
-    const profiles = await page.evaluate(() =>
-      Array.from(document.querySelectorAll(".parental-control-profile")).map(
-        (li) => {
-          const name = li.querySelector("h3")?.textContent?.trim() ?? "";
-          const pins = Array.from(
-            li.querySelectorAll('[data-uia^="pin-number-"]'),
-          )
-            .sort(
-              (a, b) =>
-                +a.getAttribute("data-uia").slice(-1) -
-                +b.getAttribute("data-uia").slice(-1),
-            )
-            .map((inp) => inp.value ?? "");
-          return { name, oldPin: pins.join("") };
-        },
-      ),
-    );
+      for (let i = 0; i < count; i++) {
+        const btn = profileButtons.nth(i);
+        const text = (await btn.textContent()) || "";
 
-    console.log(
-      `  [pin-cookie] Profil: ${profiles.map((p) => `${p.name}(${p.oldPin})`).join(", ")}`,
-    );
+        // Bersihkan teks Netflix dan target: jadikan huruf kecil, ubah spasi ganda jadi spasi tunggal, dan hilangkan spasi ujung
+        const cleanText = text.toLowerCase().replace(/\s+/g, " ").trim();
+        const cleanTarget = target.toLowerCase().replace(/\s+/g, " ").trim();
 
-    const targets = targetProfiles.map((t) => t.trim().toLowerCase());
+        // Gunakan .includes() untuk mengabaikan teks tambahan tersembunyi dari Netflix (seperti "Now Watching")
+        if (cleanText.includes(cleanTarget)) {
+          targetBtn = btn;
+          break;
+        }
+      }
 
-    function isExactProfileMatch(profileName, target) {
-      const escaped = target.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-      const re = new RegExp(`\\b${escaped}\\b`, "i");
-      return re.test(profileName);
-    }
+      if (!targetBtn) {
+        console.warn(
+          `  [pin-cookie] ⚠ Profil "${target}" tidak ditemukan di halaman ini.`,
+        );
+        continue;
+      }
 
-    for (const prof of profiles) {
-      if (!targets.some((t) => isExactProfileMatch(prof.name, t))) continue;
+      // 2. Klik profil (Masuk ke halaman Manage profile and preferences)
+      console.log(`  [pin-cookie] Klik profil "${target}"...`);
+      await targetBtn.click();
+      await page.waitForLoadState("domcontentloaded");
+      await sleep(1500);
 
-      const newPin = generateNewPin(prof.oldPin);
-      console.log(`  [pin-cookie] "${prof.name}": ${prof.oldPin} → ${newPin}`);
+      // 3. Klik tombol Profile Lock / Kunci Profil
+      const profileLockBtn = page.locator(
+        '[data-uia="menu-card+profile-lock"]',
+      );
+      if (
+        !(await profileLockBtn.isVisible({ timeout: 5000 }).catch(() => false))
+      ) {
+        console.warn(
+          `  [pin-cookie] ⚠ Tombol Profile Lock tidak ditemukan untuk "${target}".`,
+        );
+        continue;
+      }
+      console.log(`  [pin-cookie] Masuk ke pengaturan Profile Lock...`);
+      await profileLockBtn.click();
+      await page.waitForLoadState("domcontentloaded");
+      await sleep(1500);
 
-      await page.evaluate(
-        ({ profileName, newPin }) => {
-          const escaped = profileName.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-          const re = new RegExp(`\\b${escaped}\\b`, "i");
+      // 4. Klik Edit PIN (Jika PIN sudah aktif sebelumnya)
+      const editPinBtn = page.locator(
+        '[data-uia="profile-lock-page+edit-button"]',
+      );
+      if (await editPinBtn.isVisible({ timeout: 2000 }).catch(() => false)) {
+        console.log(`  [pin-cookie] Klik tombol Edit PIN...`);
+        await editPinBtn.click();
+        await sleep(1500);
+      }
 
-          for (const li of document.querySelectorAll(
-            ".parental-control-profile",
-          )) {
-            const h3 = li.querySelector("h3");
-            if (!h3?.textContent || !re.test(h3.textContent)) continue;
-            const inputs = Array.from(
-              li.querySelectorAll('[data-uia^="pin-number-"]'),
-            ).sort(
-              (a, b) =>
-                +a.getAttribute("data-uia").slice(-1) -
-                +b.getAttribute("data-uia").slice(-1),
-            );
-            newPin.split("").forEach((d, i) => {
-              if (!inputs[i]) return;
-              const setter = Object.getOwnPropertyDescriptor(
-                HTMLInputElement.prototype,
-                "value",
-              ).set;
-              setter.call(inputs[i], d);
-              inputs[i].dispatchEvent(new Event("input", { bubbles: true }));
-              inputs[i].dispatchEvent(new Event("change", { bubbles: true }));
-            });
-            return;
-          }
-        },
-        { profileName: prof.name, newPin },
+      // 5. Cek Form MFA (Confirm Password / Email Code)
+      const confirmPwBtn = page.locator(
+        'button:has([data-uia="account-mfa-button-PASSWORD+label"])',
+      );
+      if (await confirmPwBtn.isVisible({ timeout: 3000 }).catch(() => false)) {
+        console.log(
+          `  [pin-cookie] MFA Terdeteksi, memilih Confirm Password...`,
+        );
+        await confirmPwBtn.click();
+        await sleep(1000);
+
+        // 6. Masukkan Password Akun
+        const pwInput = page.locator(
+          '[data-uia="collect-password-input-modal-entry"]',
+        );
+        const konfirmPwButtons = page.locator(
+        '[data-uia="collect-input-submit-cta"]',
+      );
+        console.log(`  [pin-cookie] Memasukkan password akun...`);
+        await pwInput.fill(password);
+        await sleep(500);
+
+        // Tekan Enter untuk submit modal password
+        await konfirmPwButtons.click();
+
+        // Tunggu hingga masuk ke input PIN atau muncul error password
+        await Promise.race([
+          page
+            .locator('[data-uia="profile-lock+pin-input"]')
+            .waitFor({ state: "visible", timeout: 10_000 }),
+          page
+            .locator('[data-uia="input-message-error"]')
+            .waitFor({ state: "visible", timeout: 10_000 }),
+        ]).catch(() => {});
+
+        const pwError = page.locator(
+          '[data-uia="input-message-error"], .ui-message-error',
+        );
+        if (await pwError.isVisible({ timeout: 1000 }).catch(() => false)) {
+          console.error(`  [pin-cookie] ✗ Password ditolak.`);
+          throw new WrongPasswordError(email);
+        }
+      }
+
+      // 7. Input PIN Baru (Format input tunggal)
+      const pinInput = page.locator('[data-uia="profile-lock+pin-input"]');
+      if (!(await pinInput.isVisible({ timeout: 5000 }).catch(() => false))) {
+        console.warn(
+          `  [pin-cookie] ⚠ Form input PIN gagal dimuat untuk "${target}".`,
+        );
+        continue;
+      }
+
+      // Ambil PIN lama untuk direkam sebelum membuat yang baru
+      const oldPin = (await pinInput.inputValue()) || "0000";
+      const newPin = generateNewPin(oldPin);
+
+      console.log(
+        `  [pin-cookie] "${target}" PIN lama: ${oldPin !== "0000" ? oldPin : "(kosong)"} ➔ PIN baru: ${newPin}`,
       );
 
-      await sleep(400);
-      pinChanges.set(prof.name, newPin);
-    }
+      // Bersihkan dan ketik PIN baru
+      await pinInput.fill("");
+      await pinInput.fill(newPin);
+      await sleep(500);
 
-    if (pinChanges.size > 0) {
-      console.log("  [pin-cookie] Klik Terapkan...");
-      await page.locator('[data-uia="profile-hub-migration-apply"]').click();
+      // Centang "Require PIN to add new profiles" jika muncul dan kamu butuh (Opsional)
+      // await page.locator('input[type="checkbox"]').check().catch(()=>{});
+
+      // 8. Simpan PIN
+      console.log("  [pin-cookie] Menyimpan PIN...");
+      const savePinBtn = page.locator(
+        '[data-uia="profile-lock-pin-entry-page+save-button"]',
+      );
+      await savePinBtn.click();
+
+      // Tunggu hingga loading selesai dan kembali ke halaman profile lock status
       await page
-        .waitForURL((url) => !url.toString().includes("/settings/migration"), {
+        .waitForURL((url) => !url.toString().includes("pin-entry"), {
           timeout: TIMEOUT_NAV,
         })
         .catch(() => {});
       await sleep(1500);
-      console.log(
-        `  [pin-cookie] Selesai! ${[...pinChanges.keys()].join(", ")}`,
-      );
 
-      // Dynamic Update: simpan cookie terbaru dari server
+      pinChanges.set(target, newPin);
+    }
+
+    // Dynamic Update: simpan cookie terbaru dari server setelah semua selesai
+    if (pinChanges.size > 0) {
+      console.log(
+        `\n  [pin-cookie] Selesai! Update PIN sukses untuk: ${[...pinChanges.keys()].join(", ")}`,
+      );
       const { refreshAndSaveCookies } = require("./kicker-cookie");
       await refreshAndSaveCookies(page.context(), email);
     } else {
-      console.log("  [pin-cookie] Tidak ada profil yang cocok.");
+      console.log("\n  [pin-cookie] Tidak ada profil yang berhasil diubah.");
     }
   } finally {
     await browser.close();
