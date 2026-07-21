@@ -448,7 +448,7 @@ async function kickDevicesByProfiles(page, profileNames) {
     }
   }
 
-  const MAX_ROUNDS = 100; 
+  const MAX_ROUNDS = 100;
   let hitRoundLimit = true;
 
   // Scan dari atas setiap round untuk menghindari bug pergeseran posisi DOM
@@ -456,7 +456,7 @@ async function kickDevicesByProfiles(page, profileNames) {
     // 1. Ambil state DOM paling segar (fresh)
     const cards = page.locator('li[data-uia^="device-list+"]');
     const count = await cards.count();
-    
+
     // Jika tidak ada card sama sekali, berarti list kosong / sudah habis
     if (count === 0) {
       hitRoundLimit = false;
@@ -475,23 +475,32 @@ async function kickDevicesByProfiles(page, profileNames) {
       }
 
       // Skip PERANGKAT SAAT INI (abaikan dan lanjut cek card di bawahnya)
-      const isCurrent = (await card.locator('[data-uia$="+current-device-badge+ANNOUNCE"]').count()) > 0;
+      const isCurrent =
+        (await card
+          .locator('[data-uia$="+current-device-badge+ANNOUNCE"]')
+          .count()) > 0;
       if (isCurrent) {
-        continue; 
+        continue;
       }
 
       // Expand card jika belum ada tombol Keluar
-      const keluarBtn = card.locator('button:has-text("Keluar"), button:has-text("Sign Out")').first();
-      let isExpanded = await keluarBtn.isVisible({ timeout: 500 }).catch(() => false);
-      
+      const keluarBtn = card
+        .locator('button:has-text("Keluar"), button:has-text("Sign Out")')
+        .first();
+      let isExpanded = await keluarBtn
+        .isVisible({ timeout: 500 })
+        .catch(() => false);
+
       if (!isExpanded) {
         const dropBtn = card.locator('[data-uia$="+dropdown-button"]').first();
         if (await dropBtn.isVisible({ timeout: 1500 }).catch(() => false)) {
           await dropBtn.click();
-          await sleep(1000); // Jeda sebentar agar animasi expand selesai
-          isExpanded = await keluarBtn.isVisible({ timeout: 1500 }).catch(() => false);
+          await sleep(1800); // Jeda sebentar agar animasi expand selesai
+          isExpanded = await keluarBtn
+            .isVisible({ timeout: 1500 })
+            .catch(() => false);
         }
-        
+
         // Jika tetap tidak bisa di-expand, skip ke card berikutnya
         if (!isExpanded) {
           continue;
@@ -503,21 +512,33 @@ async function kickDevicesByProfiles(page, profileNames) {
       const lowerText = cardText.toLowerCase();
 
       let profileText = null;
-      const lines = cardText.split("\n").map((l) => l.trim()).filter(Boolean);
+      const lines = cardText
+        .split("\n")
+        .map((l) => l.trim())
+        .filter(Boolean);
       const deviceName = lines[0] ?? "";
-      
+
       for (const line of lines) {
-        if (line.toLowerCase().includes("terakhir ditonton") || line.toLowerCase().includes("last watched")) {
+        if (
+          line.toLowerCase().includes("terakhir ditonton") ||
+          line.toLowerCase().includes("last watched")
+        ) {
           profileText = line;
           break;
         }
       }
 
-      if (profileText && (profileText.toLowerCase().includes("tidak ada aktivitas") || profileText.toLowerCase().includes("no activity"))) {
+      if (
+        profileText &&
+        (profileText.toLowerCase().includes("tidak ada aktivitas") ||
+          profileText.toLowerCase().includes("no activity"))
+      ) {
         profileText = null;
       }
 
-      const noActivity = lowerText.includes("tidak ada aktivitas") || lowerText.includes("no activity");
+      const noActivity =
+        lowerText.includes("tidak ada aktivitas") ||
+        lowerText.includes("no activity");
 
       const matchedTarget = targets.find((t) => {
         if (!profileText) return false;
@@ -532,21 +553,43 @@ async function kickDevicesByProfiles(page, profileNames) {
       }
 
       // 4. Proses Kick! (Target cocok atau device tidak ada aktivitas)
-      const keluarVisible = await keluarBtn.isVisible({ timeout: 2000 }).catch(() => false);
-      const display = profileText ?? (noActivity ? "tidak ada aktivitas" : "no profile");
+      const keluarVisible = await keluarBtn
+        .isVisible({ timeout: 2000 })
+        .catch(() => false);
+      const display =
+        profileText ?? (noActivity ? "tidak ada aktivitas" : "no profile");
 
       if (keluarVisible) {
-        await keluarBtn.click();
+        await keluarBtn.scrollIntoViewIfNeeded().catch(() => {});
+
+        try {
+          await keluarBtn.click({ timeout: 10000 });
+        } catch (clickErr) {
+          console.warn(
+            `  [kick] ⚠ Klik normal gagal (${clickErr.message.split("\n")[0]}), coba force click...`,
+          );
+          await debugShot(
+            page,
+            `click_blocked_${deviceName.replace(/\s+/g, "_")}`,
+          );
+          await keluarBtn.click({ force: true, timeout: 10000 });
+        }
 
         // Verifikasi: toast HARUS muncul
         const toastText = await waitForKickToastMatch(page, deviceName, 10000);
         if (toastText) {
           totalKicked++;
-          console.log(`  [kick] ✅ Dikick & terverifikasi: "${deviceName}" (profil: ${display})`);
+          console.log(
+            `  [kick] ✅ Dikick & terverifikasi: "${deviceName}" (profil: ${display})`,
+          );
 
           // 5. Tutup Toast (menangani bug penumpukan / menghalangi elemen)
-          const closeToastBtn = page.locator('button[aria-label="Tutup Toast"]').first();
-          if (await closeToastBtn.isVisible({ timeout: 3000 }).catch(() => false)) {
+          const closeToastBtn = page
+            .locator('button[aria-label="Tutup Toast"]')
+            .first();
+          if (
+            await closeToastBtn.isVisible({ timeout: 3000 }).catch(() => false)
+          ) {
             await closeToastBtn.click();
             console.log(`  [kick] ℹ️ Toast ditutup.`);
           }
@@ -554,19 +597,21 @@ async function kickDevicesByProfiles(page, profileNames) {
           // 6. JEDA PANJANG: Beri waktu agar card yang dikick menghilang & DOM bergeser rapi
           console.log(`  [kick] ⏳ Menunggu DOM stabil (4 detik)...`);
           await sleep(4000);
-
         } else {
-          console.warn(`  [kick] ⚠ MISS: "${deviceName}" (profil: ${display}) — toast tidak muncul!`);
+          console.warn(
+            `  [kick] ⚠ MISS: "${deviceName}" (profil: ${display}) — toast tidak muncul!`,
+          );
           await sleep(2000); // Tetap beri jeda jika terjadi miss
         }
-        
-        // BREAK: Karena DOM berubah (ada device yang terhapus), kita HENTIKAN scan ini 
+
+        // BREAK: Karena DOM berubah (ada device yang terhapus), kita HENTIKAN scan ini
         // dan biarkan loop 'round' mereset scan dari indeks 0 kembali.
         kickedInThisRound = true;
-        break; 
-
+        break;
       } else {
-        console.warn(`  [kick] ⚠ MISS: "${deviceName}" (profil: ${display}) — tombol Keluar tidak muncul!`);
+        console.warn(
+          `  [kick] ⚠ MISS: "${deviceName}" (profil: ${display}) — tombol Keluar tidak muncul!`,
+        );
       }
     }
 
@@ -580,7 +625,7 @@ async function kickDevicesByProfiles(page, profileNames) {
   if (hitRoundLimit) {
     console.warn(
       `  [kick] ⚠ Mencapai batas ${MAX_ROUNDS} putaran — mungkin masih ada device tersisa. ` +
-        `Pertimbangkan menjalankan ulang untuk akun ini.`
+        `Pertimbangkan menjalankan ulang untuk akun ini.`,
     );
   }
 
