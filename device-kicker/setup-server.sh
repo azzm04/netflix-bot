@@ -31,7 +31,7 @@ echo "=== [4/4] Buat file .env ==="
 if [ ! -f ".env" ]; then
   cat > .env << 'EOF'
 GOOGLE_CREDENTIALS_PATH=../credentials.json
-SPREADSHEET_NAME=netflix account jaeminies's
+SPREADSHEET_NAME=netflix account jaeminies
 SHEETS_TO_CHECK=HARIAN,MINGGUAN,BULANAN
 COL_EMAIL=0
 COL_PASSWORD=1

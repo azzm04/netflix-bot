@@ -36,7 +36,7 @@ npm install
 Edit file `.env`:
 
 ```env
-SPREADSHEET_NAME=netflix account jaeminies's  # nama spreadsheet kamu
+SPREADSHEET_NAME=netflix account jaeminies  # nama spreadsheet kamu
 SHEETS_TO_CHECK=HARIAN,MINGGUAN,BULANAN        # sheet mana yang dicek
 CRON_SCHEDULE=*/15 * * * *                     # cek setiap 15 menit
 HEADLESS=true                                  # false = lihat browser untuk debug

@@ -16,7 +16,7 @@ if not BOT_TOKEN:
 
 # Nama file credentials Google Service Account
 CREDENTIALS_FILE = "credentials.json"
-SPREADSHEET_NAME = netflix account jaeminies's
+SPREADSHEET_NAME = netflix account jaeminies
 INVEST_EMAIL_SHEET_MAP = {
     # Sheet rekapan_ena
     "cresser.gb@mahesh.co":           "rekapan_ena",
