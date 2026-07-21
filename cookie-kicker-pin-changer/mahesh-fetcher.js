@@ -60,13 +60,18 @@ function saveSession(str) {
   console.log(`[mahesh] Session tersimpan: ${SESSION_FILE}`);
 }
 
-// ── Client ────────────────────────────────────────────────
 function createClient(sessionStr = "") {
   if (!API_ID || !API_HASH) {
     throw new Error("MAHESH_API_ID dan MAHESH_API_HASH belum diset di .env");
   }
+  
   return new TelegramClient(new StringSession(sessionStr), API_ID, API_HASH, {
-    connectionRetries: 3,
+    connectionRetries: 5,
+    requestRetries: 5,
+    useWSS: true,        // Paksa koneksi mirip trafik web (HTTPS)
+    useIPV6: false,      // Matikan IPv6 (sering bermasalah di jaringan lokal Indo)
+    timeout: 60000,      // Perbesar timeout
+    autoReconnect: true
   });
 }
 

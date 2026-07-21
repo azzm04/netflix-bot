@@ -12,3 +12,4 @@ npm-debug.log*
 # Cookie sessions (JANGAN commit — berisi data autentikasi sensitif)
 device-kicker/cookies.json
 cookies.json
+mahesh.session
