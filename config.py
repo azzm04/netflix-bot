@@ -32,9 +32,10 @@ INVEST_EMAIL_SHEET_MAP = {
     "humpadhis@stayhome.li":          "rekapan_ena_2",
     "fitwhovex@fuwari.be":            "rekapan_ena_2",
     # Sheet rekapan_ena_rose (mulai 1 Juni 2026)
+    "ivot.u.nask.a@gmail.com":          "rekapan_UMI_rose",
+    "k.r.istel.anne1212@gmail.com":            "rekapan_UMI_rose",
     "ournapapt@stayhome.li":          "rekapan_UMI_rose",
-    "wagmug733@fuwari.be":            "rekapan_UMI_rose",
-    "pielidlid@stayhome.li":          "rekapan_UMI_rose",
+    "wagmug733@fuwari.be":          "rekapan_UMI_rose",
 
     "markbronston@ramaco.tech":          "rekapan_ena_5",
     "skmiller11@ramaco.tech":          "rekapan_ena_5",
