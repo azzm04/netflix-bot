@@ -5,6 +5,8 @@
 import os
 from dotenv import load_dotenv
 
+load_dotenv()
+
 BOT_TOKEN = os.getenv("BOT_TOKEN")
 ADMIN_ID = int(os.getenv("ADMIN_ID"))
 
@@ -16,7 +18,7 @@ if not BOT_TOKEN:
 
 # Nama file credentials Google Service Account
 CREDENTIALS_FILE = "credentials.json"
-SPREADSHEET_NAME = netflix account jaeminies
+SPREADSHEET_NAME = "netflix account jaeminies"
 INVEST_EMAIL_SHEET_MAP = {
     # Sheet rekapan_ena
     "cresser.gb@mahesh.co":           "rekapan_ena",
@@ -76,11 +78,8 @@ DATA_START_ROW = 2
 JAM_LOGOUT = "10:00"
 
 # ---- ID yang menerima notifikasi setiap order berhasil ----
-NOTIF_ORDER_IDS = [-5278264601, -1003766272919]
-
-# ---- User yang boleh pakai bot (whitelist) ----
-# Admin utama yang tidak bisa dihapus
-ADMIN_ID = 5728717900
+_notif_ids_raw = os.getenv("NOTIF_ORDER_IDS", "")
+NOTIF_ORDER_IDS = [int(x.strip()) for x in _notif_ids_raw.split(",") if x.strip()]
 
 # File untuk simpan daftar user yang diizinkan
 USERS_FILE = "allowed_users.json"
