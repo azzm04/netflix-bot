@@ -542,9 +542,11 @@ async function kickDevicesByProfiles(page, profileNames) {
 
       const matchedTarget = targets.find((t) => {
         if (!profileText) return false;
-        const escaped = t.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-        const re = new RegExp(`\\b${escaped}\\b`, "i");
-        return re.test(profileText);
+
+        // Ambil nama persis sebelum tanda "(" lalu bersihkan spasi
+        const nameOnCard = profileText.split("(")[0].trim().toLowerCase();
+
+        return nameOnCard === t.trim().toLowerCase();
       });
 
       // Filter: Jika ada profil tapi tidak cocok dengan target, skip
