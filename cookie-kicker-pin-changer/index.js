@@ -280,16 +280,32 @@ async function processExpiredAccounts() {
 
           // Update spreadsheet dengan PIN yang baru-baru ini di-return
           for (const account of group) {
+            const accNorm = account.profile.toLowerCase().replace(/\s+/g, " ").trim();
             let newPin = null;
+            let matchedKey = null;
+
+            // Prioritas 1: exact match
             for (const [profName, pin] of pinChanges.entries()) {
-              if (
-                account.profile
-                  .toLowerCase()
-                  .includes(profName.toLowerCase()) ||
-                profName.toLowerCase().includes(account.profile.toLowerCase())
-              ) {
+              const profNorm = profName.toLowerCase().replace(/\s+/g, " ").trim();
+              if (accNorm === profNorm) {
                 newPin = pin;
+                matchedKey = profName;
                 break;
+              }
+            }
+
+            // Prioritas 2: salah satu mengandung yang lain (guard: panjang minimal 3 char)
+            if (!newPin) {
+              for (const [profName, pin] of pinChanges.entries()) {
+                const profNorm = profName.toLowerCase().replace(/\s+/g, " ").trim();
+                if (
+                  profNorm.length >= 3 && accNorm.length >= 3 &&
+                  (accNorm.includes(profNorm) || profNorm.includes(accNorm))
+                ) {
+                  newPin = pin;
+                  matchedKey = profName;
+                  break;
+                }
               }
             }
 
@@ -306,11 +322,11 @@ async function processExpiredAccounts() {
                 account.rowIndex,
               );
               console.log(
-                `[cookie-server]   ✓ PIN "${account.profile}" → ${newPin}`,
+                `[cookie-server]   ✓ PIN "${account.profile}" (matched: "${matchedKey}") → ${newPin}`,
               );
             } else {
               console.warn(
-                `[cookie-server]   ⚠ PIN tidak ditemukan untuk "${account.profile}"`,
+                `[cookie-server]   ⚠ PIN tidak ditemukan untuk "${account.profile}" — spreadsheet TIDAK diupdate`,
               );
             }
           }

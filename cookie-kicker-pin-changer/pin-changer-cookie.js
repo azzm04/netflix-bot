@@ -26,9 +26,13 @@ class WrongPasswordError extends Error {
 // ── Generate PIN Baru ─────────────────────────────────────
 function generateNewPin(oldPin) {
   let pin;
+  let attempts = 0;
   do {
     pin = String(Math.floor(1000 + Math.random() * 9000));
-  } while (pin === oldPin);
+    attempts++;
+    // Setelah 100 percobaan, terima apapun (sangat tidak mungkin terjadi)
+    if (attempts > 100) break;
+  } while (pin === oldPin || /^(.)\1{3}$/.test(pin)); // Hindari juga 1111, 2222, dst.
   return pin;
 }
 
@@ -262,18 +266,24 @@ async function changePinsForProfilesCookie(email, password, targetProfiles) {
         continue;
       }
 
-      // Ambil PIN lama untuk direkam sebelum membuat yang baru
-      const oldPin = (await pinInput.inputValue()) || "0000";
-      const newPin = generateNewPin(oldPin);
+      // PIN lama tidak bisa dibaca (masked) — langsung generate PIN baru acak
+      const newPin = generateNewPin("????"); // "????" tidak akan pernah sama dengan 4-digit angka
+      console.log(`  [pin-cookie] "${target}" ➔ PIN baru: ${newPin}`);
 
-      console.log(
-        `  [pin-cookie] "${target}" PIN lama: ${oldPin !== "0000" ? oldPin : "(kosong)"} ➔ PIN baru: ${newPin}`,
-      );
-
-      // Bersihkan dan ketik PIN baru
+      // Bersihkan dan ketik PIN baru, lalu verifikasi nilai ter-set dengan benar
       await pinInput.fill("");
       await pinInput.fill(newPin);
-      await sleep(500);
+      await sleep(300);
+
+      // Triple-check: pastikan input benar-benar berisi newPin sebelum save
+      // Beberapa implementasi React mungkin butuh click+type alih-alih fill
+      const currentVal = await pinInput.inputValue().catch(() => "");
+      if (currentVal !== newPin) {
+        console.log(`  [pin-cookie] fill() tidak ter-set, coba click+selectAll+type...`);
+        await pinInput.click({ clickCount: 3 });
+        await pinInput.type(newPin, { delay: 80 });
+        await sleep(300);
+      }
 
       // Centang "Require PIN to add new profiles" jika muncul dan kamu butuh (Opsional)
       // await page.locator('input[type="checkbox"]').check().catch(()=>{});
@@ -285,14 +295,32 @@ async function changePinsForProfilesCookie(email, password, targetProfiles) {
       );
       await savePinBtn.click();
 
-      // Tunggu hingga loading selesai dan kembali ke halaman profile lock status
+      // Tunggu hingga URL berpindah keluar dari halaman pin-entry
       await page
         .waitForURL((url) => !url.toString().includes("pin-entry"), {
           timeout: TIMEOUT_NAV,
         })
         .catch(() => {});
-      await sleep(1500);
+      await sleep(1000);
 
+      // 9. Verifikasi: pastikan tidak ada error message (PIN tidak tersimpan)
+      const saveError = page.locator(
+        '[data-uia="input-message-error"], .ui-message-error, [data-uia="profile-lock-page+error"]',
+      );
+      if (await saveError.isVisible({ timeout: 2000 }).catch(() => false)) {
+        const errText = (await saveError.textContent().catch(() => "")) || "";
+        console.error(`  [pin-cookie] ✗ Gagal simpan PIN untuk "${target}": ${errText.trim()}`);
+        continue; // skip — jangan set pinChanges agar tidak tulis PIN salah ke sheet
+      }
+
+      // 10. Verifikasi: pastikan sudah kembali ke halaman profile lock (bukan masih di pin-entry)
+      const finalUrl = page.url();
+      if (finalUrl.includes("pin-entry")) {
+        console.error(`  [pin-cookie] ✗ Masih di halaman pin-entry setelah save untuk "${target}" — skip.`);
+        continue;
+      }
+
+      console.log(`  [pin-cookie] ✓ PIN "${target}" berhasil disimpan: ${newPin}`);
       pinChanges.set(target, newPin);
     }
 
