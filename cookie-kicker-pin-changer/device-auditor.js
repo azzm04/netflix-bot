@@ -23,6 +23,8 @@ const {
   checkForExtraVerification,
   refreshAndSaveCookies,
   waitForKickToastMatch,
+  extractProfileName,
+  profileNameMatches,
   CookieExpiredError,
 } = require("./kicker-cookie");
 const { sendTelegram } = require("./notify");
@@ -693,7 +695,6 @@ function decideAuditActions(snapshot, profileRows) {
       colGRaw,
       isEmptySlot,
     } = row;
-    const profileLower = profile.trim().toLowerCase();
 
     const kicked = [];
     const kept = [];
@@ -707,7 +708,7 @@ function decideAuditActions(snapshot, profileRows) {
 
       const intruders = snapshot.filter((d) => {
         if (d.isCurrent || !d.profileText) return false;
-        return d.profileText.toLowerCase().includes(profileLower);
+        return profileNameMatches(extractProfileName(d.profileText), profile);
       });
 
       for (const d of intruders) {
@@ -739,10 +740,7 @@ function decideAuditActions(snapshot, profileRows) {
     // Device yang login di profil ini (cocokkan nama sebelum tanda kurung)
     const profileDevices = snapshot.filter((d) => {
       if (d.isCurrent || d.noActivity || !d.profileText) return false;
-
-      const nameOnCard = d.profileText.split("(")[0].trim().toLowerCase();
-
-      return nameOnCard === profileLower;
+      return profileNameMatches(extractProfileName(d.profileText), profile);
     });
 
     // ── Case 1: Kolom G ada isinya → matching-based ──────

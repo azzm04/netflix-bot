@@ -45,6 +45,108 @@ class CookieExpiredError extends Error {
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
+// ── Ekstrak nama profil dari teks card Netflix ────────────
+/**
+ * Netflix menampilkan info profil di card device dalam format:
+ *   "3 - baca snk! (terakhir ditonton)"
+ *   "1 - LATTE☕ (terakhir ditonton)"
+ *   "2 - BAI LU🐰 (terakhir ditonton)"
+ *   "1 - DOOR 1 (terakhir ditonton)"
+ *   "1 - snk baca!! (terakhir ditonton)"
+ *
+ * Fungsi ini mengekstrak HANYA nama profil bersih tanpa prefix angka,
+ * tanpa teks "(terakhir ditonton)", dan tanpa spasi berlebih.
+ *
+ * Output contoh:
+ *   "baca snk!"  |  "latte☕"  |  "bai lu🐰"  |  "door 1"
+ *
+ * @param {string} profileLine - satu baris teks dari card yang mengandung "terakhir ditonton"
+ * @returns {string} nama profil bersih (lowercase), atau "" jika gagal parse
+ */
+function extractProfileName(profileLine) {
+  if (!profileLine) return "";
+
+  // 1. Ambil bagian sebelum "(" → buang "(terakhir ditonton ...)"
+  const beforeParen = profileLine.split("(")[0];
+
+  // 2. Strip prefix angka + dash: "3 - " atau "12 - "
+  //    Hati-hati: jangan strip angka yang bagian dari nama seperti "DOOR 1", "HOME2", "AAA1"
+  //    Format prefix Netflix SELALU: <angka> <spasi> <dash> <spasi> <nama>
+  const stripped = beforeParen.replace(/^\d+\s+-\s+/, "");
+
+  // 3. Normalize: lowercase, trim, collapse multiple whitespace
+  return stripped.toLowerCase().replace(/\s+/g, " ").trim();
+}
+
+/**
+ * Cek apakah nama profil dari card Netflix cocok dengan nama target dari spreadsheet.
+ * Aman untuk semua jenis nama: emoji, tanda baca, angka, spasi, karakter khusus.
+ *
+ * Strategi matching (dari paling ketat ke paling longgar):
+ *  1. Exact match setelah normalize
+ *  2. Target mengandung nameOnCard (guard: min 3 char) — antisipasi Netflix tambah spasi
+ *  3. nameOnCard mengandung target (guard: min 3 char) — antisipasi nama profil dipotong
+ *
+ * TIDAK pakai substring match yang terlalu bebas untuk menghindari false positive
+ * pada nama mirip: "DOOR 1" vs "DOOR 2", "HOME1" vs "HOME2", "PAWPAW 1" vs "PAWPAW 2"
+ *
+ * @param {string} nameOnCard  - hasil extractProfileName() — sudah lowercase
+ * @param {string} targetName  - nama profil dari spreadsheet (kolom C)
+ * @returns {boolean}
+ */
+function profileNameMatches(nameOnCard, targetName) {
+  if (!nameOnCard || !targetName) return false;
+
+  // Normalisasi: lowercase + collapse whitespace, TAPI pertahankan emoji/simbol
+  // agar "🐼 Panda" dan "PANDA" tidak salah cocok
+  const norm = (s) => s.toLowerCase().replace(/\s+/g, " ").trim();
+
+  // Normalisasi tanpa emoji — untuk fallback exact match kalau target di spreadsheet
+  // tidak pakai emoji tapi card Netflix punya (atau sebaliknya)
+  const normNoEmoji = (s) =>
+    s
+      .toLowerCase()
+      .replace(/[\p{Emoji_Presentation}\p{Extended_Pictographic}]/gu, "")
+      .replace(/\s+/g, " ")
+      .trim();
+
+  const a = norm(nameOnCard);   // dari card Netflix (dengan emoji)
+  const b = norm(targetName);   // dari spreadsheet (dengan emoji)
+
+  // 1. Exact match dengan emoji
+  if (a === b) return true;
+
+  // 2. Exact match tanpa emoji (menangani kasus target di sheet tidak pakai emoji
+  //    tapi Netflix menampilkan dengan emoji, atau sebaliknya)
+  //    Guard: hasil strip emoji tidak boleh kosong dan tidak boleh terlalu berbeda panjangnya
+  //    (hindari "🐼 Panda" strip→"panda" vs "panda" strip→"panda" — padahal beda profil)
+  const aNoEmoji = normNoEmoji(nameOnCard);
+  const bNoEmoji = normNoEmoji(targetName);
+  // Hanya allow emoji-stripped match jika SALAH SATU sisi punya emoji (bukan keduanya tidak punya)
+  const aHasEmoji = a !== aNoEmoji;
+  const bHasEmoji = b !== bNoEmoji;
+  if ((aHasEmoji || bHasEmoji) && aNoEmoji === bNoEmoji && aNoEmoji.length > 0) return true;
+
+  // 3. Substring match dengan word-boundary HANYA jika:
+  //    - kedua string cukup panjang (min 4 char setelah normalize)
+  //    - string yang lebih pendek TIDAK diakhiri angka (menghindari DOOR1 vs DOOR2)
+  //    - match terjadi di word boundary (menghindari RORA vs AURORA, PUFF vs PUFFY, DORA vs DORALIC)
+  if (a.length >= 4 && b.length >= 4) {
+    const shorterEndsWithDigit = (s) => /\d$/.test(s);
+    const isWordBoundaryMatch = (longer, shorter) => {
+      const idx = longer.indexOf(shorter);
+      if (idx === -1) return false;
+      const before = idx === 0 ? " " : longer[idx - 1];
+      const after = idx + shorter.length >= longer.length ? " " : longer[idx + shorter.length];
+      return before === " " && after === " ";
+    };
+    if (!shorterEndsWithDigit(b) && isWordBoundaryMatch(a, b)) return true;
+    if (!shorterEndsWithDigit(a) && isWordBoundaryMatch(b, a)) return true;
+  }
+
+  return false;
+}
+
 // ── Debug Screenshot ──────────────────────────────────────
 function debugShot(page, name) {
   const dir = process.env.DEBUG_SHOT_DIR ?? "/tmp/nfdebug";
@@ -540,14 +642,17 @@ async function kickDevicesByProfiles(page, profileNames) {
         lowerText.includes("tidak ada aktivitas") ||
         lowerText.includes("no activity");
 
-      const matchedTarget = targets.find((t) => {
-        if (!profileText) return false;
+      const nameOnCard = extractProfileName(profileText ?? "");
+      const matchedTarget = profileText
+        ? targets.find((t) => profileNameMatches(nameOnCard, t))
+        : undefined;
 
-        // Ambil nama persis sebelum tanda "(" lalu bersihkan spasi
-        const nameOnCard = profileText.split("(")[0].trim().toLowerCase();
-
-        return nameOnCard === t.trim().toLowerCase();
-      });
+      // Debug: log hasil matching untuk memudahkan diagnosis
+      if (profileText) {
+        console.log(
+          `  [kick] 🔍 Card "${deviceName}" → profil: "${nameOnCard}" | targets: [${targets.join(", ")}] | match: ${matchedTarget ?? "❌ tidak ada"}`,
+        );
+      }
 
       // Filter: Jika ada profil tapi tidak cocok dengan target, skip
       if (profileText && !matchedTarget) {
@@ -732,4 +837,6 @@ module.exports = {
   checkForExtraVerification,
   refreshAndSaveCookies,
   waitForKickToastMatch,
+  extractProfileName,
+  profileNameMatches,
 };
