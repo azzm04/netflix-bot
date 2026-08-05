@@ -1,6 +1,4 @@
 /**
- * sheets.js — Baca data expired dari Google Sheets
- *
  * ─── Cara Mendeteksi Akun MAHESH / ROSE (SKIP) ──────────────────────────────
  *
  * Di spreadsheet, akun dikelompokkan dalam "blok" yang diawali baris header.
@@ -412,8 +410,109 @@ async function updatePin(spreadsheetId, sheetName, rowIndex, newPin) {
   console.log(`  [sheets] updatePin: ${sheetName} baris ${rowIndex} → PIN ${newPin}`);
 }
 
+/**
+ * Baca SEMUA profil untuk satu email dari spreadsheet (aktif + slot kosong).
+ * Digunakan oleh kicker-cookie.js untuk validasi device saat kick.
+ *
+ * Return format kompatibel dengan device-auditor.js:
+ * {
+ *   profile: string,
+ *   logoutText: string,
+ *   allowedDeviceCount: number,   // 1 atau 2 (sempriv)
+ *   allowedDevices: string[],     // dari kolom G
+ *   colGRaw: string,
+ *   isEmptySlot: boolean,         // kolom E kosong = slot tersedia
+ *   isMahesh: boolean,
+ *   blockLabel: string,
+ * }
+ *
+ * @param {string} targetEmail
+ * @returns {Promise<Array>}
+ */
+async function getAllProfilesForEmail(targetEmail) {
+  const sheets = await getSheets();
+  const spreadsheetId = await findSpreadsheetId();
+
+  const COL_DEVICE = COL_LOGOUT + 2; // G
+
+  const isSemiPrivate = (text) => {
+    if (!text) return false;
+    const l = text.toLowerCase().replace(/[\s_-]/g, "");
+    return l.includes("sempriv") || l.includes("semiprivate") || l.includes("semiprib");
+  };
+
+  const parseAllowedDevices = (colG) => {
+    if (!colG || !colG.trim()) return [];
+    return colG.split(/\bdan\b|[,&]/i).map((s) => s.trim().toLowerCase()).filter(Boolean);
+  };
+
+  const sheetNames = (process.env.SHEETS_TO_CHECK ?? "HARIAN,MINGGUAN,BULANAN")
+    .split(",").map((s) => s.trim()).filter(Boolean);
+
+  const results = [];
+  const seen = new Set(); // deduplicate email+profile
+
+  for (const sheetName of sheetNames) {
+    let rows;
+    try {
+      const res = await sheets.spreadsheets.values.get({ spreadsheetId, range: sheetName });
+      rows = res.data.values ?? [];
+    } catch {
+      continue;
+    }
+
+    let currentBlockLabel = "";
+    let currentBlockIsMahesh = false;
+
+    for (let i = 0; i < rows.length; i++) {
+      const row = rows[i];
+      const colA = row[COL_EMAIL]?.trim() ?? "";
+
+      // Header blok
+      if (!colA.includes("@")) {
+        const fullText = row.join(" ").toUpperCase();
+        if (fullText.includes("MAHESH")) { currentBlockLabel = "MAHESH"; currentBlockIsMahesh = true; }
+        else if (fullText.includes("ROSE")) { currentBlockLabel = "ROSE"; currentBlockIsMahesh = false; }
+        else if (row.some((c) => c && c.trim().length > 2)) { currentBlockLabel = ""; currentBlockIsMahesh = false; }
+        continue;
+      }
+
+      if (colA.toLowerCase() === "email") continue;
+      if (colA.toLowerCase() !== targetEmail.toLowerCase()) continue;
+
+      const profile    = row[COL_PROFILE]?.trim() ?? "";
+      const logoutText = row[COL_LOGOUT]?.trim()  ?? "";
+      const colGRaw    = row[COL_DEVICE]?.trim()  ?? "";
+
+      // Slot kosong = kolom E kosong atau bertuliskan EXPIRED
+      const isEmptySlot = !logoutText || logoutText.toUpperCase() === "EXPIRED";
+
+      // Skip baris tanpa profil sama sekali
+      if (!profile) continue;
+
+      const key = `${colA.toLowerCase()}||${profile.toLowerCase()}`;
+      if (seen.has(key)) continue;
+      seen.add(key);
+
+      results.push({
+        profile,
+        logoutText: isEmptySlot ? "" : logoutText,
+        allowedDeviceCount: isEmptySlot ? 0 : (isSemiPrivate(logoutText) ? 2 : 1),
+        allowedDevices: isEmptySlot ? [] : parseAllowedDevices(colGRaw),
+        colGRaw: isEmptySlot ? "" : colGRaw,
+        isEmptySlot,
+        isMahesh: currentBlockIsMahesh,
+        blockLabel: currentBlockLabel,
+      });
+    }
+  }
+
+  return results;
+}
+
 module.exports = {
   getExpiredAccounts,
+  getAllProfilesForEmail,
   markAsKicked,
   updatePin,
   findSpreadsheetId,

@@ -1,12 +1,5 @@
 "use strict";
 
-/**
- * index.js — Cookie Kicker + PIN Changer (Server Mode)
- *
- * - HANYA pakai cookie injection (tidak ada fallback ke login biasa)
- * - Jika CookieExpiredError → kirim notif Telegram + skip akun
- * - Lock agar tidak ada dua proses berjalan bersamaan
- */
 
 require("dotenv").config();
 const cron = require("node-cron");

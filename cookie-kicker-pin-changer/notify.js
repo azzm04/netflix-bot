@@ -1,7 +1,5 @@
-/**
- * notify.js — Kirim notifikasi ke Telegram langsung dari Node.js
- * Menggunakan Telegram Bot API via HTTPS request (tanpa library tambahan)
- */
+// Menggunakan Telegram Bot API via HTTPS request (tanpa library tambahan)
+
 
 "use strict";
 
@@ -15,11 +13,6 @@ if (!BOT_TOKEN || !ADMIN_ID) {
   console.warn("[notify] BOT_TOKEN atau ADMIN_ID tidak diset di .env — notifikasi dinonaktifkan.");
 }
 
-/**
- * Kirim pesan Telegram ke ADMIN_ID.
- * @param {string} text  - pesan dalam format Markdown
- * @returns {Promise<void>}
- */
 async function sendTelegram(text) {
   if (!BOT_TOKEN || !ADMIN_ID) return;
 
@@ -55,19 +48,6 @@ async function sendTelegram(text) {
   });
 }
 
-/**
- * Notifikasi hasil kick device (akun MEET / normal).
- *
- * @param {{
- *   email: string,
- *   profiles: string[],
- *   kicked: number,
- *   sheetUpdated: boolean,
- *   elapsed: number,
- *   blockLabel: string,
- *   rows: Array<{profile: string, sheetName: string, rowIndex: number, logoutText: string}>
- * }} info
- */
 async function notifyKickDone(info) {
   const { email, profiles, kicked, sheetUpdated, elapsed, blockLabel, rows } = info;
 
@@ -90,18 +70,6 @@ async function notifyKickDone(info) {
   await sendTelegram(msg);
 }
 
-/**
- * Notifikasi hasil ganti PIN (akun MAHESH/ROSE).
- *
- * @param {{
- *   email: string,
- *   blockLabel: string,
- *   pinChanges: Map<string, string>,   // profileName → newPin
- *   sheetUpdated: boolean,
- *   elapsed: number,
- *   rows: Array<{profile: string, sheetName: string, rowIndex: number}>
- * }} info
- */
 async function notifyPinChanged(info) {
   const { email, blockLabel, pinChanges, sheetUpdated, elapsed, rows } = info;
 
@@ -135,9 +103,7 @@ async function notifyPinChanged(info) {
   await sendTelegram(msg);
 }
 
-/**
- * Notifikasi error saat proses.
- */
+// Notifikasi error saat proses.
 async function notifyError(email, profileNames, errorMessage) {
   const msg =
     `❌ *Error Saat Proses Akun*\n\n` +
@@ -148,9 +114,7 @@ async function notifyError(email, profileNames, errorMessage) {
   await sendTelegram(msg);
 }
 
-/**
- * Notifikasi ringkasan akhir setelah semua akun selesai diproses.
- */
+// Notifikasi ringkasan akhir setelah semua akun selesai diproses.
 async function notifySummary({ totalKick, totalPin, totalFailed, elapsed }) {
   if (totalKick === 0 && totalPin === 0 && totalFailed === 0) return;
 

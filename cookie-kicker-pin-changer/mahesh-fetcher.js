@@ -1,13 +1,6 @@
 /**
- * mahesh-fetcher.js — Fetch kode Netflix dari @Maheshshoppiebot di Telegram
- *
  * SETUP AWAL (sekali saja):
  *   node mahesh-fetcher.js --setup
- *
- * TEST:
- *   node mahesh-fetcher.js "jack01@maheshpro.com" signin
- *   node mahesh-fetcher.js "jack01@maheshpro.com" signin6
- *
  * Tipe kode → label tombol bot:
  *   signin    → "Sign-in Code"
  *   signin6   → "Verification code after login"

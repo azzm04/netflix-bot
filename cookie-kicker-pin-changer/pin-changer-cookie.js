@@ -113,21 +113,6 @@ async function newCookiePage(browser, email, targetUrl) {
 }
 
 // ── Ganti PIN ─────────────────────────────────────────────
-
-/**
- * Ganti PIN untuk profil tertentu menggunakan cookie.
- *
- * @param {string}   email
- * @param {string}   password      - password akun (untuk form Kontrol Orang Tua jika diminta)
- * @param {string[]} targetProfiles - nama profil yang PIN-nya mau diganti
- * @returns {Promise<Map<string, string>>} map nama profil → PIN baru
- * @throws {CookieExpiredError} jika cookie tidak ada / expired
- */
-
-/**
- * Ganti PIN untuk profil tertentu menggunakan cookie.
- * Menggunakan iterasi per-profil dari https://www.netflix.com/account/profiles
- */
 async function changePinsForProfilesCookie(email, password, targetProfiles) {
   const browser = await launchBrowser();
   const pinChanges = new Map();

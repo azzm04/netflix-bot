@@ -46,10 +46,6 @@ const COL_PHONE = COL_LOGOUT + 1; // F
 const COL_DEVICE = COL_LOGOUT + 2; // G
 
 // ── Deteksi tipe slot ─────────────────────────────────────
-/**
- * @param {string} logoutText - isi kolom E, contoh: "21 Agustus (sempriv)"
- * @returns {boolean}
- */
 function isSemiPrivate(logoutText) {
   if (!logoutText) return false;
   const lower = logoutText.toLowerCase().replace(/[\s_-]/g, "");
@@ -61,20 +57,9 @@ function isSemiPrivate(logoutText) {
   );
 }
 
-/**
- * Jumlah device yang diizinkan berdasarkan tipe slot.
- * @param {string} logoutText
- * @returns {number} 1 atau 2
- */
 function allowedDeviceCount(logoutText) {
   return isSemiPrivate(logoutText) ? 2 : 1;
 }
-
-// ── Parse nama device yang diizinkan dari kolom G ─────────
-/**
- * @param {string} colG
- * @returns {string[]} array nama device (lowercase, sudah di-trim)
- */
 function parseAllowedDevices(colG) {
   if (!colG || colG.trim() === "") return [];
   // Split by "dan" (word boundary) atau koma
@@ -222,19 +207,6 @@ function deviceMatchesAllowed(netflixDeviceName, allowedDevices) {
 }
 
 // ── Baca akun AKTIF dari spreadsheet ─────────────────────
-/**
- * @returns {Promise<Array<{
- *   sheetName: string,
- *   rowIndex: number,
- *   email: string,
- *   profile: string,
- *   logoutText: string,
- *   allowedDeviceCount: number,
- *   allowedDevices: string[],
- *   blockLabel: string,
- *   isMahesh: boolean,
- * }>>}
- */
 async function getActiveAccounts() {
   const credPath = path.resolve(__dirname, process.env.GOOGLE_CREDENTIALS_PATH);
   const auth = new google.auth.GoogleAuth({
@@ -448,16 +420,6 @@ async function newCookiePage(browser, email, targetUrl) {
 }
 
 // ── Scan semua device SEKALI — expand semua card sekaligus ──
-/**
- * @param {import('playwright').Page} page
- * @returns {Promise<Array<{
- *   index: number,
- *   deviceName: string,
- *   profileText: string|null,
- *   noActivity: boolean,
- *   isCurrent: boolean,
- * }>>}
- */
 async function scanAllDevicesOnce(page) {
   await sleep(1500);
 
@@ -554,11 +516,6 @@ async function scanAllDevicesOnce(page) {
 }
 
 // ── Kick satu device berdasarkan index card ───────────────
-/**
- * @param {import('playwright').Page} page
- * @param {string} deviceName - nama device (untuk verifikasi toast)
- * @returns {Promise<boolean>} true jika berhasil dikick
- */
 async function kickOneDevice(page, deviceName) {
   // Re-fetch semua cards (DOM mungkin bergeser setelah scan)
   const MAX_ROUNDS = 50;
@@ -661,22 +618,6 @@ async function kickOneDevice(page, deviceName) {
   return false;
 }
 
-/**
- * Tentukan keputusan kick untuk semua profil dari snapshot
- * @param {Array} snapshot         - hasil dari scanAllDevicesOnce()
- * @param {Array} profileRows      - semua profil untuk akun ini
- * @returns {{
- *   toKick: string[],             - device name yang harus dikick
- *   perProfile: Array<{
- *     profile: string,
- *     logoutText: string,
- *     kicked: string[],
- *     kept: string[],
- *     violations: string[],
- *   }>,
- *   accountNoActivityDevices: string[] - device no-activity di level akun
- * }}
- */
 function decideAuditActions(snapshot, profileRows) {
   const claimedDevices = new Set();
   const toKick = [];
@@ -853,9 +794,6 @@ function decideAuditActions(snapshot, profileRows) {
 }
 
 // ── Audit satu akun (satu email, semua profil sekaligus) ──
-/**
- * @param {Array} profileRows - semua baris dari email yang sama
- */
 async function auditAccount(profileRows) {
   const email = profileRows[0].email;
   const isMahesh = profileRows[0].isMahesh;
@@ -965,13 +903,6 @@ async function auditAccount(profileRows) {
   return result;
 }
 
-// ── Helper: kirim teks panjang dalam beberapa chunk ──────
-/**
- * Telegram membatasi pesan maksimal 4096 karakter.
- * Fungsi ini memecah teks per baris agar tidak putus di tengah kalimat.
- * @param {string} text
- * @param {string} [header] - header yang diulang di setiap chunk
- */
 async function sendChunked(text, header = "") {
   const MAX = 3800; // sedikit di bawah 4096 untuk safety margin
   const lines = text.split("\n");

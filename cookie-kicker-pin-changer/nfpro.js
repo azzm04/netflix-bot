@@ -1,11 +1,4 @@
 /**
- * nfpro.js — Fetch kode Netflix secara otomatis dari nfpro.store/cecilionss
- *
- * Flow:
- *   POST /cecilionss  { check_mode: "recheck", choice: CHOICE, email: EMAIL }
- *   → redirect ke GET /cecilionss/result
- *   → parse kode dari: [data-nf-otp] atau .otp-value--hero
- *
  * Choice mapping:
  *   "signin"   → 4-Digit Code (login Netflix via kode email)
  *   "signin6"  → 6-Digit Code (verifikasi identitas di manageaccountaccess)
@@ -23,13 +16,6 @@ const BASE_URL  = "https://nfpro.store/cecilionss";
 const RESULT_URL = "https://nfpro.store/cecilionss/result";
 
 // ─── Helper: HTTP request sederhana (tanpa library eksternal) ──
-/**
- * Kirim HTTP request, kembalikan { status, headers, body }.
- * @param {string} url
- * @param {{ method?, headers?, body? }} options
- * @param {string[]} cookieJar  - mutable array untuk simpan/kirim cookie
- * @returns {Promise<{ status: number, headers: object, body: string, finalUrl: string }>}
- */
 function request(url, options = {}, cookieJar = []) {
   return new Promise((resolve, reject) => {
     const parsed = new URL(url);
@@ -113,16 +99,6 @@ function request(url, options = {}, cookieJar = []) {
 }
 
 // ─── Parse kode dari HTML result ──────────────────────────
-/**
- * Ekstrak kode OTP dari HTML halaman result.
- * Prioritas:
- *   1. [data-nf-otp="XXXX"] — paling reliable
- *   2. .otp-value--hero text content
- *   3. Regex fallback: cari 4-6 digit di area kode
- *
- * @param {string} html
- * @returns {string|null}  kode sebagai string, null jika tidak ditemukan
- */
 function parseCodeFromHtml(html) {
   // 1. data-nf-otp attribute (paling akurat)
   const attrMatch = html.match(/data-nf-otp="(\d{4,6})"/);
@@ -162,22 +138,6 @@ function parseResultStatus(html) {
 }
 
 // ─── Fungsi Utama ─────────────────────────────────────────
-
-/**
- * Fetch kode Netflix dari nfpro.store secara otomatis.
- *
- * @param {string} email   - email akun Netflix
- * @param {"signin"|"signin6"|"login"|"household"} choice
- *   - "signin"   → 4-digit login code
- *   - "signin6"  → 6-digit verification code
- *   - "login"    → 2FA code
- *   - "household"→ household code/link
- * @param {object} opts
- *   - retries: jumlah retry jika kode belum ada (default: 3)
- *   - retryDelay: jeda antar retry dalam ms (default: 4000)
- * @returns {Promise<string>}  kode yang ditemukan
- * @throws {Error} jika kode tidak ditemukan setelah semua retry
- */
 async function fetchNetflixCode(email, choice, opts = {}) {
   const retries    = opts.retries    ?? 3;
   const retryDelay = opts.retryDelay ?? 4000;

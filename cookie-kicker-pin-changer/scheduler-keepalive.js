@@ -1,13 +1,7 @@
 /**
- * scheduler-keepalive.js — Jalankan keep-alive otomatis via node-cron
- *
  * Cara pakai:
  *   node scheduler-keepalive.js        → jalan terus di background, keep-alive tiap 3 hari
  *   node scheduler-keepalive.js --now  → langsung jalankan sekali sekarang
- *
- * Di server Ubuntu, jalankan dengan PM2:
- *   pm2 start scheduler-keepalive.js --name "netflix-keepalive"
- *   pm2 save
  */
 
 "use strict";
