@@ -274,7 +274,7 @@ async function getExpiredAccounts() {
   const sheets = await getSheets();
   const spreadsheetId = await findSpreadsheetId();
 
-  const sheetNames = (process.env.SHEETS_TO_CHECK ?? "HARIAN,MINGGUAN,BULANAN")
+  const sheetNames = (process.env.SHEETS_TO_CHECK)
     .split(",")
     .map((s) => s.trim())
     .filter(Boolean);

@@ -1,201 +1,162 @@
 /**
  * Choice mapping:
- *   "signin"   → 4-Digit Code (login Netflix via kode email)
- *   "signin6"  → 6-Digit Code (verifikasi identitas di manageaccountaccess)
- *   "login"    → 2FA Code
- *   "household"→ Household link/code
+ *   "signin"    → 4-Digit Code
+ *   "signin6"   → 6-Digit Code
+ *   "login"     → 2FA Code
+ *   "household" → Household
+ *   "reset"     → Reset Link
  */
 
 "use strict";
 
-const https  = require("https");
-const http   = require("http");
-const { URL } = require("url");
+require("dotenv").config();
+const { chromium } = require("playwright");
 
-const BASE_URL  = "https://nfpro.store/cecilionss";
-const RESULT_URL = "https://nfpro.store/cecilionss/result";
-
-// ─── Helper: HTTP request sederhana (tanpa library eksternal) ──
-function request(url, options = {}, cookieJar = []) {
-  return new Promise((resolve, reject) => {
-    const parsed = new URL(url);
-    const lib = parsed.protocol === "https:" ? https : http;
-
-    const headers = {
-      "User-Agent":
-        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/125.0.0.0 Safari/537.36",
-      Accept:
-        "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
-      "Accept-Language": "en-US,en;q=0.9",
-      ...(options.headers ?? {}),
-    };
-
-    if (cookieJar.length > 0) {
-      headers["Cookie"] = cookieJar.join("; ");
-    }
-
-    if (options.body) {
-      headers["Content-Type"] = "application/x-www-form-urlencoded";
-      headers["Content-Length"] = Buffer.byteLength(options.body);
-      headers["Origin"] = "https://nfpro.store";
-      headers["Referer"] = BASE_URL;
-    }
-
-    const reqOptions = {
-      hostname: parsed.hostname,
-      path: parsed.pathname + parsed.search,
-      method: options.method ?? "GET",
-      headers,
-    };
-
-    const req = lib.request(reqOptions, (res) => {
-      // Simpan Set-Cookie ke jar
-      const setCookie = res.headers["set-cookie"];
-      if (setCookie) {
-        setCookie.forEach((c) => {
-          const cookiePart = c.split(";")[0].trim();
-          const name = cookiePart.split("=")[0];
-          // Update atau tambah cookie (hindari duplikat)
-          const idx = cookieJar.findIndex((existing) =>
-            existing.startsWith(name + "=")
-          );
-          if (idx >= 0) cookieJar[idx] = cookiePart;
-          else cookieJar.push(cookiePart);
-        });
-      }
-
-      // Handle redirect (302)
-      if (
-        (res.statusCode === 301 || res.statusCode === 302) &&
-        res.headers.location
-      ) {
-        const redirectUrl = res.headers.location.startsWith("http")
-          ? res.headers.location
-          : `https://nfpro.store${res.headers.location}`;
-        // Consume body lalu follow redirect
-        res.resume();
-        request(redirectUrl, { method: "GET" }, cookieJar)
-          .then(resolve)
-          .catch(reject);
-        return;
-      }
-
-      let body = "";
-      res.on("data", (chunk) => (body += chunk));
-      res.on("end", () =>
-        resolve({
-          status: res.statusCode,
-          headers: res.headers,
-          body,
-          finalUrl: url,
-        })
-      );
-    });
-
-    req.on("error", reject);
-    if (options.body) req.write(options.body);
-    req.end();
-  });
-}
-
-// ─── Parse kode dari HTML result ──────────────────────────
-function parseCodeFromHtml(html) {
-  // 1. data-nf-otp attribute (paling akurat)
-  const attrMatch = html.match(/data-nf-otp="(\d{4,6})"/);
-  if (attrMatch) return attrMatch[1];
-
-  // 2. .otp-value--hero text content
-  const heroMatch = html.match(
-    /class="otp-value[^"]*otp-value--hero[^"]*"[^>]*>\s*(\d{4,6})\s*</
-  );
-  if (heroMatch) return heroMatch[1];
-
-  // 3. otp-value tanpa --hero
-  const otpMatch = html.match(/class="otp-value[^"]*"[^>]*>\s*(\d{4,6})\s*</);
-  if (otpMatch) return otpMatch[1];
-
-  // 4. Cek apakah ada "No code found" atau error
-  if (html.toLowerCase().includes("no code") ||
-      html.toLowerCase().includes("not found") ||
-      html.toLowerCase().includes("chip-fail") ||
-      html.toLowerCase().includes("no result")) {
-    return null;
-  }
-
-  return null;
-}
-
-/**
- * Cek apakah result menunjukkan sukses atau gagal.
- * @param {string} html
- * @returns {"success"|"not_found"|"error"}
- */
-function parseResultStatus(html) {
-  if (html.includes("chip-success") || html.includes("Succeeded")) return "success";
-  if (html.includes("chip-fail") || html.includes("Failed")) return "not_found";
-  if (html.includes("result-card")) return "success"; // ada result card = ada hasil
-  return "error";
-}
-
-// ─── Fungsi Utama ─────────────────────────────────────────
+const NFPRO_URL  = process.env.NFPRO_URL;
+const HEADLESS   = process.env.HEADLESS !== "false";
+const sleep      = (ms) => new Promise((r) => setTimeout(r, ms));
 async function fetchNetflixCode(email, choice, opts = {}) {
   const retries    = opts.retries    ?? 3;
   const retryDelay = opts.retryDelay ?? 4000;
 
-  const cookieJar = [];
-
-  // Step 1: GET halaman utama dulu untuk dapat session cookie
-  console.log(`  [nfpro] Inisialisasi session...`);
-  await request(BASE_URL, { method: "GET" }, cookieJar);
-
-  for (let attempt = 1; attempt <= retries; attempt++) {
-    console.log(`  [nfpro] Fetch "${choice}" untuk ${email} (attempt ${attempt}/${retries})...`);
-
-    // Step 2: POST form dengan timestamp untuk hindari cache
-    const body =
-      `check_mode=recheck` +
-      `&choice=${encodeURIComponent(choice)}` +
-      `&email=${encodeURIComponent(email)}` +
-      `&_t=${Date.now()}`;
-
-    const res = await request(
-      BASE_URL,
-      {
-        method: "POST",
-        body,
-        headers: {
-          "Cache-Control": "no-cache, no-store",
-          "Pragma": "no-cache",
-        },
-      },
-      cookieJar
-    );
-
-    // Setelah POST + redirect, kita di /result
-    const status = parseResultStatus(res.body);
-    const code   = parseCodeFromHtml(res.body);
-
-    if (code) {
-      console.log(`  [nfpro] ✅ Kode ditemukan: ${code}`);
-      return code;
-    }
-
-    if (status === "not_found" && attempt < retries) {
-      console.log(`  [nfpro] Kode belum ada, retry dalam ${retryDelay / 1000}s...`);
-      await new Promise((r) => setTimeout(r, retryDelay));
-      continue;
-    }
-
-    if (attempt === retries) {
-      // Debug: simpan body terakhir
-      if (process.env.NFPRO_DEBUG === "true") {
-        require("fs").writeFileSync(`nfpro-debug-${choice}.html`, res.body);
-        console.log(`  [nfpro] Debug HTML disimpan ke nfpro-debug-${choice}.html`);
+  const proxyConfig = process.env.PROXY_SERVER
+    ? {
+        server:   process.env.PROXY_SERVER,
+        username: process.env.PROXY_USERNAME,
+        password: process.env.PROXY_PASSWORD,
       }
-      throw new Error(
-        `Kode Netflix tidak ditemukan untuk ${email} (${choice}) setelah ${retries} percobaan.`
-      );
+    : undefined;
+
+  const browser = await chromium.launch({
+    headless: HEADLESS,
+    executablePath: process.env.CHROME_PATH || undefined,
+    proxy: proxyConfig,
+    args: ["--no-sandbox", "--disable-setuid-sandbox", "--disable-dev-shm-usage"],
+  });
+
+  try {
+    const ctx  = await browser.newContext({ viewport: { width: 1280, height: 900 }, locale: "en-US" });
+    const page = await ctx.newPage();
+
+    console.log(`  [nfpro] Membuka ${NFPRO_URL} ...`);
+    await page.goto(NFPRO_URL, { waitUntil: "domcontentloaded", timeout: 30_000 });
+    await sleep(1500);
+
+    for (let attempt = 1; attempt <= retries; attempt++) {
+      console.log(`  [nfpro] Attempt ${attempt}/${retries} — email: ${email}, choice: ${choice}`);
+
+      // ── Pastikan form aktif (bukan di halaman result) ──
+      const newLookupBtn = page.locator('#home-new-lookup-btn');
+      if (await newLookupBtn.isVisible({ timeout: 2000 }).catch(() => false)) {
+        console.log(`  [nfpro] Klik "New lookup" untuk kembali ke form...`);
+        await newLookupBtn.click();
+        await sleep(800);
+      }
+
+      // ── Isi email ──────────────────────────────────────
+      const emailInput = page.locator('#email-input');
+      await emailInput.waitFor({ state: "visible", timeout: 10_000 });
+      await emailInput.fill("");
+      await emailInput.fill(email);
+      await sleep(300);
+
+      // ── Klik tile sesuai choice ────────────────────────
+      const tile = page.locator(`button[data-choice="${choice}"]`);
+      if (!(await tile.isVisible({ timeout: 5000 }).catch(() => false))) {
+        throw new Error(`Tile choice "${choice}" tidak ditemukan di halaman nfpro.`);
+      }
+      await tile.click();
+      await sleep(500);
+
+      // ── Klik Continue ──────────────────────────────────
+      const continueBtn = page.locator('#home-continue-btn');
+      // Tunggu tombol enabled (tidak disabled lagi)
+      await page.waitForFunction(
+        () => !document.querySelector('#home-continue-btn')?.disabled,
+        { timeout: 5000 }
+      ).catch(() => {});
+
+      if (!(await continueBtn.isEnabled({ timeout: 3000 }).catch(() => false))) {
+        console.warn(`  [nfpro] Tombol Continue masih disabled — coba force click.`);
+        await continueBtn.click({ force: true });
+      } else {
+        await continueBtn.click();
+      }
+
+      // ── Tunggu hasil muncul ────────────────────────────
+      console.log(`  [nfpro] Menunggu hasil...`);
+      try {
+        await page.waitForFunction(
+          () => {
+            // Sukses: ada kode OTP
+            const otp = document.querySelector('[data-nf-otp]');
+            if (otp && /^\d{4,6}$/.test(otp.getAttribute('data-nf-otp') || '')) return true;
+            // Sukses: ada teks di .otp-value--hero
+            const hero = document.querySelector('.otp-value--hero');
+            if (hero && /^\d{4,6}$/.test(hero.textContent?.trim() || '')) return true;
+            // Gagal: chip-fail muncul
+            if (document.querySelector('.chip-fail')) return true;
+            // Gagal: "No match" teks
+            if (document.body.innerText.toLowerCase().includes('no match')) return true;
+            return false;
+          },
+          { timeout: 20_000, polling: 500 }
+        );
+      } catch {
+        console.warn(`  [nfpro] Timeout menunggu hasil.`);
+      }
+
+      await sleep(500);
+
+      // ── Ambil kode dari hasil ──────────────────────────
+      // Prioritas 1: data-nf-otp attribute
+      const otpAttr = await page.locator('[data-nf-otp]').first().getAttribute('data-nf-otp').catch(() => null);
+      if (otpAttr && /^\d{4,6}$/.test(otpAttr)) {
+        console.log(`  [nfpro] ✅ Kode ditemukan (attr): ${otpAttr}`);
+        return otpAttr;
+      }
+
+      // Prioritas 2: teks .otp-value--hero
+      const heroText = await page.locator('.otp-value--hero').first().textContent().catch(() => null);
+      if (heroText && /^\d{4,6}$/.test(heroText.trim())) {
+        console.log(`  [nfpro] ✅ Kode ditemukan (hero): ${heroText.trim()}`);
+        return heroText.trim();
+      }
+
+      // Prioritas 3: isi #home-result-content (fallback HTML parse)
+      const resultContent = await page.locator('#home-result-content').textContent().catch(() => "");
+      const codeMatch = resultContent.match(/\b(\d{4,6})\b/);
+      if (codeMatch) {
+        console.log(`  [nfpro] ✅ Kode ditemukan (content): ${codeMatch[1]}`);
+        return codeMatch[1];
+      }
+
+      // ── Gagal: cek apakah chip-fail ───────────────────
+      const isFailed = await page.locator('.chip-fail').isVisible({ timeout: 1000 }).catch(() => false);
+      if (isFailed) {
+        console.warn(`  [nfpro] ✗ Hasil: FAILED (no match found).`);
+      } else {
+        console.warn(`  [nfpro] ✗ Kode tidak ditemukan di halaman hasil.`);
+      }
+
+      // Debug: simpan screenshot jika diminta
+      if (process.env.NFPRO_DEBUG === "true") {
+        const path = require("path");
+        const shot = path.join(process.env.DEBUG_SHOT_DIR ?? "/tmp/nfdebug", `nfpro-${choice}-attempt${attempt}-${Date.now()}.png`);
+        require("fs").mkdirSync(require("path").dirname(shot), { recursive: true });
+        await page.screenshot({ path: shot, fullPage: true }).catch(() => {});
+        console.log(`  [nfpro] Screenshot disimpan: ${shot}`);
+      }
+
+      if (attempt < retries) {
+        console.log(`  [nfpro] Retry dalam ${retryDelay / 1000}s...`);
+        await sleep(retryDelay);
+      }
     }
+
+    throw new Error(`Kode Netflix tidak ditemukan untuk ${email} (${choice}) setelah ${retries} percobaan.`);
+  } finally {
+    await browser.close();
   }
 }
 
