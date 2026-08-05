@@ -669,6 +669,24 @@ async function kickDevicesByProfiles(page, profileNames) {
       if (keluarVisible) {
         await keluarBtn.scrollIntoViewIfNeeded().catch(() => {});
 
+        // Pastikan tidak ada toast lama yang menghalangi sebelum klik
+        const blockingToast = page.locator('div[role="alert"]').last();
+        if (await blockingToast.isVisible({ timeout: 500 }).catch(() => false)) {
+          const closeBtn = page
+            .locator(
+              'button[aria-label="Tutup Toast"], button[aria-label="Close"], button[aria-label="Dismiss"]',
+            )
+            .first();
+          if (await closeBtn.isVisible({ timeout: 500 }).catch(() => false)) {
+            await closeBtn.click().catch(() => {});
+          } else {
+            await blockingToast
+              .waitFor({ state: "hidden", timeout: 5000 })
+              .catch(() => {});
+          }
+          await sleep(500);
+        }
+
         try {
           await keluarBtn.click({ timeout: 10000 });
         } catch (clickErr) {
@@ -692,29 +710,52 @@ async function kickDevicesByProfiles(page, profileNames) {
 
           // 5. Tutup Toast (menangani bug penumpukan / menghalangi elemen)
           const closeToastBtn = page
-            .locator('button[aria-label="Tutup Toast"]')
+            .locator(
+              'button[aria-label="Tutup Toast"], button[aria-label="Close"], button[aria-label="Dismiss"]',
+            )
             .first();
           if (
             await closeToastBtn.isVisible({ timeout: 3000 }).catch(() => false)
           ) {
-            await closeToastBtn.click();
+            await closeToastBtn.click().catch(() => {});
             console.log(`  [kick] ℹ️ Toast ditutup.`);
+          } else {
+            // Tunggu sampai toast menghilang sendiri sebelum lanjut
+            await page
+              .locator('div[role="alert"]')
+              .last()
+              .waitFor({ state: "hidden", timeout: 6000 })
+              .catch(() => {});
           }
 
           // 6. JEDA PANJANG: Beri waktu agar card yang dikick menghilang & DOM bergeser rapi
           console.log(`  [kick] ⏳ Menunggu DOM stabil (4 detik)...`);
           await sleep(4000);
+
+          // BREAK: Karena DOM berubah (ada device yang terhapus), reset scan dari indeks 0
+          kickedInThisRound = true;
+          break;
         } else {
           console.warn(
             `  [kick] ⚠ MISS: "${deviceName}" (profil: ${display}) — toast tidak muncul!`,
           );
-          await sleep(2000); // Tetap beri jeda jika terjadi miss
+          // Tutup toast lama yang mungkin masih ada dan menghalangi klik berikutnya
+          const staleToast = page.locator(
+            'button[aria-label="Tutup Toast"], button[aria-label="Close"], button[aria-label="Dismiss"]',
+          ).first();
+          if (await staleToast.isVisible({ timeout: 1000 }).catch(() => false)) {
+            await staleToast.click().catch(() => {});
+          } else {
+            await page
+              .locator('div[role="alert"]')
+              .last()
+              .waitFor({ state: "hidden", timeout: 4000 })
+              .catch(() => {});
+          }
+          await sleep(1500);
+          // JANGAN set kickedInThisRound = true — agar loop bisa lanjut scan card berikutnya
+          // JANGAN break — lanjut cek card lain di round ini
         }
-
-        // BREAK: Karena DOM berubah (ada device yang terhapus), kita HENTIKAN scan ini
-        // dan biarkan loop 'round' mereset scan dari indeks 0 kembali.
-        kickedInThisRound = true;
-        break;
       } else {
         console.warn(
           `  [kick] ⚠ MISS: "${deviceName}" (profil: ${display}) — tombol Keluar tidak muncul!`,
