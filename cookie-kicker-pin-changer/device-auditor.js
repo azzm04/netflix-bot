@@ -708,7 +708,7 @@ function decideAuditActions(snapshot, profileRows) {
 
       const intruders = snapshot.filter((d) => {
         if (d.isCurrent || !d.profileText) return false;
-        return profileNameMatches(extractProfileName(d.profileText), profile);
+        return profileNameMatches(extractProfileName(d.profileText), profile, d.profileText);
       });
 
       for (const d of intruders) {
@@ -740,7 +740,7 @@ function decideAuditActions(snapshot, profileRows) {
     // Device yang login di profil ini (cocokkan nama sebelum tanda kurung)
     const profileDevices = snapshot.filter((d) => {
       if (d.isCurrent || d.noActivity || !d.profileText) return false;
-      return profileNameMatches(extractProfileName(d.profileText), profile);
+      return profileNameMatches(extractProfileName(d.profileText), profile, d.profileText);
     });
 
     // ── Case 1: Kolom G ada isinya → matching-based ──────

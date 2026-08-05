@@ -94,15 +94,13 @@ function extractProfileName(profileLine) {
  * @param {string} targetName  - nama profil dari spreadsheet (kolom C)
  * @returns {boolean}
  */
-function profileNameMatches(nameOnCard, targetName) {
+function profileNameMatches(nameOnCard, targetName, rawProfileText = "") {
   if (!nameOnCard || !targetName) return false;
 
-  // Normalisasi: lowercase + collapse whitespace, TAPI pertahankan emoji/simbol
-  // agar "🐼 Panda" dan "PANDA" tidak salah cocok
+  // Normalisasi: lowercase + collapse whitespace, pertahankan emoji/simbol
   const norm = (s) => s.toLowerCase().replace(/\s+/g, " ").trim();
 
-  // Normalisasi tanpa emoji — untuk fallback exact match kalau target di spreadsheet
-  // tidak pakai emoji tapi card Netflix punya (atau sebaliknya)
+  // Normalisasi tanpa emoji — untuk fallback kalau target di sheet tidak pakai emoji
   const normNoEmoji = (s) =>
     s
       .toLowerCase()
@@ -110,27 +108,21 @@ function profileNameMatches(nameOnCard, targetName) {
       .replace(/\s+/g, " ")
       .trim();
 
-  const a = norm(nameOnCard);   // dari card Netflix (dengan emoji)
-  const b = norm(targetName);   // dari spreadsheet (dengan emoji)
+  const a = norm(nameOnCard);
+  const b = norm(targetName);
 
   // 1. Exact match dengan emoji
   if (a === b) return true;
 
-  // 2. Exact match tanpa emoji (menangani kasus target di sheet tidak pakai emoji
-  //    tapi Netflix menampilkan dengan emoji, atau sebaliknya)
-  //    Guard: hasil strip emoji tidak boleh kosong dan tidak boleh terlalu berbeda panjangnya
-  //    (hindari "🐼 Panda" strip→"panda" vs "panda" strip→"panda" — padahal beda profil)
+  // 2. Exact match tanpa emoji (salah satu sisi punya emoji, satunya tidak)
   const aNoEmoji = normNoEmoji(nameOnCard);
   const bNoEmoji = normNoEmoji(targetName);
-  // Hanya allow emoji-stripped match jika SALAH SATU sisi punya emoji (bukan keduanya tidak punya)
   const aHasEmoji = a !== aNoEmoji;
   const bHasEmoji = b !== bNoEmoji;
   if ((aHasEmoji || bHasEmoji) && aNoEmoji === bNoEmoji && aNoEmoji.length > 0) return true;
 
-  // 3. Substring match dengan word-boundary HANYA jika:
-  //    - kedua string cukup panjang (min 4 char setelah normalize)
-  //    - string yang lebih pendek TIDAK diakhiri angka (menghindari DOOR1 vs DOOR2)
-  //    - match terjadi di word boundary (menghindari RORA vs AURORA, PUFF vs PUFFY, DORA vs DORALIC)
+  // 3. Substring match dengan word-boundary
+  //    Guard: tidak diakhiri angka (hindari "DOOR 1" vs "DOOR 2", "PAWPAW 1" vs "PAWPAW 2")
   if (a.length >= 4 && b.length >= 4) {
     const shorterEndsWithDigit = (s) => /\d$/.test(s);
     const isWordBoundaryMatch = (longer, shorter) => {
@@ -142,6 +134,19 @@ function profileNameMatches(nameOnCard, targetName) {
     };
     if (!shorterEndsWithDigit(b) && isWordBoundaryMatch(a, b)) return true;
     if (!shorterEndsWithDigit(a) && isWordBoundaryMatch(b, a)) return true;
+  }
+
+  // 4. Fallback: regex word-boundary pada teks mentah Netflix (seperti kode lama)
+  //    Menangani nama pendek (< 4 char) dan karakter khusus yang lolos dari cek di atas
+  //    Contoh: "dnd", "yah okay", "aint over", "fine", "shyt"
+  if (rawProfileText) {
+    try {
+      const escaped = b.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+      const re = new RegExp(`\\b${escaped}\\b`, "i");
+      if (re.test(rawProfileText)) return true;
+    } catch {
+      // regex invalid (karakter aneh) — abaikan
+    }
   }
 
   return false;
@@ -638,13 +643,9 @@ async function kickDevicesByProfiles(page, profileNames) {
         profileText = null;
       }
 
-      const noActivity =
-        lowerText.includes("tidak ada aktivitas") ||
-        lowerText.includes("no activity");
-
       const nameOnCard = extractProfileName(profileText ?? "");
       const matchedTarget = profileText
-        ? targets.find((t) => profileNameMatches(nameOnCard, t))
+        ? targets.find((t) => profileNameMatches(nameOnCard, t, profileText))
         : undefined;
 
       // Debug: log hasil matching untuk memudahkan diagnosis
@@ -659,12 +660,54 @@ async function kickDevicesByProfiles(page, profileNames) {
         continue;
       }
 
-      // 4. Proses Kick! (Target cocok atau device tidak ada aktivitas)
+      // Filter: Jika tidak ada profil (tidak ada aktivitas):
+      // Kick HANYA jika tidak ada profil non-target yang masih aktif di akun ini.
+      // Alasan: device tanpa aktivitas bisa milik profil yang belum expired.
+      // Kalau semua profil yang teridentifikasi adalah target → aman untuk dikick.
+      if (!profileText) {
+        const allCards = page.locator('li[data-uia^="device-list+"]');
+        const allCount = await allCards.count();
+        let hasNonTargetProfile = false;
+        for (let ci = 0; ci < allCount; ci++) {
+          const c = allCards.nth(ci);
+          const cText = await c.innerText().catch(() => "");
+          let cProfileLine = null;
+          for (const cl of cText.split("\n").map((l) => l.trim()).filter(Boolean)) {
+            if (
+              cl.toLowerCase().includes("terakhir ditonton") ||
+              cl.toLowerCase().includes("last watched")
+            ) {
+              if (
+                !cl.toLowerCase().includes("tidak ada aktivitas") &&
+                !cl.toLowerCase().includes("no activity")
+              ) {
+                cProfileLine = cl;
+              }
+              break;
+            }
+          }
+          if (!cProfileLine) continue;
+          const cName = extractProfileName(cProfileLine);
+          const isTarget = targets.some((t) => profileNameMatches(cName, t, cProfileLine));
+          if (!isTarget) {
+            hasNonTargetProfile = true;
+            console.log(
+              `  [kick] ⏭ Skip "${deviceName}" (tidak ada aktivitas) — ada profil aktif non-target: "${cName}"`,
+            );
+            break;
+          }
+        }
+        if (hasNonTargetProfile) continue;
+        console.log(
+          `  [kick] 🎯 "${deviceName}" tidak ada aktivitas & semua profil teridentifikasi adalah target — lanjut kick.`,
+        );
+      }
+
+      // 4. Proses Kick! (profil match target, atau tidak ada aktivitas & aman dikick)
       const keluarVisible = await keluarBtn
         .isVisible({ timeout: 2000 })
         .catch(() => false);
-      const display =
-        profileText ?? (noActivity ? "tidak ada aktivitas" : "no profile");
+      const display = profileText ?? "tidak ada aktivitas";
 
       if (keluarVisible) {
         await keluarBtn.scrollIntoViewIfNeeded().catch(() => {});
