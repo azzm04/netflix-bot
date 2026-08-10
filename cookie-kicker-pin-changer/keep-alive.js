@@ -29,23 +29,32 @@ const {
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
-// ── Keep-alive satu akun ──────────────────────────────────
-async function keepAliveOne(email, cookieData) {
-  let browser;
-  try {
-    browser = await chromium.launch({
-      headless: process.env.HEADLESS !== "false",
-      args: ["--no-sandbox", "--disable-setuid-sandbox", "--disable-dev-shm-usage"],
-    });
-  } catch (err) {
-    console.error(`  [keep-alive] Gagal launch browser: ${err.message}`);
-    return { success: false, reason: err.message };
-  }
+const proxyConfig = process.env.PROXY_SERVER
+  ? {
+      server: process.env.PROXY_SERVER,
+      username: process.env.PROXY_USERNAME,
+      password: process.env.PROXY_PASSWORD,
+    }
+  : undefined;
 
+// Resource yang tidak perlu dimuat cuma untuk refresh sesi (hemat waktu + bandwidth proxy)
+const BLOCKED_RESOURCE_TYPES = new Set(["image", "media", "font", "stylesheet"]);
+
+// ── Keep-alive satu akun (pakai browser yang sudah jalan, cuma bikin context baru) ──
+async function keepAliveOne(browser, email, cookieData) {
+  let ctx;
   try {
-    const ctx = await browser.newContext({
+    ctx = await browser.newContext({
       viewport: { width: 1280, height: 900 },
       locale: "id-ID",
+      proxy: proxyConfig,
+    });
+
+    await ctx.route("**/*", (route) => {
+      if (BLOCKED_RESOURCE_TYPES.has(route.request().resourceType())) {
+        return route.abort();
+      }
+      return route.continue();
     });
 
     // Inject cookie
@@ -103,7 +112,7 @@ async function keepAliveOne(email, cookieData) {
     console.error(`  [keep-alive] Error: ${err.message}`);
     return { success: false, reason: err.message };
   } finally {
-    await browser.close().catch(() => {});
+    await ctx?.close().catch(() => {});
   }
 }
 
@@ -124,35 +133,56 @@ async function main() {
   console.log(`${new Date().toLocaleString("id-ID")}`);
   console.log(`Proses ${emails.length} akun...\n`);
 
+  let browser;
+  try {
+    browser = await chromium.launch({
+      headless: process.env.HEADLESS !== "false",
+      args: [
+        "--no-sandbox",
+        "--disable-setuid-sandbox",
+        "--disable-dev-shm-usage",
+        "--disable-blink-features=AutomationControlled",
+      ],
+      proxy: proxyConfig,
+    });
+  } catch (err) {
+    console.error(`[keep-alive] Gagal launch browser: ${err.message}`);
+    return;
+  }
+
   let ok = 0, expired = 0, failed = 0;
 
-  for (let i = 0; i < emails.length; i++) {
-    const email      = emails[i];
-    const cookieData = all[email];
+  try {
+    for (let i = 0; i < emails.length; i++) {
+      const email      = emails[i];
+      const cookieData = all[email];
 
-    if (!cookieData?.netflixId) {
-      console.log(`[${i + 1}/${emails.length}] ${email} — skip (tidak ada netflixId)`);
-      failed++;
-      continue;
+      if (!cookieData?.netflixId) {
+        console.log(`[${i + 1}/${emails.length}] ${email} — skip (tidak ada netflixId)`);
+        failed++;
+        continue;
+      }
+
+      console.log(`[${i + 1}/${emails.length}] ${email}`);
+      const result = await keepAliveOne(browser, email, cookieData);
+
+      if (result.success) {
+        const label = result.reason === "refreshed" ? "✓ Cookie diperbarui" : "✓ Sesi aktif";
+        console.log(`  ${label}`);
+        ok++;
+      } else if (result.reason === "cookie_expired") {
+        console.log(`  ✗ Cookie expired — perlu harvest ulang`);
+        expired++;
+      } else {
+        console.log(`  ✗ Gagal: ${result.reason}`);
+        failed++;
+      }
+
+      // Jeda antar akun agar tidak terlihat bot
+      if (i < emails.length - 1) await sleep(2000);
     }
-
-    console.log(`[${i + 1}/${emails.length}] ${email}`);
-    const result = await keepAliveOne(email, cookieData);
-
-    if (result.success) {
-      const label = result.reason === "refreshed" ? "✓ Cookie diperbarui" : "✓ Sesi aktif";
-      console.log(`  ${label}`);
-      ok++;
-    } else if (result.reason === "cookie_expired") {
-      console.log(`  ✗ Cookie expired — perlu harvest ulang`);
-      expired++;
-    } else {
-      console.log(`  ✗ Gagal: ${result.reason}`);
-      failed++;
-    }
-
-    // Jeda antar akun agar tidak terlihat bot
-    if (i < emails.length - 1) await sleep(2000);
+  } finally {
+    await browser.close().catch(() => {});
   }
 
   console.log(`\n${"═".repeat(45)}`);

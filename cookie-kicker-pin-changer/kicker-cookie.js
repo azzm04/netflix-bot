@@ -18,6 +18,13 @@ const HEADLESS    = process.env.HEADLESS !== "false";
 const TIMEOUT_NAV = 45_000;
 const URL_DEVICES = "https://www.netflix.com/manageaccountaccess";
 
+// Resource yang aman diblokir untuk mempercepat load — TIDAK termasuk "stylesheet"
+// karena banyak logic di file ini bergantung pada isVisible()/computed layout (CSS).
+const BLOCKED_RESOURCE_TYPES = new Set(["image", "media", "font"]);
+
+const DEBUG_SHOT_RETENTION_MS =
+  (parseInt(process.env.DEBUG_SHOT_RETENTION_DAYS ?? "7", 10) || 7) * 24 * 60 * 60 * 1000;
+
 // ── Custom Errors ─────────────────────────────────────────
 class CookieExpiredError extends Error {
   constructor(email) {
@@ -29,10 +36,31 @@ class CookieExpiredError extends Error {
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
-// ── Debug Screenshot ──────────────────────────────────────
+// ── Sembunyikan sebagian besar kode OTP sebelum masuk log ────
+function maskCode(code) {
+  if (!code) return code;
+  const visible = 2;
+  return code.length <= visible
+    ? "*".repeat(code.length)
+    : "*".repeat(code.length - visible) + code.slice(-visible);
+}
+
+// ── Debug Screenshot (dengan retensi, biar tidak menumpuk selamanya) ─
+function pruneOldDebugShots(dir) {
+  try {
+    const now = Date.now();
+    for (const file of fs.readdirSync(dir)) {
+      const filePath = `${dir}/${file}`;
+      const stat = fs.statSync(filePath);
+      if (now - stat.mtimeMs > DEBUG_SHOT_RETENTION_MS) fs.unlinkSync(filePath);
+    }
+  } catch {}
+}
+
 function debugShot(page, name) {
   const dir = process.env.DEBUG_SHOT_DIR ?? "/tmp/nfdebug";
   try { fs.mkdirSync(dir, { recursive: true }); } catch {}
+  pruneOldDebugShots(dir);
   return page.screenshot({ path: `${dir}/${name}_${Date.now()}.png`, fullPage: true }).catch(() => {});
 }
 
@@ -116,6 +144,14 @@ async function newCookiePage(browser, email, targetUrl) {
     extraHTTPHeaders: { "Accept-Language": "id-ID,id;q=0.9,en-US;q=0.8" },
     proxy,
   });
+
+  await ctx.route("**/*", (route) => {
+    if (BLOCKED_RESOURCE_TYPES.has(route.request().resourceType())) {
+      return route.abort();
+    }
+    return route.continue();
+  });
+
   await ctx.addCookies(buildPlaywrightCookies(cookieData));
 
   const page = await ctx.newPage();
@@ -190,7 +226,7 @@ async function checkForExtraVerification(page, email, isMahesh = false) {
         console.log(`  [mfa] Auto-fetch kode 6 digit via nfpro...`);
         code6 = await fetchNetflixCode(email, "signin6", { retries: 2, retryDelay: 5000 });
       }
-      console.log(`  [mfa] Kode: ${code6}`);
+      console.log(`  [mfa] Kode: ${maskCode(code6)}`);
     } catch (err) {
       console.warn(`  [mfa] Auto-fetch gagal: ${err.message}`);
       console.log(`  [mfa] Minta kode manual via Telegram...`);
@@ -204,7 +240,7 @@ async function checkForExtraVerification(page, email, isMahesh = false) {
     if (!code6) throw new Error(`Kode MFA tidak tersedia untuk ${email}`);
 
     const digits = code6.replace(/\D/g, "").split("");
-    console.log(`  [mfa] Isi ${digits.length} digit: ${code6}`);
+    console.log(`  [mfa] Isi ${digits.length} digit: ${maskCode(code6)}`);
 
     let inputs = [];
     for (const sel of ['input[inputmode="numeric"]', 'input[maxlength="1"]', 'input[autocomplete="one-time-code"]']) {
@@ -557,16 +593,21 @@ async function refreshAndSaveCookies(ctx, email) {
 
 // ── Entry Point: Kick untuk beberapa profil ──────────────
 /**
- * @param {string}   email
- * @param {string[]} profileNames  - profil yang EXPIRED (akan dikick)
- * @param {boolean}  isMahesh
+ * @param {string}          email
+ * @param {string[]}        profileNames  - profil yang EXPIRED (akan dikick)
+ * @param {boolean}         isMahesh
+ * @param {import("playwright").Browser|null} browser - browser yang sudah jalan
+ *   (dipakai bersama antar akun agar tidak launch Chromium berulang-ulang).
+ *   Kalau tidak dioper, fungsi ini launch & tutup browser sendiri (standalone).
  */
-async function kickDevicesForProfilesCookie(email, profileNames, isMahesh = false) {
-  const browser = await launchBrowser();
+async function kickDevicesForProfilesCookie(email, profileNames, isMahesh = false, browser = null) {
+  const ownBrowser    = !browser;
+  const activeBrowser = browser ?? await launchBrowser();
   let totalKicked = 0;
+  let page;
 
   try {
-    const page = await newCookiePage(browser, email, URL_DEVICES);
+    page = await newCookiePage(activeBrowser, email, URL_DEVICES);
     await checkForExtraVerification(page, email, isMahesh);
 
     if (!page.url().includes("manageaccountaccess")) {
@@ -604,14 +645,16 @@ async function kickDevicesForProfilesCookie(email, profileNames, isMahesh = fals
     console.log(`  [kick] Total ${totalKicked} device dikick.`);
     await refreshAndSaveCookies(page.context(), email);
   } finally {
-    await browser.close();
+    // Selalu tutup context akun ini sendiri (biar tidak menumpuk kalau browser dipakai bersama)
+    if (page) await page.context().close().catch(() => {});
+    if (ownBrowser) await activeBrowser.close();
   }
 
   return { kicked: totalKicked };
 }
 
-async function kickDevicesForProfileCookie(email, profileName, isMahesh = false) {
-  return kickDevicesForProfilesCookie(email, [profileName], isMahesh);
+async function kickDevicesForProfileCookie(email, profileName, isMahesh = false, browser = null) {
+  return kickDevicesForProfilesCookie(email, [profileName], isMahesh, browser);
 }
 
 module.exports = {
@@ -623,4 +666,5 @@ module.exports = {
   waitForKickToastMatch,
   extractProfileName,
   profileNameMatches,
+  launchBrowser,
 };

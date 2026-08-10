@@ -2,18 +2,30 @@
 
 require("dotenv").config();
 const { chromium } = require("playwright");
+const fs = require("fs");
 const {
   getCookieForEmail,
   buildPlaywrightCookies,
   deleteCookieForEmail,
 } = require("./cookie-helper");
-const { CookieExpiredError } = require("./kicker-cookie");
+const { CookieExpiredError, checkForExtraVerification } = require("./kicker-cookie");
 
 const HEADLESS = process.env.HEADLESS !== "false";
 const TIMEOUT_NAV = 45_000;
 const URL_PIN_SETTINGS = "https://www.netflix.com/settings/migration";
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+
+// ── Debug Screenshot ──────────────────────────────────────
+function debugShot(page, name) {
+  const dir = process.env.DEBUG_SHOT_DIR ?? "/tmp/nfdebug";
+  try {
+    fs.mkdirSync(dir, { recursive: true });
+  } catch {}
+  return page
+    .screenshot({ path: `${dir}/${name}_${Date.now()}.png`, fullPage: true })
+    .catch(() => {});
+}
 
 class WrongPasswordError extends Error {
   constructor(email) {
@@ -60,7 +72,7 @@ async function launchBrowser() {
 }
 
 // ── Buat Context + Inject Cookie ─────────────────────────
-async function newCookiePage(browser, email, targetUrl) {
+async function newCookiePage(browser, email, targetUrl, isMahesh = false) {
   const cookieData = getCookieForEmail(email);
   if (!cookieData) {
     throw new CookieExpiredError(email);
@@ -96,12 +108,13 @@ async function newCookiePage(browser, email, targetUrl) {
     throw new CookieExpiredError(email);
   }
 
-  // Handle MFA jika muncul
-  if (url.includes("/mfa")) {
-    console.log(`  [pin-cookie] MFA terdeteksi, selesaikan verifikasi...`);
-    const { checkForExtraVerification } = require("./kicker-cookie");
-    await checkForExtraVerification(page, email);
-    // Navigate ulang ke target setelah MFA selesai
+  // Handle MFA / verifikasi tambahan jika muncul. checkForExtraVerification
+  // mendeteksi lewat isi halaman juga (bukan cuma URL "/mfa"), dan untuk akun
+  // MAHESH kode diambil dari Mahesh Bot, bukan nfpro — jadi isMahesh WAJIB dioper.
+  await checkForExtraVerification(page, email, isMahesh);
+
+  if (page.url() !== targetUrl) {
+    console.log(`  [pin-cookie] Navigate ulang ke ${targetUrl} setelah verifikasi...`);
     await page.goto(targetUrl, {
       waitUntil: "domcontentloaded",
       timeout: TIMEOUT_NAV,
@@ -113,13 +126,26 @@ async function newCookiePage(browser, email, targetUrl) {
 }
 
 // ── Ganti PIN ─────────────────────────────────────────────
-async function changePinsForProfilesCookie(email, password, targetProfiles) {
-  const browser = await launchBrowser();
+/**
+ * @param {import("playwright").Browser|null} browser - browser yang sudah jalan
+ *   (dipakai bersama antar akun agar tidak launch Chromium berulang-ulang).
+ *   Kalau tidak dioper, fungsi ini launch & tutup browser sendiri (standalone).
+ */
+async function changePinsForProfilesCookie(
+  email,
+  password,
+  targetProfiles,
+  isMahesh = false,
+  browser = null,
+) {
+  const ownBrowser    = !browser;
+  const activeBrowser = browser ?? await launchBrowser();
   const pinChanges = new Map();
+  let page;
 
   try {
     const startUrl = "https://www.netflix.com/account/profiles";
-    const page = await newCookiePage(browser, email, startUrl);
+    page = await newCookiePage(activeBrowser, email, startUrl, isMahesh);
     await sleep(2000);
 
     const targets = targetProfiles.map((t) => t.trim().toLowerCase());
@@ -318,9 +344,12 @@ async function changePinsForProfilesCookie(email, password, targetProfiles) {
       await refreshAndSaveCookies(page.context(), email);
     } else {
       console.log("\n  [pin-cookie] Tidak ada profil yang berhasil diubah.");
+      await debugShot(page, `pin_no_changes_${email.split("@")[0]}`);
     }
   } finally {
-    await browser.close();
+    // Selalu tutup context akun ini sendiri (biar tidak menumpuk kalau browser dipakai bersama)
+    if (page) await page.context().close().catch(() => {});
+    if (ownBrowser) await activeBrowser.close();
   }
 
   return pinChanges;
@@ -330,4 +359,5 @@ module.exports = {
   changePinsForProfilesCookie,
   CookieExpiredError,
   WrongPasswordError,
+  launchBrowser,
 };

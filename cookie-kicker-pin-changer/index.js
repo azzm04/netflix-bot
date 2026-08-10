@@ -12,10 +12,12 @@ const {
 const {
   kickDevicesForProfilesCookie,
   CookieExpiredError,
+  launchBrowser: launchKickBrowser,
 } = require("./kicker-cookie");
 const {
   changePinsForProfilesCookie,
   WrongPasswordError,
+  launchBrowser: launchPinBrowser,
 } = require("./pin-changer-cookie");
 const { getCookieForEmail } = require("./cookie-helper");
 const {
@@ -43,6 +45,33 @@ async function notifyCookieExpired(email, profiles) {
       `\`node cookie-helper.js save-interactive "${email}"\`\n` +
       `Lalu masukkan dengan command \`setcookie\` ke bot.`,
   );
+}
+
+// ── Launch browser bersama untuk satu section (kick/pin) ──
+// Kalau launch gagal, tetap kirim notifikasi per-akun (bukan cuma aggregate count)
+// supaya operator tahu akun mana saja yang kena imbas.
+async function launchSharedBrowser(launchFn, groups, label) {
+  try {
+    return await launchFn();
+  } catch (err) {
+    console.error(`[cookie-server] Gagal launch browser untuk ${label}: ${err.message}`);
+    for (const group of groups) {
+      await notifyError(
+        group[0].email,
+        group.map((a) => a.profile),
+        `Gagal launch browser ${label}: ${err.message}`,
+      );
+    }
+    return null;
+  }
+}
+
+// ── Pastikan browser bersama masih hidup, launch ulang kalau terputus ──
+// (mencegah satu crash/disconnect di tengah batch bikin semua akun sisanya gagal)
+async function ensureBrowserConnected(browser, launchFn, label) {
+  if (browser && browser.isConnected()) return browser;
+  console.warn(`[cookie-server]   ⚠ Browser ${label} terputus/belum ada — launch ulang...`);
+  return launchFn();
 }
 
 // ── Main ──────────────────────────────────────────────────
@@ -138,89 +167,110 @@ async function processExpiredAccounts() {
         `\n[cookie-server] == KICK DEVICE (${kickGroups.length} email, ${toKick.length} profil) ==`,
       );
 
-      for (let gi = 0; gi < kickGroups.length; gi++) {
-        const group = kickGroups[gi];
-        const email = group[0].email;
-        const accountLabel = group[0].blockLabel ?? "";
-        const profiles = group.map((a) => a.profile);
+      // Satu browser dipakai bersama untuk semua akun di section ini — hindari
+      // launch Chromium berulang per akun (mahal), context tetap terisolasi per akun.
+      let kickBrowser = await launchSharedBrowser(launchKickBrowser, kickGroups, "kick");
+      if (!kickBrowser) totalFailed += toKick.length;
 
-        console.log(`\n${"─".repeat(60)}`);
-        console.log(
-          `[cookie-server] [${gi + 1}/${kickGroups.length}] ${email}`,
-        );
-        console.log(`  Profil : ${profiles.join(", ")}`);
-        console.log("─".repeat(60));
-
-        if (!getCookieForEmail(email)) {
-          console.warn(`[cookie-server]   ⚠ Cookie tidak ada — skip.`);
-          await notifyCookieExpired(email, profiles);
-          totalFailed += group.length;
-          continue;
-        }
-
-        const t0 = Date.now();
+      if (kickBrowser) {
         try {
-          const result = await kickDevicesForProfilesCookie(
-            email,
-            profiles,
-            accountLabel === "MAHESH",
-          );
-          const elapsed = ((Date.now() - t0) / 1000).toFixed(1);
+          for (let gi = 0; gi < kickGroups.length; gi++) {
+            const group = kickGroups[gi];
+            const email = group[0].email;
+            const accountLabel = group[0].blockLabel ?? "";
+            const profiles = group.map((a) => a.profile);
 
-          for (const account of group) {
-            await markAsKicked(
-              spreadsheetId,
-              account.sheetName,
-              account.rowIndex,
+            console.log(`\n${"─".repeat(60)}`);
+            console.log(
+              `[cookie-server] [${gi + 1}/${kickGroups.length}] ${email}`,
             );
-          }
+            console.log(`  Profil : ${profiles.join(", ")}`);
+            console.log("─".repeat(60));
 
-          console.log(
-            `[cookie-server]   ✓ ${result.kicked} dikick (${elapsed}s)`,
-          );
-          totalKicked += group.length;
+            if (!getCookieForEmail(email)) {
+              console.warn(`[cookie-server]   ⚠ Cookie tidak ada — skip.`);
+              await notifyCookieExpired(email, profiles);
+              totalFailed += group.length;
+              continue;
+            }
 
-          await notifyKickDone({
-            email,
-            profiles,
-            kicked: result.kicked,
-            sheetUpdated: true,
-            elapsed,
-            blockLabel: accountLabel,
-            rows: group.map((a) => ({
-              profile: a.profile,
-              sheetName: a.sheetName,
-              rowIndex: a.rowIndex,
-              logoutText: a.logoutText,
-            })),
-          });
-        } catch (err) {
-          if (
-            err instanceof CookieExpiredError ||
-            err.name === "CookieExpiredError"
-          ) {
-            console.warn(`[cookie-server]   ✗ Cookie expired — skip.`);
-            await notifyCookieExpired(email, profiles);
-          } else if (
-            err instanceof WrongPasswordError ||
-            err.name === "WrongPasswordError"
-          ) {
-            console.warn(`[cookie-server]   ✗ Password salah — skip.`);
-            await sendTelegram(
-              `🔒 *Password Salah — Ganti PIN Gagal*\n\n` +
-                `📧 Akun: \`${email}\`\n` +
-                `👤 Profil: ${profiles.join(", ")}\n\n` +
-                `Netflix menolak password saat submit "Kontrol Orang Tua" (pesan: "Sandi salah.").\n` +
-                `Tolong cek/update password akun ini di spreadsheet.`,
-            );
-          } else {
-            console.error(`[cookie-server]   ✗ Error: ${err.message}`);
-            await notifyError(email, profiles, err.message);
+            try {
+              kickBrowser = await ensureBrowserConnected(kickBrowser, launchKickBrowser, "kick");
+            } catch (relaunchErr) {
+              console.error(`[cookie-server]   ✗ Gagal launch ulang browser kick: ${relaunchErr.message}`);
+              await notifyError(email, profiles, `Browser kick mati & gagal launch ulang: ${relaunchErr.message}`);
+              totalFailed += group.length;
+              continue;
+            }
+
+            const t0 = Date.now();
+            try {
+              const result = await kickDevicesForProfilesCookie(
+                email,
+                profiles,
+                accountLabel === "MAHESH",
+                kickBrowser,
+              );
+              const elapsed = ((Date.now() - t0) / 1000).toFixed(1);
+
+              for (const account of group) {
+                await markAsKicked(
+                  spreadsheetId,
+                  account.sheetName,
+                  account.rowIndex,
+                );
+              }
+
+              console.log(
+                `[cookie-server]   ✓ ${result.kicked} dikick (${elapsed}s)`,
+              );
+              totalKicked += group.length;
+
+              await notifyKickDone({
+                email,
+                profiles,
+                kicked: result.kicked,
+                sheetUpdated: true,
+                elapsed,
+                blockLabel: accountLabel,
+                rows: group.map((a) => ({
+                  profile: a.profile,
+                  sheetName: a.sheetName,
+                  rowIndex: a.rowIndex,
+                  logoutText: a.logoutText,
+                })),
+              });
+            } catch (err) {
+              if (
+                err instanceof CookieExpiredError ||
+                err.name === "CookieExpiredError"
+              ) {
+                console.warn(`[cookie-server]   ✗ Cookie expired — skip.`);
+                await notifyCookieExpired(email, profiles);
+              } else if (
+                err instanceof WrongPasswordError ||
+                err.name === "WrongPasswordError"
+              ) {
+                console.warn(`[cookie-server]   ✗ Password salah — skip.`);
+                await sendTelegram(
+                  `🔒 *Password Salah — Ganti PIN Gagal*\n\n` +
+                    `📧 Akun: \`${email}\`\n` +
+                    `👤 Profil: ${profiles.join(", ")}\n\n` +
+                    `Netflix menolak password saat submit "Kontrol Orang Tua" (pesan: "Sandi salah.").\n` +
+                    `Tolong cek/update password akun ini di spreadsheet.`,
+                );
+              } else {
+                console.error(`[cookie-server]   ✗ Error: ${err.message}`);
+                await notifyError(email, profiles, err.message);
+              }
+              totalFailed += group.length;
+            }
+
+            if (gi < kickGroups.length - 1) await sleep(4000);
           }
-          totalFailed += group.length;
+        } finally {
+          await kickBrowser.close().catch(() => {});
         }
-
-        if (gi < kickGroups.length - 1) await sleep(4000);
       }
     }
 
@@ -241,118 +291,139 @@ async function processExpiredAccounts() {
         `\n[cookie-server] == GANTI PIN (${pinEmailGroups.length} email, ${toPinAll.length} profil) ==`,
       );
 
-      for (let gi = 0; gi < pinEmailGroups.length; gi++) {
-        const group = pinEmailGroups[gi];
-        const email = group[0].email;
-        const password = group[0].password;
-        const blockLabel = group[0].blockLabel;
-        const profiles = group.map((a) => a.profile);
+      // Sama seperti section kick: satu browser dipakai bersama untuk semua akun.
+      let pinBrowser = await launchSharedBrowser(launchPinBrowser, pinEmailGroups, "pin");
+      if (!pinBrowser) totalFailed += toPinAll.length;
 
-        console.log(`\n${"─".repeat(60)}`);
-        console.log(
-          `[cookie-server] [${gi + 1}/${pinEmailGroups.length}] ${email} [${blockLabel}]`,
-        );
-        console.log(`  Profil : ${profiles.join(", ")}`);
-        console.log("─".repeat(60));
-
-        if (!getCookieForEmail(email)) {
-          console.warn(`[cookie-server]   ⚠ Cookie tidak ada — skip.`);
-          await notifyCookieExpired(email, profiles);
-          totalFailed += group.length;
-          continue;
-        }
-
-        const t0 = Date.now();
+      if (pinBrowser) {
         try {
-          const pinChanges = await changePinsForProfilesCookie(
-            email,
-            password,
-            profiles,
-          );
-          const elapsed = ((Date.now() - t0) / 1000).toFixed(1);
+          for (let gi = 0; gi < pinEmailGroups.length; gi++) {
+            const group = pinEmailGroups[gi];
+            const email = group[0].email;
+            const password = group[0].password;
+            const blockLabel = group[0].blockLabel;
+            const profiles = group.map((a) => a.profile);
 
-          // Update spreadsheet dengan PIN yang baru-baru ini di-return
-          for (const account of group) {
-            const accNorm = account.profile.toLowerCase().replace(/\s+/g, " ").trim();
-            let newPin = null;
-            let matchedKey = null;
+            console.log(`\n${"─".repeat(60)}`);
+            console.log(
+              `[cookie-server] [${gi + 1}/${pinEmailGroups.length}] ${email} [${blockLabel}]`,
+            );
+            console.log(`  Profil : ${profiles.join(", ")}`);
+            console.log("─".repeat(60));
 
-            // Prioritas 1: exact match
-            for (const [profName, pin] of pinChanges.entries()) {
-              const profNorm = profName.toLowerCase().replace(/\s+/g, " ").trim();
-              if (accNorm === profNorm) {
-                newPin = pin;
-                matchedKey = profName;
-                break;
-              }
+            if (!getCookieForEmail(email)) {
+              console.warn(`[cookie-server]   ⚠ Cookie tidak ada — skip.`);
+              await notifyCookieExpired(email, profiles);
+              totalFailed += group.length;
+              continue;
             }
 
-            // Prioritas 2: salah satu mengandung yang lain (guard: panjang minimal 3 char)
-            if (!newPin) {
-              for (const [profName, pin] of pinChanges.entries()) {
-                const profNorm = profName.toLowerCase().replace(/\s+/g, " ").trim();
-                if (
-                  profNorm.length >= 3 && accNorm.length >= 3 &&
-                  (accNorm.includes(profNorm) || profNorm.includes(accNorm))
-                ) {
-                  newPin = pin;
-                  matchedKey = profName;
-                  break;
+            try {
+              pinBrowser = await ensureBrowserConnected(pinBrowser, launchPinBrowser, "pin");
+            } catch (relaunchErr) {
+              console.error(`[cookie-server]   ✗ Gagal launch ulang browser pin: ${relaunchErr.message}`);
+              await notifyError(email, profiles, `Browser pin mati & gagal launch ulang: ${relaunchErr.message}`);
+              totalFailed += group.length;
+              continue;
+            }
+
+            const t0 = Date.now();
+            try {
+              const pinChanges = await changePinsForProfilesCookie(
+                email,
+                password,
+                profiles,
+                blockLabel === "MAHESH",
+                pinBrowser,
+              );
+              const elapsed = ((Date.now() - t0) / 1000).toFixed(1);
+
+              // Update spreadsheet dengan PIN yang baru-baru ini di-return
+              for (const account of group) {
+                const accNorm = account.profile.toLowerCase().replace(/\s+/g, " ").trim();
+                let newPin = null;
+                let matchedKey = null;
+
+                // Prioritas 1: exact match
+                for (const [profName, pin] of pinChanges.entries()) {
+                  const profNorm = profName.toLowerCase().replace(/\s+/g, " ").trim();
+                  if (accNorm === profNorm) {
+                    newPin = pin;
+                    matchedKey = profName;
+                    break;
+                  }
+                }
+
+                // Prioritas 2: salah satu mengandung yang lain (guard: panjang minimal 3 char)
+                if (!newPin) {
+                  for (const [profName, pin] of pinChanges.entries()) {
+                    const profNorm = profName.toLowerCase().replace(/\s+/g, " ").trim();
+                    if (
+                      profNorm.length >= 3 && accNorm.length >= 3 &&
+                      (accNorm.includes(profNorm) || profNorm.includes(accNorm))
+                    ) {
+                      newPin = pin;
+                      matchedKey = profName;
+                      break;
+                    }
+                  }
+                }
+
+                if (newPin) {
+                  await updatePin(
+                    spreadsheetId,
+                    account.sheetName,
+                    account.rowIndex,
+                    newPin,
+                  );
+                  await markAsKicked(
+                    spreadsheetId,
+                    account.sheetName,
+                    account.rowIndex,
+                  );
+                  console.log(
+                    `[cookie-server]   ✓ PIN "${account.profile}" (matched: "${matchedKey}") → ${newPin}`,
+                  );
+                } else {
+                  console.warn(
+                    `[cookie-server]   ⚠ PIN tidak ditemukan untuk "${account.profile}" — spreadsheet TIDAK diupdate`,
+                  );
                 }
               }
+
+              totalPinChanged += group.length;
+
+              await notifyPinChanged({
+                email,
+                blockLabel,
+                pinChanges,
+                sheetUpdated: true,
+                elapsed,
+                rows: group.map((a) => ({
+                  profile: a.profile,
+                  sheetName: a.sheetName,
+                  rowIndex: a.rowIndex,
+                })),
+              });
+            } catch (err) {
+              if (
+                err instanceof CookieExpiredError ||
+                err.name === "CookieExpiredError"
+              ) {
+                console.warn(`[cookie-server]   ✗ Cookie expired — skip.`);
+                await notifyCookieExpired(email, profiles);
+              } else {
+                console.error(`[cookie-server]   ✗ Error: ${err.message}`);
+                await notifyError(email, profiles, err.message);
+              }
+              totalFailed += group.length;
             }
 
-            if (newPin) {
-              await updatePin(
-                spreadsheetId,
-                account.sheetName,
-                account.rowIndex,
-                newPin,
-              );
-              await markAsKicked(
-                spreadsheetId,
-                account.sheetName,
-                account.rowIndex,
-              );
-              console.log(
-                `[cookie-server]   ✓ PIN "${account.profile}" (matched: "${matchedKey}") → ${newPin}`,
-              );
-            } else {
-              console.warn(
-                `[cookie-server]   ⚠ PIN tidak ditemukan untuk "${account.profile}" — spreadsheet TIDAK diupdate`,
-              );
-            }
+            if (gi < pinEmailGroups.length - 1) await sleep(4000);
           }
-
-          totalPinChanged += group.length;
-
-          await notifyPinChanged({
-            email,
-            blockLabel,
-            pinChanges,
-            sheetUpdated: true,
-            elapsed,
-            rows: group.map((a) => ({
-              profile: a.profile,
-              sheetName: a.sheetName,
-              rowIndex: a.rowIndex,
-            })),
-          });
-        } catch (err) {
-          if (
-            err instanceof CookieExpiredError ||
-            err.name === "CookieExpiredError"
-          ) {
-            console.warn(`[cookie-server]   ✗ Cookie expired — skip.`);
-            await notifyCookieExpired(email, profiles);
-          } else {
-            console.error(`[cookie-server]   ✗ Error: ${err.message}`);
-            await notifyError(email, profiles, err.message);
-          }
-          totalFailed += group.length;
+        } finally {
+          await pinBrowser.close().catch(() => {});
         }
-
-        if (gi < pinEmailGroups.length - 1) await sleep(4000);
       }
     }
 
