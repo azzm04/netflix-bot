@@ -633,96 +633,105 @@ async def terima_pin_baru(update: Update, context: ContextTypes.DEFAULT_TYPE):
 # ─── /cekcookies ───────────────────────────────────────────
 
 async def cmd_cekcookies(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Cek status cookie semua akun via keep-alive headless."""
+    """
+    Cek status cookie SEMUA akun lewat verifyCookie() asli di cookie-helper.js —
+    persistent browser profile + proxy yang SAMA dengan yang dipakai
+    kicker-cookie.js/pin-changer-cookie.js. Sekuensial & lebih lambat daripada
+    cek HTTP mentah, tapi akurat karena mengecek identitas yang benar-benar sama
+    dengan yang dilihat Netflix dari automation asli.
+    """
     if update.effective_user.id != ADMIN_ID:
         await update.message.reply_text("⛔ Hanya admin utama.")
         return
 
-    pesan = await update.message.reply_text("🔍 Mengecek cookie semua akun...")
-
-    import ssl
-    import urllib.request
-    import os
+    import asyncio
     import json
+    import os
+    import time
 
-    # Path ke cookie-kicker-pin-changer
     base_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
     ckpc_dir = os.path.join(base_dir, "cookie-kicker-pin-changer")
     cookies_file = os.path.join(ckpc_dir, "cookies.json")
 
-    # Baca cookies.json untuk daftar email
     if not os.path.exists(cookies_file):
-        await pesan.edit_text("⚠️ File cookies.json tidak ditemukan.")
+        await update.message.reply_text("⚠️ File cookies.json tidak ditemukan.")
         return
 
     try:
         with open(cookies_file, "r") as f:
             cookies = json.load(f)
     except Exception as e:
-        await pesan.edit_text(f"⚠️ Gagal baca cookies.json: {e}")
+        await update.message.reply_text(f"⚠️ Gagal baca cookies.json: {e}")
         return
 
     emails = list(cookies.keys())
     if not emails:
-        await pesan.edit_text("ℹ️ Tidak ada cookie tersimpan di cookies.json.")
+        await update.message.reply_text("ℹ️ Tidak ada cookie tersimpan di cookies.json.")
         return
 
-    await pesan.edit_text(f"🔍 Mengecek {len(emails)} akun... (bisa 1-2 menit)")
+    estimasi_menit = max(1, round(len(emails) * 8 / 60))
+    pesan = await update.message.reply_text(
+        f"🔍 Mengecek {len(emails)} akun lewat sesi browser asli "
+        f"(profile & proxy yang sama dengan kick/ganti PIN)...\n"
+        f"Estimasi ~{estimasi_menit} menit — sengaja sekuensial biar akurat, mohon tunggu."
+    )
 
-    # Jalankan cek cookie via HTTP (tanpa buka browser, jauh lebih cepat)
-    import ssl
-    import urllib.request
+    output_path = os.path.join(ckpc_dir, f"cookie-status-{update.effective_chat.id}-{int(time.time())}.json")
+    timeout_detik = max(600, len(emails) * 30)
 
-    checking_msg = await pesan.edit_text(f"🔍 Mengecek {len(emails)} akun via HTTP...")
-
-    ok_list      = []
-    expired_list = []
-
-    for email, data in cookies.items():
-        netflix_id = data.get("netflixId", "")
-        secure_id  = data.get("secureNetflixId", "")
-
-        if not netflix_id or not secure_id:
-            expired_list.append(email)
-            continue
-
-        # Cek via HTTP request ke Netflix
+    try:
+        proc = await asyncio.create_subprocess_exec(
+            "node", "cookie-helper.js", "check-all", "--output", output_path,
+            cwd=ckpc_dir,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
+        )
         try:
-            cookie_str = f"NetflixId={netflix_id}; SecureNetflixId={secure_id}"
-            req = urllib.request.Request(
-                "https://www.netflix.com/browse",
-                headers={
-                    "Cookie": cookie_str,
-                    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/127.0.0.0 Safari/537.36",
-                }
+            _, stderr = await asyncio.wait_for(proc.communicate(), timeout=timeout_detik)
+        except asyncio.TimeoutError:
+            proc.kill()
+            await proc.wait()
+            await pesan.edit_text(
+                f"❌ *Pengecekan timeout* setelah {timeout_detik // 60} menit.\n"
+                f"Proses di server mungkin macet — cek log server atau coba lagi.",
+                parse_mode="Markdown",
             )
-            ctx = ssl.create_default_context()
-            with urllib.request.urlopen(req, context=ctx, timeout=8) as resp:
-                final_url = resp.geturl()
-                if "/login" in final_url or "/LoginHelp" in final_url:
-                    expired_list.append(email)
-                else:
-                    ok_list.append(email)
-        except urllib.error.HTTPError as e:
-            # 200 redirect ke login berarti expired
-            if e.code in (301, 302):
-                expired_list.append(email)
-            else:
-                ok_list.append(email)  # error lain anggap masih valid
+            return
+
+        if proc.returncode != 0:
+            err_text = stderr.decode(errors="ignore").strip()[-500:] or "(tidak ada detail error)"
+            await pesan.edit_text(
+                f"❌ *Gagal jalankan pengecekan*\n\n`{err_text}`",
+                parse_mode="Markdown",
+            )
+            return
+
+        with open(output_path, "r") as f:
+            data = json.load(f)
+        results = data.get("results", [])
+    except Exception as e:
+        await pesan.edit_text(f"❌ *Gagal jalankan pengecekan*\n\n`{e}`", parse_mode="Markdown")
+        return
+    finally:
+        try:
+            os.remove(output_path)
         except Exception:
-            ok_list.append(email)  # timeout jaringan, anggap masih valid
+            pass
+
+    ok_list      = [r["email"] for r in results if r.get("valid")]
+    expired_list = [r["email"] for r in results if not r.get("valid")]
 
     ok_count      = len(ok_list)
     expired_count = len(expired_list)
 
     teks  = "🍪 *STATUS COOKIE AKUN*\n"
-    teks += "━━━━━━━━━━━━━━━━\n"
+    teks += "┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄\n"
     teks += f"✅ Valid   : *{ok_count}*\n"
     teks += f"❌ Expired : *{expired_count}*\n"
-    teks += f"📊 Total   : *{len(emails)}*\n"
+    teks += f"📊 Total   : *{len(results)}*\n"
 
     if expired_list:
-        teks += "\n*Akun yang perlu update cookie:*\n"
+        teks += "\n*Akun yang perlu update cookie* _(otomatis dihapus dari cookies.json)_:\n"
         for e in expired_list:
             teks += f"• `{e}`\n"
         teks += (
@@ -735,7 +744,7 @@ async def cmd_cekcookies(update: Update, context: ContextTypes.DEFAULT_TYPE):
     else:
         teks += "\n✅ Semua cookie masih valid!"
 
-    teks += "\n━━━━━━━━━━━━━━━━"
+    teks += "\n┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄"
 
     # Telegram max 4096 chars
     if len(teks) > 4000:

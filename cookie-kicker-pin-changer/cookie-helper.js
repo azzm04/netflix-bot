@@ -317,6 +317,59 @@ async function main() {
       break;
     }
 
+    case "check-all": {
+      // node cookie-helper.js check-all [--output <path>]
+      //
+      // Cek SEMUA akun pakai verifyCookie() asli (persistent profile + proxy —
+      // identitas yang SAMA dengan yang dipakai kicker-cookie.js/pin-changer-cookie.js),
+      // bukan tebakan HTTP mentah. Sengaja sekuensial (satu-satu), bukan paralel —
+      // akurasi diutamakan di atas kecepatan untuk command ini.
+      //
+      // Hasil ditulis sebagai JSON ke --output (default: cookie-status.json di
+      // folder ini) supaya caller (mis. bot Telegram) tidak perlu parsing stdout.
+      const outputIdx  = args.indexOf("--output");
+      const outputPath =
+        outputIdx !== -1 && args[outputIdx + 1]
+          ? path.resolve(args[outputIdx + 1])
+          : path.resolve(__dirname, "cookie-status.json");
+
+      const all    = loadAllCookies();
+      const emails = Object.keys(all);
+      const results = [];
+
+      console.log(`[cookie] Mengecek ${emails.length} akun (real browser check, sekuensial)...`);
+
+      for (let i = 0; i < emails.length; i++) {
+        const email = emails[i];
+        console.log(`[${i + 1}/${emails.length}] ${email}`);
+
+        let result;
+        try {
+          result = await verifyCookie(email);
+        } catch (err) {
+          result = { valid: false, reason: `Error saat cek: ${err.message}` };
+        }
+        console.log(`  ${result.valid ? "✓" : "✗"} ${result.reason}`);
+
+        // Auto-heal: hapus dari cookies.json kalau sudah dikonfirmasi expired,
+        // sama seperti yang dilakukan keep-alive.js — biar file tetap sinkron
+        // dengan hasil pengecekan, bukan cuma laporan yang dibuang.
+        if (!result.valid && result.reason.toLowerCase().includes("expired")) {
+          deleteCookieForEmail(email);
+        }
+
+        results.push({ email, valid: result.valid, reason: result.reason });
+      }
+
+      fs.writeFileSync(
+        outputPath,
+        JSON.stringify({ checkedAt: new Date().toISOString(), results }, null, 2),
+        "utf-8",
+      );
+      console.log(`\n[cookie] Selesai. Hasil ditulis ke: ${outputPath}`);
+      break;
+    }
+
     case "list": {
       // node cookie-helper.js list
       const all = loadAllCookies();
@@ -352,6 +405,7 @@ Perintah:
   save <email> <NetflixId> <SecureNetflixId>   Simpan cookie manual dari DevTools
   save-interactive <email>                     Buka browser, login manual, auto-extract
   check <email>                                Cek apakah cookie masih valid
+  check-all [--output <path>]                  Cek SEMUA akun (real browser check, sekuensial)
   list                                         Lihat semua cookie tersimpan
   delete <email>                               Hapus cookie untuk email tertentu
 
