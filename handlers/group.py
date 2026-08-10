@@ -12,6 +12,7 @@ import logging
 from datetime import datetime
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import ContextTypes, ConversationHandler
+from telegram.helpers import escape_markdown
 from config import ADMIN_ID
 from sheets_handler import tulis_fee_admin, tulis_gestun, tulis_modal_netflix
 from handlers.states import (
@@ -623,7 +624,7 @@ def _parse_quick_modal(teks: str) -> dict:
 
 
 def _fmt_modal_konfirm(tanggal, nominal, keterangan) -> str:
-    ket_str = keterangan if keterangan else "-"
+    ket_str = escape_markdown(keterangan, version=1) if keterangan else "-"
     return (
         f"🏦 *KONFIRMASI MODAL NETFLIX*\n"
         f"━━━━━━━━━━━━━━━━\n"
@@ -894,7 +895,7 @@ async def callback_konfirmasi_modal(update: Update, context: ContextTypes.DEFAUL
             )
             return ConversationHandler.END
 
-        ket_str = keterangan if keterangan else "-"
+        ket_str = escape_markdown(keterangan, version=1) if keterangan else "-"
         await query.edit_message_text(
             f"✅ *MODAL NETFLIX TERSIMPAN*\n"
             f"━━━━━━━━━━━━━━━━\n"

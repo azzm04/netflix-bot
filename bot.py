@@ -8,6 +8,7 @@ from zoneinfo import ZoneInfo
 from telegram import Update, BotCommand
 from telegram.ext import (
     Application,
+    AIORateLimiter,
     CommandHandler,
     MessageHandler,
     CallbackQueryHandler,
@@ -133,7 +134,18 @@ async def post_init(application):
 # ─── main ──────────────────────────────────────────────────
 
 def main():
-    app = Application.builder().token(BOT_TOKEN).post_init(post_init).build()
+    # concurrent_updates: proses beberapa update bersamaan (bukan 1-per-1 default PTB) —
+    # penting sekarang karena order.py sudah lempar panggilan gspread yang blocking ke thread
+    # terpisah (asyncio.to_thread), jadi user lain tidak nunggu event loop kosong.
+    # rate_limiter: auto-retry kalau kena rate limit Telegram (mis. notif admin ke banyak ID).
+    app = (
+        Application.builder()
+        .token(BOT_TOKEN)
+        .concurrent_updates(8)
+        .rate_limiter(AIORateLimiter())
+        .post_init(post_init)
+        .build()
+    )
 
     # ─── Scheduler: Auto Closing jam 23:59 WIB setiap hari ─────
     job_queue = app.job_queue

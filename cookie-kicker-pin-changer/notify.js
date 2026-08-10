@@ -55,17 +55,18 @@ async function notifyKickDone(info) {
     `  • *${r.profile}* — [${r.sheetName}] baris ${r.rowIndex} _(${r.logoutText})_`
   ).join("\n");
 
-  const status = kicked > 0 ? "✅ Berhasil dikick" : "ℹ️ Tidak ada device aktif";
-  const label  = blockLabel ? `[${blockLabel}] ` : "";
+  const status = kicked > 0
+    ? `✅ ${kicked} device berhasil dikick`
+    : "💤 Tidak ada device aktif — semua aman";
+  const label = blockLabel ? `[${blockLabel}] ` : "";
 
   const msg =
-    `🔓 *Berhasil Kick Device - Detail Akun*\n\n` +
-    `📧 Akun: \`${label}${email}\`\n` +
-    `🔢 Device dikick ada: *${kicked}*\n` +
+    `🔓 *Kick Device Selesai*\n\n` +
+    `📧 Akun   : \`${label}${email}\`\n` +
     `📋 Profil diproses:\n${profileList}\n\n` +
     `${status}\n` +
-    `📝 Sheet: ${sheetUpdated ? "diupdate (kosong + hijau)" : "tidak diupdate"}\n` +
-    `⏱ Waktu: ${elapsed}s`;
+    `📝 Sheet  : ${sheetUpdated ? "diupdate (kosong + hijau)" : "tidak diupdate"}\n` +
+    `⏱ Durasi : ${elapsed}s`;
 
   await sendTelegram(msg);
 }
@@ -75,9 +76,9 @@ async function notifyPinChanged(info) {
 
   if (pinChanges.size === 0) {
     await sendTelegram(
-      `⚠️ *PIN Change — Tidak Ada Perubahan*\n\n` +
+      `🔒 *Ganti PIN — Tidak Ada yang Berubah*\n\n` +
       `📧 Akun: \`[${blockLabel}] ${email}\`\n` +
-      `Profil tidak ditemukan atau PIN tidak berhasil diganti.`
+      `Profil tidak ditemukan atau PIN gagal disimpan.`
     );
     return;
   }
@@ -93,12 +94,12 @@ async function notifyPinChanged(info) {
   }).join("\n");
 
   const msg =
-    `🔑 *Berhasil Ganti Pin*\n\n` +
-    `📧 Akun: \`[${blockLabel}] ${email}\`\n` +
-    `🔢 Profil diubah: *${pinChanges.size}*\n\n` +
+    `🔑 *Ganti PIN Selesai*\n\n` +
+    `📧 Akun   : \`[${blockLabel}] ${email}\`\n` +
+    `🔢 Diubah : *${pinChanges.size}* profil\n\n` +
     `${pinList}\n\n` +
-    `📝 Sheet: ${sheetUpdated ? "diupdate (PIN baru + kosong + hijau)" : "tidak diupdate"}\n` +
-    `⏱ Waktu: ${elapsed}s`;
+    `📝 Sheet  : ${sheetUpdated ? "diupdate (PIN baru + kosong + hijau)" : "tidak diupdate"}\n` +
+    `⏱ Durasi : ${elapsed}s`;
 
   await sendTelegram(msg);
 }
@@ -106,10 +107,10 @@ async function notifyPinChanged(info) {
 // Notifikasi error saat proses.
 async function notifyError(email, profileNames, errorMessage) {
   const msg =
-    `❌ *Error Saat Proses Akun*\n\n` +
-    `📧 Akun: \`${email}\`\n` +
-    `👤 Profil: ${profileNames.join(", ")}\n\n` +
-    `Error: \`${errorMessage.substring(0, 300)}\``;
+    `❌ *Proses Akun Gagal*\n\n` +
+    `📧 Akun   : \`${email}\`\n` +
+    `👤 Profil : ${profileNames.join(", ")}\n\n` +
+    `Penyebab:\n\`${errorMessage.substring(0, 300)}\``;
 
   await sendTelegram(msg);
 }
@@ -119,8 +120,8 @@ async function notifySummary({ totalKick, totalPin, totalFailed, elapsed }) {
   if (totalKick === 0 && totalPin === 0 && totalFailed === 0) return;
 
   const msg =
-    `📊 *Ringkasan Bot Otomatis*\n\n` +
-    `✅ Kick device : *${totalKick}* profil\n` +
+    `📊 *Ringkasan Proses Hari Ini*\n\n` +
+    `🔓 Kick device : *${totalKick}* profil\n` +
     `🔑 Ganti PIN   : *${totalPin}* profil\n` +
     `❌ Gagal       : *${totalFailed}* profil\n` +
     `⏱ Total waktu : ${elapsed}s`;

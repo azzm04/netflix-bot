@@ -65,6 +65,22 @@ def get_sheet_modal_name(dt: datetime = None) -> str:
     return f"omset netflix_{BULAN_MODAL[dt.month]}"
 
 
+# Karakter yang bisa ditafsir sebagai awal formula oleh Excel/Sheets
+_FORMULA_TRIGGER_CHARS = ("=", "+", "-", "@", "\t", "\r")
+
+
+def sanitize_cell_text(value):
+    """
+    Cegah CSV/formula injection: teks bebas dari user (nomor pelanggan, device,
+    lokasi, keterangan) ditulis apa adanya ke sel. Kalau diawali karakter yang
+    bisa ditafsir Excel/Sheets sebagai formula (=, +, -, @), prefix apostrof
+    supaya selalu dibaca sebagai teks literal.
+    """
+    if not isinstance(value, str) or not value:
+        return value
+    return "'" + value if value[0] in _FORMULA_TRIGGER_CHARS else value
+
+
 # ─── Cache koneksi & lock untuk async safety ──────────────
 
 _client_cache = None
@@ -663,7 +679,7 @@ def tulis_logout_ke_sheet(nama_sheet: str, nomor_baris: int, tanggal_logout: str
     col_f = gspread.utils.rowcol_to_a1(nomor_baris, COL_PHONE + 1)
     sheet.batch_update([
         {"range": col_e, "values": [[tanggal_logout]]},
-        {"range": col_f, "values": [[nomor_pelanggan]]},
+        {"range": col_f, "values": [[sanitize_cell_text(nomor_pelanggan)]]},
     ])
 
     # Ubah background kolom E jadi putih (slot sudah terisi)
@@ -697,7 +713,7 @@ def tulis_rekapan(nomor_pelanggan: str, durasi: int, email_akun: str):
     # Batch update: tulis 5 cell sekaligus (1 API call)
     row = baris_target
     sheet_rekap.batch_update([
-        {"range": gspread.utils.rowcol_to_a1(row, 1), "values": [[nomor_pelanggan]]},
+        {"range": gspread.utils.rowcol_to_a1(row, 1), "values": [[sanitize_cell_text(nomor_pelanggan)]]},
         {"range": gspread.utils.rowcol_to_a1(row, 2), "values": [[tanggal]]},
         {"range": gspread.utils.rowcol_to_a1(row, 3), "values": [[durasi_text]]},
         {"range": gspread.utils.rowcol_to_a1(row, 4), "values": [[harga]]},
@@ -727,11 +743,11 @@ def tulis_rekapan_quick(nomor_pelanggan: str, durasi: int, email_akun: str, loka
 
     row = baris_target
     sheet_rekap.batch_update([
-        {"range": gspread.utils.rowcol_to_a1(row, 1), "values": [[nomor_pelanggan]]},
+        {"range": gspread.utils.rowcol_to_a1(row, 1), "values": [[sanitize_cell_text(nomor_pelanggan)]]},
         {"range": gspread.utils.rowcol_to_a1(row, 2), "values": [[tanggal]]},
         {"range": gspread.utils.rowcol_to_a1(row, 3), "values": [[durasi_text]]},
         {"range": gspread.utils.rowcol_to_a1(row, 4), "values": [[harga]]},
-        {"range": gspread.utils.rowcol_to_a1(row, 5), "values": [[email_lokasi]]},
+        {"range": gspread.utils.rowcol_to_a1(row, 5), "values": [[sanitize_cell_text(email_lokasi)]]},
     ])
 
 
@@ -761,11 +777,11 @@ def tulis_rekapan_bulanan_quick(nomor_pelanggan: str, jumlah_bulan: int, tipe: s
 
     row = baris_target
     sheet_rekap.batch_update([
-        {"range": gspread.utils.rowcol_to_a1(row, 1), "values": [[nomor_pelanggan]]},
+        {"range": gspread.utils.rowcol_to_a1(row, 1), "values": [[sanitize_cell_text(nomor_pelanggan)]]},
         {"range": gspread.utils.rowcol_to_a1(row, 2), "values": [[tanggal]]},
         {"range": gspread.utils.rowcol_to_a1(row, 3), "values": [[durasi_text]]},
         {"range": gspread.utils.rowcol_to_a1(row, 4), "values": [[harga]]},
-        {"range": gspread.utils.rowcol_to_a1(row, 5), "values": [[email_lokasi]]},
+        {"range": gspread.utils.rowcol_to_a1(row, 5), "values": [[sanitize_cell_text(email_lokasi)]]},
     ])
 
 
@@ -820,7 +836,7 @@ def tulis_rekapan_bulanan(nomor_pelanggan: str, jumlah_bulan: int, tipe: str, em
 
     row = baris_target
     sheet_rekap.batch_update([
-        {"range": gspread.utils.rowcol_to_a1(row, 1), "values": [[nomor_pelanggan]]},
+        {"range": gspread.utils.rowcol_to_a1(row, 1), "values": [[sanitize_cell_text(nomor_pelanggan)]]},
         {"range": gspread.utils.rowcol_to_a1(row, 2), "values": [[tanggal]]},
         {"range": gspread.utils.rowcol_to_a1(row, 3), "values": [[durasi_text]]},
         {"range": gspread.utils.rowcol_to_a1(row, 4), "values": [[harga]]},
@@ -1061,7 +1077,7 @@ def tulis_modal_netflix(tanggal_str: str, nominal: int, keterangan: str) -> dict
         {"range": col_h, "values": [[tanggal_str]]},
         {"range": col_i, "values": [["modal"]]},
         {"range": col_j, "values": [[nominal]]},
-        {"range": col_k, "values": [[keterangan]]},
+        {"range": col_k, "values": [[sanitize_cell_text(keterangan)]]},
     ])
 
     return {"ok": True, "baris": baris_tulis}

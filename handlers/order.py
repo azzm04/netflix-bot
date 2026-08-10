@@ -2,10 +2,12 @@
 #  handlers/order.py — /start, alur order harian/bulanan/quick
 # ============================================================
 
+import asyncio
 import logging
 import gspread
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import ContextTypes, ConversationHandler
+from telegram.helpers import escape_markdown
 from config import HARGA, HARGA_BULANAN
 from sheets_handler import (
     cari_slot_kosong,
@@ -21,6 +23,7 @@ from sheets_handler import (
     format_template_bulanan,
     verifikasi_slot_masih_kosong,
     get_spreadsheet,
+    sanitize_cell_text,
     _order_lock,
 )
 from handlers.auth import is_allowed
@@ -32,6 +35,14 @@ from handlers.states import (
 from utils.notify import kirim_notif_admin
 
 logger = logging.getLogger(__name__)
+
+
+def _tulis_device_kolom_g(nama_sheet: str, nomor_baris: int, device_text: str):
+    """Tulis merk device ke kolom G. Blocking (gspread) — panggil lewat asyncio.to_thread."""
+    spreadsheet = get_spreadsheet()
+    sheet = spreadsheet.worksheet(nama_sheet)
+    col_g = gspread.utils.rowcol_to_a1(nomor_baris, 7)  # Kolom G
+    sheet.update_acell(col_g, sanitize_cell_text(device_text))
 
 # Mapping device
 DEVICE_MAP = {
@@ -414,10 +425,10 @@ async def terima_quick_order(update: Update, context: ContextTypes.DEFAULT_TYPE)
                 # HARIAN / MINGGUAN
                 slot = None
                 for attempt in range(3):
-                    slot = cari_slot_kosong(durasi, device_type)
+                    slot = await asyncio.to_thread(cari_slot_kosong, durasi, device_type)
                     if slot is None:
                         break
-                    if verifikasi_slot_masih_kosong(slot["nama_sheet"], slot["nomor_baris"]):
+                    if await asyncio.to_thread(verifikasi_slot_masih_kosong, slot["nama_sheet"], slot["nomor_baris"]):
                         break
                     slot = None
 
@@ -440,10 +451,10 @@ async def terima_quick_order(update: Update, context: ContextTypes.DEFAULT_TYPE)
 
                 slot = None
                 for attempt in range(3):
-                    slot = cari_slot_kosong_bulanan(device_type)
+                    slot = await asyncio.to_thread(cari_slot_kosong_bulanan, device_type)
                     if slot is None:
                         break
-                    if verifikasi_slot_masih_kosong(slot["nama_sheet"], slot["nomor_baris"]):
+                    if await asyncio.to_thread(verifikasi_slot_masih_kosong, slot["nama_sheet"], slot["nomor_baris"]):
                         break
                     slot = None
 
@@ -460,7 +471,8 @@ async def terima_quick_order(update: Update, context: ContextTypes.DEFAULT_TYPE)
                 sheet_info = "BULANAN"
 
             # Tulis ke sheet HARIAN/MINGGUAN/BULANAN
-            tulis_logout_ke_sheet(
+            await asyncio.to_thread(
+                tulis_logout_ke_sheet,
                 nama_sheet=slot["nama_sheet"],
                 nomor_baris=slot["nomor_baris"],
                 tanggal_logout=tanggal_logout,
@@ -468,22 +480,21 @@ async def terima_quick_order(update: Update, context: ContextTypes.DEFAULT_TYPE)
             )
 
             # Tulis merk device di kolom G
-            spreadsheet = get_spreadsheet()
-            sheet = spreadsheet.worksheet(slot["nama_sheet"])
-            col_g = gspread.utils.rowcol_to_a1(slot["nomor_baris"], 7)  # Kolom G
-            sheet.update_acell(col_g, device_text)
+            await asyncio.to_thread(_tulis_device_kolom_g, slot["nama_sheet"], slot["nomor_baris"], device_text)
 
             # Tulis rekapan (kolom E = email + ", " + lokasi)
             try:
                 if durasi_info["mode"] == "harian":
-                    tulis_rekapan_quick(
+                    await asyncio.to_thread(
+                        tulis_rekapan_quick,
                         nomor_pelanggan=nomor_pelanggan,
                         durasi=durasi,
                         email_akun=slot["email"],
                         lokasi=lokasi
                     )
                 else:
-                    tulis_rekapan_bulanan_quick(
+                    await asyncio.to_thread(
+                        tulis_rekapan_bulanan_quick,
                         nomor_pelanggan=nomor_pelanggan,
                         jumlah_bulan=jumlah_bulan,
                         tipe=tipe,
@@ -571,7 +582,7 @@ async def terima_nomor(update: Update, context: ContextTypes.DEFAULT_TYPE) -> in
         [InlineKeyboardButton("⬅️ Kembali", callback_data="back_durasi")],
     ]
     await update.message.reply_text(
-        f"✅ Pelanggan: *{nomor_pelanggan}*\n\n"
+        f"✅ Pelanggan: *{escape_markdown(nomor_pelanggan, version=1)}*\n\n"
         f"Login device apa?",
         parse_mode="Markdown",
         reply_markup=InlineKeyboardMarkup(keyboard)
@@ -596,10 +607,10 @@ async def callback_device(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
             slot = None
             # Retry max 3x kalau slot keburu diambil order lain
             for attempt in range(3):
-                slot = cari_slot_kosong(durasi, device)
+                slot = await asyncio.to_thread(cari_slot_kosong, durasi, device)
                 if slot is None:
                     break
-                if verifikasi_slot_masih_kosong(slot["nama_sheet"], slot["nomor_baris"]):
+                if await asyncio.to_thread(verifikasi_slot_masih_kosong, slot["nama_sheet"], slot["nomor_baris"]):
                     break
                 logger.warning(f"Slot baris {slot['nomor_baris']} sudah terisi, retry {attempt+1}")
                 slot = None
@@ -616,7 +627,8 @@ async def callback_device(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
             tanggal_logout = hitung_tanggal_logout(durasi)
 
             # Tulis logout & nomor pelanggan dulu (paling penting!)
-            tulis_logout_ke_sheet(
+            await asyncio.to_thread(
+                tulis_logout_ke_sheet,
                 nama_sheet=slot["nama_sheet"],
                 nomor_baris=slot["nomor_baris"],
                 tanggal_logout=tanggal_logout,
@@ -625,7 +637,8 @@ async def callback_device(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
 
             # Tulis rekapan (kalau gagal, tetap log warning tapi jangan rollback)
             try:
-                tulis_rekapan(
+                await asyncio.to_thread(
+                    tulis_rekapan,
                     nomor_pelanggan=nomor_pelanggan,
                     durasi=durasi,
                     email_akun=slot["email"]
@@ -700,7 +713,7 @@ async def terima_nomor_bulanan(update: Update, context: ContextTypes.DEFAULT_TYP
         [InlineKeyboardButton("⬅️ Kembali", callback_data="back_paket")],
     ]
     await update.message.reply_text(
-        f"✅ Pelanggan: *{nomor_pelanggan}*\n\n"
+        f"✅ Pelanggan: *{escape_markdown(nomor_pelanggan, version=1)}*\n\n"
         f"Login device apa?",
         parse_mode="Markdown",
         reply_markup=InlineKeyboardMarkup(keyboard)
@@ -728,10 +741,10 @@ async def callback_device_bulanan(update: Update, context: ContextTypes.DEFAULT_
         async with _order_lock:
             slot = None
             for attempt in range(3):
-                slot = cari_slot_kosong_bulanan(device)
+                slot = await asyncio.to_thread(cari_slot_kosong_bulanan, device)
                 if slot is None:
                     break
-                if verifikasi_slot_masih_kosong(slot["nama_sheet"], slot["nomor_baris"]):
+                if await asyncio.to_thread(verifikasi_slot_masih_kosong, slot["nama_sheet"], slot["nomor_baris"]):
                     break
                 logger.warning(f"Slot bulanan baris {slot['nomor_baris']} sudah terisi, retry {attempt+1}")
                 slot = None
@@ -746,7 +759,8 @@ async def callback_device_bulanan(update: Update, context: ContextTypes.DEFAULT_
 
             tanggal_logout = hitung_tanggal_logout_bulanan(jumlah_bulan, is_sempriv)
 
-            tulis_logout_ke_sheet(
+            await asyncio.to_thread(
+                tulis_logout_ke_sheet,
                 nama_sheet=slot["nama_sheet"],
                 nomor_baris=slot["nomor_baris"],
                 tanggal_logout=tanggal_logout,
@@ -754,7 +768,8 @@ async def callback_device_bulanan(update: Update, context: ContextTypes.DEFAULT_
             )
 
             try:
-                tulis_rekapan_bulanan(
+                await asyncio.to_thread(
+                    tulis_rekapan_bulanan,
                     nomor_pelanggan=nomor_pelanggan,
                     jumlah_bulan=jumlah_bulan,
                     tipe=tipe,
