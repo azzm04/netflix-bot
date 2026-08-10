@@ -6,24 +6,24 @@
 
 require("dotenv").config();
 const { requestCodeFromTelegram } = require("./tg-bridge");
-const { chromium } = require("playwright");
 const {
   getCookieForEmail,
-  buildPlaywrightCookies,
   deleteCookieForEmail,
+  launchAccountContext,
 } = require("./cookie-helper");
 const fs = require("fs");
 
-const HEADLESS    = process.env.HEADLESS !== "false";
 const TIMEOUT_NAV = 45_000;
 const URL_DEVICES = "https://www.netflix.com/manageaccountaccess";
 
+// Kalau device "tidak ada aktivitas" (jejak bot sendiri: keep-alive/kick/pin-changer
+const MASS_LOGOUT_THRESHOLD = parseInt(process.env.MASS_LOGOUT_THRESHOLD, 10) || 20;
+
 // Resource yang aman diblokir untuk mempercepat load — TIDAK termasuk "stylesheet"
-// karena banyak logic di file ini bergantung pada isVisible()/computed layout (CSS).
 const BLOCKED_RESOURCE_TYPES = new Set(["image", "media", "font"]);
 
 const DEBUG_SHOT_RETENTION_MS =
-  (parseInt(process.env.DEBUG_SHOT_RETENTION_DAYS ?? "7", 10) || 7) * 24 * 60 * 60 * 1000;
+  (parseInt(process.env.DEBUG_SHOT_RETENTION_DAYS, 10) || 7) * 24 * 60 * 60 * 1000;
 
 // ── Custom Errors ─────────────────────────────────────────
 class CookieExpiredError extends Error {
@@ -116,34 +116,12 @@ function profileNameMatches(nameOnCard, targetName, rawProfileText = "") {
   return false;
 }
 
-// ── Launch Browser ────────────────────────────────────────
-async function launchBrowser() {
-  const proxy = process.env.PROXY_SERVER
-    ? { server: process.env.PROXY_SERVER, username: process.env.PROXY_USERNAME, password: process.env.PROXY_PASSWORD }
-    : undefined;
-  return chromium.launch({
-    headless: HEADLESS,
-    executablePath: process.env.CHROME_PATH || undefined,
-    proxy,
-    args: ["--no-sandbox","--disable-setuid-sandbox","--disable-blink-features=AutomationControlled","--disable-dev-shm-usage","--lang=id-ID"],
-  });
-}
-
-// ── Buat Context + Inject Cookie ─────────────────────────
-async function newCookiePage(browser, email, targetUrl) {
+// ── Buat Context (persistent, per akun) + Buka Halaman ────
+async function newCookiePage(email, targetUrl) {
   const cookieData = getCookieForEmail(email);
   if (!cookieData) throw new CookieExpiredError(email);
 
-  const proxy = process.env.PROXY_SERVER
-    ? { server: process.env.PROXY_SERVER, username: process.env.PROXY_USERNAME, password: process.env.PROXY_PASSWORD }
-    : undefined;
-
-  const ctx = await browser.newContext({
-    viewport: { width: 1280, height: 900 },
-    locale: "id-ID",
-    extraHTTPHeaders: { "Accept-Language": "id-ID,id;q=0.9,en-US;q=0.8" },
-    proxy,
-  });
+  const ctx = await launchAccountContext(email, { cookieData });
 
   await ctx.route("**/*", (route) => {
     if (BLOCKED_RESOURCE_TYPES.has(route.request().resourceType())) {
@@ -151,8 +129,6 @@ async function newCookiePage(browser, email, targetUrl) {
     }
     return route.continue();
   });
-
-  await ctx.addCookies(buildPlaywrightCookies(cookieData));
 
   const page = await ctx.newPage();
   console.log(`  [cookie] Membuka ${targetUrl} ...`);
@@ -162,7 +138,7 @@ async function newCookiePage(browser, email, targetUrl) {
   if (url.includes("/login") || url.includes("/LoginHelp")) {
     await debugShot(page, `cookie_expired_${email.split("@")[0]}`);
     deleteCookieForEmail(email);
-    await page.close();
+    await ctx.close().catch(() => {});
     throw new CookieExpiredError(email);
   }
   console.log(`  [cookie] Berhasil akses: ${url}`);
@@ -306,6 +282,42 @@ async function waitForKickToastMatch(page, deviceName, timeoutMs = 10000) {
       console.warn(`  [kick-verify] ⚠ Toast nama tidak cocok. Toast: "${text.trim()}" | Diharapkan: "${deviceName}"`);
     return null;
   } catch { return null; }
+}
+
+// ── Sign Out of All Devices (mass logout untuk backlog device parah) ─────
+// Beda dari kickDeviceByName: ini juga ikut logout device pelanggan asli yang
+// masih aktif — tradeoff yang disengaja saat jumlah device "tidak ada aktivitas"
+// sudah separah MASS_LOGOUT_THRESHOLD (biasanya jejak bot lama, lihat komentar
+// di atas). Session yang dipakai untuk klik tombol ini TIDAK ikut ke-logout.
+async function signOutAllDevices(page) {
+  const soadBtn = page.locator('[data-uia="manage-account-access-page+soad-button"]');
+  if (!(await soadBtn.isVisible({ timeout: 3000 }).catch(() => false))) {
+    console.warn(`  [kick] ⚠ Tombol "Sign Out of All Devices" tidak ditemukan — fallback ke kick satu-satu.`);
+    return false;
+  }
+
+  console.log(`  [kick] Klik "Sign Out of All Devices"...`);
+  await soadBtn.click();
+  await sleep(1200);
+
+  // Modal konfirmasi biasanya punya tombol dengan teks yang sama persis —
+  // prioritaskan tombol di dalam dialog kalau ada, baru fallback ke text-match umum.
+  const inDialog = page
+    .locator('[role="dialog"] button:has-text("Sign Out"), [role="dialog"] button:has-text("Keluar")')
+    .first();
+  const anyConfirm = page
+    .locator('button:has-text("Sign Out of All Devices"), button:has-text("Keluar dari Semua Perangkat")')
+    .last();
+
+  const confirmBtn = (await inDialog.isVisible({ timeout: 3000 }).catch(() => false)) ? inDialog : anyConfirm;
+  if (await confirmBtn.isVisible({ timeout: 3000 }).catch(() => false)) {
+    console.log(`  [kick] Konfirmasi mass sign-out...`);
+    await confirmBtn.click().catch(() => {});
+  }
+
+  await sleep(4000);
+  console.log(`  [kick] ✅ Sign Out of All Devices selesai.`);
+  return true;
 }
 
 // ── Scan semua device (2 pass: expand lalu baca) ─────────
@@ -593,21 +605,16 @@ async function refreshAndSaveCookies(ctx, email) {
 
 // ── Entry Point: Kick untuk beberapa profil ──────────────
 /**
- * @param {string}          email
- * @param {string[]}        profileNames  - profil yang EXPIRED (akan dikick)
- * @param {boolean}         isMahesh
- * @param {import("playwright").Browser|null} browser - browser yang sudah jalan
- *   (dipakai bersama antar akun agar tidak launch Chromium berulang-ulang).
- *   Kalau tidak dioper, fungsi ini launch & tutup browser sendiri (standalone).
+ * @param {string}   email
+ * @param {string[]} profileNames  - profil yang EXPIRED (akan dikick)
+ * @param {boolean}  isMahesh
  */
-async function kickDevicesForProfilesCookie(email, profileNames, isMahesh = false, browser = null) {
-  const ownBrowser    = !browser;
-  const activeBrowser = browser ?? await launchBrowser();
+async function kickDevicesForProfilesCookie(email, profileNames, isMahesh = false) {
   let totalKicked = 0;
   let page;
 
   try {
-    page = await newCookiePage(activeBrowser, email, URL_DEVICES);
+    page = await newCookiePage(email, URL_DEVICES);
     await checkForExtraVerification(page, email, isMahesh);
 
     if (!page.url().includes("manageaccountaccess")) {
@@ -630,31 +637,47 @@ async function kickDevicesForProfilesCookie(email, profileNames, isMahesh = fals
     const snapshot = await scanAllDevices(page);
     console.log(`  [kick] Snapshot: ${snapshot.length} device terbaca`);
 
-    // Putuskan siapa yang dikick
-    const expiredTargets = profileNames.map((p) => p.trim().toLowerCase());
-    const toKickNames    = decideKickTargets(snapshot, expiredTargets, allProfileRows);
-    console.log(`  [kick] Keputusan: ${toKickNames.length} device akan dikick → [${toKickNames.join(", ")}]`);
+    // Kalau device "tidak ada aktivitas" numpuk parah (jejak bot lama sebelum
+    // persistent-context fix), mass sign-out jauh lebih cepat & aman daripada
+    // kick satu-satu ratusan device (rawan race toast-verification).
+    const noActivityCount = snapshot.filter((d) => !d.isCurrent && d.noActivity && !d.profileText).length;
+    const useMassLogout   = noActivityCount > MASS_LOGOUT_THRESHOLD;
+    if (useMassLogout) {
+      console.log(`  [kick] ${noActivityCount} device "tidak ada aktivitas" (> ${MASS_LOGOUT_THRESHOLD}) — pakai Sign Out of All Devices.`);
+    }
+    const massDone = useMassLogout && (await signOutAllDevices(page));
 
-    // Eksekusi kick satu per satu (urut dari atas)
-    for (const deviceName of toKickNames) {
-      console.log(`\n  [kick] → Kick: "${deviceName}"`);
-      const ok = await kickDeviceByName(page, deviceName);
-      if (ok) totalKicked++;
+    if (massDone) {
+      totalKicked = snapshot.length - 1; // semua kecuali device sesi bot sendiri
+      console.log(`  [kick] Total ${totalKicked} device dikick (mass sign-out).`);
+    } else {
+      if (useMassLogout) console.log(`  [kick] Mass sign-out gagal/tidak tersedia — fallback ke kick satu-satu.`);
+
+      // Putuskan siapa yang dikick
+      const expiredTargets = profileNames.map((p) => p.trim().toLowerCase());
+      const toKickNames    = decideKickTargets(snapshot, expiredTargets, allProfileRows);
+      console.log(`  [kick] Keputusan: ${toKickNames.length} device akan dikick → [${toKickNames.join(", ")}]`);
+
+      // Eksekusi kick satu per satu (urut dari atas)
+      for (const deviceName of toKickNames) {
+        console.log(`\n  [kick] → Kick: "${deviceName}"`);
+        const ok = await kickDeviceByName(page, deviceName);
+        if (ok) totalKicked++;
+      }
+
+      console.log(`  [kick] Total ${totalKicked} device dikick.`);
     }
 
-    console.log(`  [kick] Total ${totalKicked} device dikick.`);
     await refreshAndSaveCookies(page.context(), email);
   } finally {
-    // Selalu tutup context akun ini sendiri (biar tidak menumpuk kalau browser dipakai bersama)
     if (page) await page.context().close().catch(() => {});
-    if (ownBrowser) await activeBrowser.close();
   }
 
   return { kicked: totalKicked };
 }
 
-async function kickDevicesForProfileCookie(email, profileName, isMahesh = false, browser = null) {
-  return kickDevicesForProfilesCookie(email, [profileName], isMahesh, browser);
+async function kickDevicesForProfileCookie(email, profileName, isMahesh = false) {
+  return kickDevicesForProfilesCookie(email, [profileName], isMahesh);
 }
 
 module.exports = {
@@ -666,5 +689,4 @@ module.exports = {
   waitForKickToastMatch,
   extractProfileName,
   profileNameMatches,
-  launchBrowser,
 };

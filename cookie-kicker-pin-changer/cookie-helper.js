@@ -108,6 +108,82 @@ function buildPlaywrightCookies(cookieData) {
   return cookies;
 }
 
+// ── Persistent browser profile per akun ──────────────────
+//
+// Kenapa: chromium.launch() + browser.newContext() (context sementara, tanpa
+// localStorage/IndexedDB yang persist) bikin Netflix mengira SETIAP run adalah
+// device baru — karena identitas device di sisi client tidak cuma dari cookie,
+// tapi juga dari state browser yang tersimpan lokal. Efeknya: akun yang sering
+// disentuh bot (keep-alive, kick, ganti PIN) numpuk banyak device palsu
+// "PC Chrome - Web Browser | no activity" yang sebenarnya cuma jejak bot sendiri.
+//
+// Fix: launchPersistentContext() nyimpen profile Chromium (localStorage, dll)
+// di disk per akun, dipakai ulang tiap run — jadi Netflix ngenalin ini device
+// yang SAMA terus, bukan device baru tiap kali bot jalan.
+
+const PROFILE_ROOT = path.resolve(__dirname, process.env.BROWSER_PROFILE_DIR ?? "browser-profiles");
+
+/** Direktori profile Chromium untuk satu email (dibuat kalau belum ada). */
+function profileDirForEmail(email) {
+  const safe = email.trim().toLowerCase().replace(/[^a-z0-9]+/g, "_");
+  return path.join(PROFILE_ROOT, safe);
+}
+
+/**
+ * Launch persistent browser context untuk satu akun. Dipakai bareng oleh
+ * keep-alive.js, kicker-cookie.js, dan pin-changer-cookie.js supaya semuanya
+ * konsisten pakai profile (= identitas device) yang sama untuk akun yang sama.
+ *
+ * @param {string} email
+ * @param {object} [opts]
+ * @param {boolean} [opts.headless]
+ * @param {string[]} [opts.extraArgs]
+ * @param {object|null} [opts.cookieData] - kalau sudah ada di tangan caller (hindari baca file 2x)
+ * @returns {Promise<import('playwright').BrowserContext>}
+ */
+async function launchAccountContext(email, opts = {}) {
+  const {
+    headless = process.env.HEADLESS !== "false",
+    extraArgs = [],
+    cookieData = null,
+  } = opts;
+
+  const proxy = process.env.PROXY_SERVER
+    ? {
+        server: process.env.PROXY_SERVER,
+        username: process.env.PROXY_USERNAME,
+        password: process.env.PROXY_PASSWORD,
+      }
+    : undefined;
+
+  const userDataDir = profileDirForEmail(email);
+  fs.mkdirSync(userDataDir, { recursive: true });
+
+  const ctx = await chromium.launchPersistentContext(userDataDir, {
+    headless,
+    executablePath: process.env.CHROME_PATH || undefined,
+    proxy,
+    viewport: { width: 1280, height: 900 },
+    locale: "id-ID",
+    extraHTTPHeaders: { "Accept-Language": "id-ID,id;q=0.9,en-US;q=0.8" },
+    args: [
+      "--no-sandbox",
+      "--disable-setuid-sandbox",
+      "--disable-blink-features=AutomationControlled",
+      "--disable-dev-shm-usage",
+      "--lang=id-ID",
+      ...extraArgs,
+    ],
+  });
+
+  const data = cookieData ?? getCookieForEmail(email);
+  if (data) {
+    await ctx.addCookies(buildPlaywrightCookies(data));
+  }
+
+  return ctx;
+}
+
 // ── Verifikasi Cookie ─────────────────────────────────────
 
 /**
@@ -121,14 +197,8 @@ async function verifyCookie(email) {
     return { valid: false, reason: "Cookie tidak ditemukan di cookies.json" };
   }
 
-  const browser = await chromium.launch({ headless: true });
+  const ctx = await launchAccountContext(email, { headless: true, cookieData });
   try {
-    const ctx = await browser.newContext({
-      viewport: { width: 1280, height: 900 },
-    });
-
-    await ctx.addCookies(buildPlaywrightCookies(cookieData));
-
     const page = await ctx.newPage();
     await page.goto("https://www.netflix.com/browse", {
       waitUntil: "domcontentloaded",
@@ -142,7 +212,7 @@ async function verifyCookie(email) {
 
     return { valid: true, reason: `Cookie valid — URL: ${url}` };
   } finally {
-    await browser.close();
+    await ctx.close();
   }
 }
 
@@ -159,12 +229,9 @@ async function extractCookieInteractive(email) {
   console.log("[cookie] Silakan login ke Netflix di browser yang terbuka.");
   console.log("[cookie] Browser akan auto-close setelah login berhasil.\n");
 
-  const browser = await chromium.launch({
-    headless: false,
-    args: ["--no-sandbox", "--disable-setuid-sandbox"],
-  });
-
-  const ctx = await browser.newContext({ viewport: { width: 1280, height: 900 } });
+  // Pakai persistent context dari awal — profile hasil login manual ini yang
+  // akan terus dipakai ulang, jadi device ini konsisten sejak login pertama.
+  const ctx = await launchAccountContext(email, { headless: false });
   const page = await ctx.newPage();
 
   await page.goto("https://www.netflix.com/login", {
@@ -190,7 +257,7 @@ async function extractCookieInteractive(email) {
 
   if (!netflixId || !secureNetflixId) {
     console.error("[cookie] Cookie utama tidak ditemukan! Pastikan login berhasil.");
-    await browser.close();
+    await ctx.close();
     return;
   }
 
@@ -206,7 +273,7 @@ async function extractCookieInteractive(email) {
   console.log(`  NetflixId       : ${netflixId.substring(0, 20)}...`);
   console.log(`  SecureNetflixId : ${secureNetflixId.substring(0, 20)}...`);
 
-  await browser.close();
+  await ctx.close();
 }
 
 // ── CLI ───────────────────────────────────────────────────
@@ -309,4 +376,6 @@ module.exports = {
   buildPlaywrightCookies,
   verifyCookie,
   loadAllCookies,
+  launchAccountContext,
+  profileDirForEmail,
 };

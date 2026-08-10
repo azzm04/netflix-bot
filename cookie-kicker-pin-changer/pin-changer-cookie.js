@@ -1,16 +1,14 @@
 "use strict";
 
 require("dotenv").config();
-const { chromium } = require("playwright");
 const fs = require("fs");
 const {
   getCookieForEmail,
-  buildPlaywrightCookies,
   deleteCookieForEmail,
+  launchAccountContext,
 } = require("./cookie-helper");
 const { CookieExpiredError, checkForExtraVerification } = require("./kicker-cookie");
 
-const HEADLESS = process.env.HEADLESS !== "false";
 const TIMEOUT_NAV = 45_000;
 const URL_PIN_SETTINGS = "https://www.netflix.com/settings/migration";
 
@@ -48,52 +46,14 @@ function generateNewPin(oldPin) {
   return pin;
 }
 
-// ── Launch Browser ────────────────────────────────────────
-async function launchBrowser() {
-  const proxyConfig = process.env.PROXY_SERVER
-    ? {
-        server: process.env.PROXY_SERVER,
-        username: process.env.PROXY_USERNAME,
-        password: process.env.PROXY_PASSWORD,
-      }
-    : undefined;
-
-  return chromium.launch({
-    headless: HEADLESS,
-    executablePath: process.env.CHROME_PATH || undefined,
-    proxy: proxyConfig,
-    args: [
-      "--no-sandbox",
-      "--disable-setuid-sandbox",
-      "--disable-blink-features=AutomationControlled",
-      "--disable-dev-shm-usage",
-    ],
-  });
-}
-
-// ── Buat Context + Inject Cookie ─────────────────────────
-async function newCookiePage(browser, email, targetUrl, isMahesh = false) {
+// ── Buat Context (persistent, per akun) + Buka Halaman ────
+async function newCookiePage(email, targetUrl, isMahesh = false) {
   const cookieData = getCookieForEmail(email);
   if (!cookieData) {
     throw new CookieExpiredError(email);
   }
 
-  const proxyConfig = process.env.PROXY_SERVER
-    ? {
-        server: process.env.PROXY_SERVER,
-        username: process.env.PROXY_USERNAME,
-        password: process.env.PROXY_PASSWORD,
-      }
-    : undefined;
-
-  const ctx = await browser.newContext({
-    viewport: { width: 1280, height: 900 },
-    locale: "id-ID",
-    proxy: proxyConfig,
-  });
-
-  await ctx.addCookies(buildPlaywrightCookies(cookieData));
-
+  const ctx = await launchAccountContext(email, { cookieData });
   const page = await ctx.newPage();
 
   console.log(`  [pin-cookie] Membuka ${targetUrl} ...`);
@@ -105,6 +65,7 @@ async function newCookiePage(browser, email, targetUrl, isMahesh = false) {
   const url = page.url();
   if (url.includes("/login") || url.includes("/LoginHelp")) {
     deleteCookieForEmail(email);
+    await ctx.close().catch(() => {});
     throw new CookieExpiredError(email);
   }
 
@@ -126,26 +87,18 @@ async function newCookiePage(browser, email, targetUrl, isMahesh = false) {
 }
 
 // ── Ganti PIN ─────────────────────────────────────────────
-/**
- * @param {import("playwright").Browser|null} browser - browser yang sudah jalan
- *   (dipakai bersama antar akun agar tidak launch Chromium berulang-ulang).
- *   Kalau tidak dioper, fungsi ini launch & tutup browser sendiri (standalone).
- */
 async function changePinsForProfilesCookie(
   email,
   password,
   targetProfiles,
   isMahesh = false,
-  browser = null,
 ) {
-  const ownBrowser    = !browser;
-  const activeBrowser = browser ?? await launchBrowser();
   const pinChanges = new Map();
   let page;
 
   try {
     const startUrl = "https://www.netflix.com/account/profiles";
-    page = await newCookiePage(activeBrowser, email, startUrl, isMahesh);
+    page = await newCookiePage(email, startUrl, isMahesh);
     await sleep(2000);
 
     const targets = targetProfiles.map((t) => t.trim().toLowerCase());
@@ -347,9 +300,7 @@ async function changePinsForProfilesCookie(
       await debugShot(page, `pin_no_changes_${email.split("@")[0]}`);
     }
   } finally {
-    // Selalu tutup context akun ini sendiri (biar tidak menumpuk kalau browser dipakai bersama)
     if (page) await page.context().close().catch(() => {});
-    if (ownBrowser) await activeBrowser.close();
   }
 
   return pinChanges;
@@ -359,5 +310,4 @@ module.exports = {
   changePinsForProfilesCookie,
   CookieExpiredError,
   WrongPasswordError,
-  launchBrowser,
 };

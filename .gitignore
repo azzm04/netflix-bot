@@ -13,3 +13,6 @@ npm-debug.log*
 device-kicker/cookies.json
 cookies.json
 mahesh.session
+
+# Persistent browser profiles per akun (localStorage/IndexedDB = sesi Netflix)
+browser-profiles/
