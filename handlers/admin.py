@@ -687,7 +687,7 @@ async def cmd_cekcookies(update: Update, context: ContextTypes.DEFAULT_TYPE):
             stderr=asyncio.subprocess.PIPE,
         )
         try:
-            _, stderr = await asyncio.wait_for(proc.communicate(), timeout=timeout_detik)
+            stdout, stderr = await asyncio.wait_for(proc.communicate(), timeout=timeout_detik)
         except asyncio.TimeoutError:
             proc.kill()
             await proc.wait()
@@ -699,9 +699,14 @@ async def cmd_cekcookies(update: Update, context: ContextTypes.DEFAULT_TYPE):
             return
 
         if proc.returncode != 0:
-            err_text = stderr.decode(errors="ignore").strip()[-500:] or "(tidak ada detail error)"
+            # Tampilkan stderr DAN stdout — kalau error-nya bukan exception JS biasa
+            # (mis. proses ke-kill duluan), detailnya sering nyangkut di stdout
+            # (log [cookie]/[kick] terakhir sebelum mati), bukan stderr.
+            err_text = stderr.decode(errors="ignore").strip()[-800:]
+            out_tail = stdout.decode(errors="ignore").strip()[-800:]
+            detail = err_text or out_tail or "(tidak ada output sama sekali — proses mungkin ke-kill langsung, cek RAM/OOM di server)"
             await pesan.edit_text(
-                f"❌ *Gagal jalankan pengecekan*\n\n`{err_text}`",
+                f"❌ *Gagal jalankan pengecekan* (exit code {proc.returncode})\n\n`{detail}`",
                 parse_mode="Markdown",
             )
             return
