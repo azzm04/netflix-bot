@@ -367,7 +367,13 @@ async function main() {
         "utf-8",
       );
       console.log(`\n[cookie] Selesai. Hasil ditulis ke: ${outputPath}`);
-      break;
+
+      // Exit eksplisit & bersih di sini. Setelah puluhan browser context
+      // dibuka-tutup berurutan dalam satu proses Node, sisa cleanup native
+      // Playwright/Chromium kadang bikin proses crash (mis. SIGABRT) pas mau
+      // keluar wajar — walau semua kerjaan (termasuk tulis file) sudah beres.
+      // File hasil sudah aman ditulis di atas (sync), jadi aman exit sekarang.
+      process.exit(0);
     }
 
     case "list": {

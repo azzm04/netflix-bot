@@ -698,22 +698,43 @@ async def cmd_cekcookies(update: Update, context: ContextTypes.DEFAULT_TYPE):
             )
             return
 
-        if proc.returncode != 0:
-            # Tampilkan stderr DAN stdout — kalau error-nya bukan exception JS biasa
-            # (mis. proses ke-kill duluan), detailnya sering nyangkut di stdout
-            # (log [cookie]/[kick] terakhir sebelum mati), bukan stderr.
+        # Cek file hasil DULU, apapun exit code-nya. Playwright/Chromium kadang
+        # crash pas mau exit (exit code negatif = kena signal, mis. -6/SIGABRT
+        # setelah puluhan browser context dibuka-tutup berurutan) padahal
+        # kerjaannya sendiri — termasuk tulis file — sudah selesai duluan.
+        # Jangan buang hasil yang sudah valid cuma gara-gara proses mati pas cleanup.
+        results = None
+        read_err = None
+        if os.path.exists(output_path):
+            try:
+                with open(output_path, "r") as f:
+                    data = json.load(f)
+                results = data.get("results", [])
+            except Exception as e:
+                read_err = e
+
+        if results is None:
+            # Beneran gagal — file hasil tidak ada / tidak valid sama sekali.
             err_text = stderr.decode(errors="ignore").strip()[-800:]
             out_tail = stdout.decode(errors="ignore").strip()[-800:]
             detail = err_text or out_tail or "(tidak ada output sama sekali — proses mungkin ke-kill langsung, cek RAM/OOM di server)"
+            if read_err:
+                detail += f"\n\n(file hasil ada tapi gagal dibaca: {read_err})"
             await pesan.edit_text(
                 f"❌ *Gagal jalankan pengecekan* (exit code {proc.returncode})\n\n`{detail}`",
                 parse_mode="Markdown",
             )
             return
 
-        with open(output_path, "r") as f:
-            data = json.load(f)
-        results = data.get("results", [])
+        crash_note = ""
+        if proc.returncode != 0:
+            logger.warning(
+                f"[cekcookies] Proses exit code {proc.returncode} tapi hasil di {output_path} tetap valid — dipakai."
+            )
+            crash_note = (
+                f"\n_(proses sempat berhenti tidak normal setelah semua akun selesai dicek "
+                f"— exit {proc.returncode}, hasil di bawah tetap valid)_\n"
+            )
     except Exception as e:
         await pesan.edit_text(f"❌ *Gagal jalankan pengecekan*\n\n`{e}`", parse_mode="Markdown")
         return
@@ -734,6 +755,7 @@ async def cmd_cekcookies(update: Update, context: ContextTypes.DEFAULT_TYPE):
     teks += f"✅ Valid   : *{ok_count}*\n"
     teks += f"❌ Expired : *{expired_count}*\n"
     teks += f"📊 Total   : *{len(results)}*\n"
+    teks += crash_note
 
     if expired_list:
         teks += "\n*Akun yang perlu update cookie* _(otomatis dihapus dari cookies.json)_:\n"
