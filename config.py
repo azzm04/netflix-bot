@@ -20,33 +20,32 @@ if not BOT_TOKEN:
 CREDENTIALS_FILE = "credentials.json"
 SPREADSHEET_NAME = "netflix account jaeminies"
 INVEST_EMAIL_SHEET_MAP = {
-    # Sheet rekapan_ena
     "cresser.gb@mahesh.co":           "rekapan_ena",
     "kylieanndodds2010.uk@mahesh.co": "rekapan_ena",
-    "rvisa25@maheshpro.com":          "rekapan_ena",    
-    # Sheet rekapan_umi
+    "rvisa25@maheshpro.com":          "rekapan_ena",   
+    
     "mixdue@stayhome.li":             "rekapan_umi",
     "ivotunaska@gmail.com":           "rekapan_umi",
     "ribdogash@stayhome.li":          "rekapan_umi",
     "aptputoak@fanclub.pm":           "rekapan_umi",
     "jasminecurdos@gmail.com":        "rekapan_umi",
-    # Sheet rekapan_ena_2 (mulai 14 Juni 2026)
+    
     "humpadhis@stayhome.li":          "rekapan_ena_2",
     "fitwhovex@fuwari.be":            "rekapan_ena_2",
-    # Sheet rekapan_ena_rose (mulai 1 Juni 2026)
+    
     "ivot.u.nask.a@gmail.com":          "rekapan_UMI_rose",
     "k.r.istel.anne1212@gmail.com":            "rekapan_UMI_rose",
     "ournapapt@stayhome.li":          "rekapan_UMI_rose",
     "wagmug733@fuwari.be":          "rekapan_UMI_rose",
 
-    "markbronston@ramaco.tech":          "rekapan_ena_5",
-    "skmiller11@ramaco.tech":          "rekapan_ena_5",
-    "rogersadam8198@ramaco.tech":          "rekapan_ena_5",
-    "kcherie86@ramaco.tech":          "rekapan_ena_5",
-    "joehelton13@ramaco.tech":          "rekapan_ena_5",
-    
     "humbinfoe@stayhome.li":          "rekapan_UMI_rose_2",
     "kittab982@tapi.re":          "rekapan_UMI_rose_2",
+    
+    "us3101tp7@ramaco.tech": "rekapan_ena_std_plan",
+    "us3001appletp4@ramaco.tech": "rekapan_ena_std_plan",
+    "splashwater_albercas.mx@mrthala.com": "rekapan_ena_std_plan",
+    "michel5@ramaco.tech": "rekapan_ena_std_plan",
+    "tjbzqu@mahesh.co": "rekapan_ena_std_plan",
 }
 # SHEET_MODAL dibuat dinamis per bulan di sheets_handler: "modal netflix_Juni", dst.
 SHEET_GESTUN = "rekapan"   # Sheet PENDAPATAN GESTUN di spreadsheet REKAPAN MODAL
