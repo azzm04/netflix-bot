@@ -37,7 +37,7 @@ Edit file `.env`:
 
 ```env
 SPREADSHEET_NAME=netflix account jaeminies  # nama spreadsheet kamu
-SHEETS_TO_CHECK=HARIAN,MINGGUAN,BULANAN        # sheet mana yang dicek
+SHEETS_TO_CHECK=HARIAN_DURASI-1,HARIAN_DURASI-2&3,MINGGUAN,BULANAN  # sheet mana yang dicek
 CRON_SCHEDULE=*/15 * * * *                     # cek setiap 15 menit
 HEADLESS=true                                  # false = lihat browser untuk debug
 ```

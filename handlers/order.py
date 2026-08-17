@@ -11,6 +11,7 @@ from telegram.helpers import escape_markdown
 from config import HARGA, HARGA_BULANAN
 from sheets_handler import (
     cari_slot_kosong,
+    pilih_sheet,
     hitung_tanggal_logout,
     tulis_logout_ke_sheet,
     tulis_rekapan,
@@ -441,7 +442,7 @@ async def terima_quick_order(update: Update, context: ContextTypes.DEFAULT_TYPE)
 
                 tanggal_logout = hitung_tanggal_logout(durasi)
                 harga = HARGA.get(durasi, "?")
-                sheet_info = "HARIAN" if durasi in [1, 2, 3] else "MINGGUAN"
+                sheet_info = pilih_sheet(durasi)
 
             else:
                 # BULANAN
@@ -560,7 +561,7 @@ async def callback_durasi(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
 
     durasi = int(query.data.split("_")[1])
     context.user_data["durasi"] = durasi
-    sheet_info = "HARIAN" if durasi in [1, 2, 3] else "MINGGUAN"
+    sheet_info = pilih_sheet(durasi)
 
     await query.edit_message_text(
         f"✅ Durasi: *{durasi} hari* (Sheet: {sheet_info})\n\n"
@@ -616,7 +617,7 @@ async def callback_device(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
                 slot = None
 
             if slot is None:
-                sheet_info = "HARIAN" if durasi in [1, 2, 3] else "MINGGUAN"
+                sheet_info = pilih_sheet(durasi)
                 await query.edit_message_text(
                     f"😔 *Maaf, stok akun di sheet {sheet_info} sedang habis.*\n\n"
                     "Semua slot sudah terisi. Hubungi admin.",
@@ -662,7 +663,7 @@ async def callback_device(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
         )
 
         # Notifikasi admin
-        sheet_info = "HARIAN" if durasi in [1, 2, 3] else "MINGGUAN"
+        sheet_info = pilih_sheet(durasi)
         await kirim_notif_admin(context, {
             "produk": f"Netflix {sheet_info} {durasi} Hari",
             "harga": HARGA.get(durasi, "?"),

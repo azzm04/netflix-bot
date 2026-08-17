@@ -62,7 +62,8 @@ COL_MODAL_KET      = 11  # K - Keterangan (Total Akun & Maker)
 PAJAK_MERCHANT = 0.007
 
 # ---- Nama sheet berdasarkan durasi ----
-SHEET_HARIAN = "HARIAN"       # Untuk durasi 1, 2, 3 hari
+SHEET_HARIAN_1  = "HARIAN_DURASI-1"     # Untuk durasi 1 hari
+SHEET_HARIAN_23 = "HARIAN_DURASI-2&3"   # Untuk durasi 2, 3 hari
 SHEET_MINGGUAN = "MINGGUAN"   # Untuk durasi 7 hari
 SHEET_BULANAN = "BULANAN"     # Untuk durasi 1 bulan, 2 bulan
 

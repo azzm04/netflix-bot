@@ -446,7 +446,7 @@ async function getAllProfilesForEmail(targetEmail) {
     return colG.split(/\bdan\b|[,&]/i).map((s) => s.trim().toLowerCase()).filter(Boolean);
   };
 
-  const sheetNames = (process.env.SHEETS_TO_CHECK ?? "HARIAN,MINGGUAN,BULANAN")
+  const sheetNames = (process.env.SHEETS_TO_CHECK ?? "HARIAN_DURASI-1,HARIAN_DURASI-2&3,MINGGUAN,BULANAN")
     .split(",").map((s) => s.trim()).filter(Boolean);
 
   const results = [];

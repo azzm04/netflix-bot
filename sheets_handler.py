@@ -9,7 +9,7 @@ from google.oauth2.service_account import Credentials
 from datetime import datetime, timedelta
 from config import (
     CREDENTIALS_FILE, SPREADSHEET_NAME,
-    SHEET_HARIAN, SHEET_MINGGUAN, SHEET_BULANAN,
+    SHEET_HARIAN_1, SHEET_HARIAN_23, SHEET_MINGGUAN, SHEET_BULANAN,
     COL_EMAIL, COL_PASSWORD, COL_PROFILE, COL_PIN,
     COL_LOGOUT, COL_PHONE, DATA_START_ROW, JAM_LOGOUT,
     HARGA, HARGA_BULANAN, DURASI_BULANAN_HARI,
@@ -131,7 +131,7 @@ def cek_stok():
     spreadsheet = get_spreadsheet()
     hasil = {}
 
-    for nama_sheet in [SHEET_HARIAN, SHEET_MINGGUAN]:
+    for nama_sheet in [SHEET_HARIAN_1, SHEET_HARIAN_23, SHEET_MINGGUAN]:
         try:
             sheet = spreadsheet.worksheet(nama_sheet)
             hasil[nama_sheet] = _hitung_slot_kosong(sheet.get_all_values())
@@ -238,7 +238,7 @@ def cek_logout():
     sheets_to_check = []
 
     # HARIAN & MINGGUAN
-    for nama_sheet in [SHEET_HARIAN, SHEET_MINGGUAN]:
+    for nama_sheet in [SHEET_HARIAN_1, SHEET_HARIAN_23, SHEET_MINGGUAN]:
         try:
             sheets_to_check.append((nama_sheet, spreadsheet.worksheet(nama_sheet)))
         except Exception:
@@ -470,7 +470,7 @@ def gantihari():
 
     # Kumpulkan semua sheet
     sheets_to_check = []
-    for nama_sheet in [SHEET_HARIAN, SHEET_MINGGUAN]:
+    for nama_sheet in [SHEET_HARIAN_1, SHEET_HARIAN_23, SHEET_MINGGUAN]:
         try:
             sheets_to_check.append((nama_sheet, spreadsheet.worksheet(nama_sheet)))
         except Exception:
@@ -515,12 +515,14 @@ def gantihari():
 # ─── Helper ────────────────────────────────────────────────
 
 def pilih_sheet(durasi: int):
-    """Pilih sheet: 1/2/3 → HARIAN, 7/14 → MINGGUAN."""
-    if durasi in [1, 2, 3]:
-        return SHEET_HARIAN
+    """Pilih sheet: 1 → HARIAN_DURASI-1, 2/3 → HARIAN_DURASI-2&3, 7/14 → MINGGUAN."""
+    if durasi == 1:
+        return SHEET_HARIAN_1
+    elif durasi in [2, 3]:
+        return SHEET_HARIAN_23
     elif durasi in [7, 14]:
         return SHEET_MINGGUAN
-    return SHEET_HARIAN
+    return SHEET_HARIAN_1
 
 
 def is_baris_data(baris):
