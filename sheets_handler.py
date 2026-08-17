@@ -1603,6 +1603,73 @@ def _sudah_ada_di_invest(sheet, tanggal_str: str, nomor: str, email_raw: str) ->
     return False
 
 
+def _hapus_blok_invest_untuk_tanggal(sheet, tanggal_target: set) -> int:
+    """
+    Hapus blok (baris header tanggal + baris data + baris subtotal) di sheet
+    invest_netflix untuk tanggal-tanggal yang ada di `tanggal_target`.
+
+    Dipanggil sebelum menulis ulang (skip_duplikat_check=True) supaya
+    /rekap_invest_ulang tidak menumpuk data dobel kalau tanggal yang sama
+    sudah pernah direkap sebelumnya.
+
+    Setiap blok dikenali dari pola baris (hasil tulisan _tulis_blok_ke_invest):
+    - Header  : hanya kolom A terisi (teks tanggal), B-E kosong (baris merge).
+    - Data    : kolom A DAN B terisi (nomor & tanggal).
+    - Subtotal: hanya kolom D terisi (total harga), A/B/C/E kosong.
+
+    Return: jumlah baris yang dihapus.
+    """
+    semua = sheet.get_all_values()
+
+    def cell(baris, idx):
+        return baris[idx].strip() if len(baris) > idx else ""
+
+    ranges = []  # list of (start_row_1idx, end_row_1idx) inklusif, siap dihapus
+    i = 0
+    n = len(semua)
+    while i < n:
+        a, b, c, d, e = (cell(semua[i], k) for k in range(5))
+        is_header = bool(a) and not (b or c or d or e)
+
+        if is_header and a in tanggal_target:
+            start = i + 1
+            j = i + 1
+            while j < n:
+                aj, bj, cj, dj, ej = (cell(semua[j], k) for k in range(5))
+                if aj and bj:
+                    j += 1
+                    continue
+                if dj and not (aj or bj or cj or ej):
+                    j += 1
+                break
+            ranges.append((start, j))
+            i = j
+        else:
+            i += 1
+
+    if not ranges:
+        return 0
+
+    sheet_id = sheet._properties["sheetId"]
+    requests = [
+        {
+            "deleteDimension": {
+                "range": {
+                    "sheetId":    sheet_id,
+                    "dimension":  "ROWS",
+                    "startIndex": start - 1,
+                    "endIndex":   end,
+                }
+            }
+        }
+        # Hapus dari bawah ke atas: menghapus baris bawah tidak menggeser index
+        # baris yang di atasnya, jadi range lain dalam batch ini tetap valid.
+        for start, end in sorted(ranges, key=lambda r: r[0], reverse=True)
+    ]
+    sheet.spreadsheet.batch_update({"requests": requests})
+    return sum(end - start + 1 for start, end in ranges)
+
+
 def rekap_invest_harian() -> dict:
     """
     Tulis rekapan hari ini ke spreadsheet invest_netflix.
@@ -1637,7 +1704,9 @@ def rekap_invest_harian() -> dict:
 def rekap_invest_ulang(tahun: int = None, bulan: int = None, tgl_mulai: int = 1) -> dict:
     """
     Rekap ulang data satu bulan ke invest_netflix.
-    Data yang sudah ada di sheet TIDAK dicek duplikat — asumsi sheet sudah dibersihkan.
+    Blok tanggal yang sudah ada di sheet untuk rentang ini dihapus dulu
+    (lihat _hapus_blok_invest_untuk_tanggal) sebelum ditulis ulang, supaya
+    rekap ulang berkali-kali tidak menumpuk data dobel.
 
     tahun, bulan  : default = bulan berjalan sekarang.
     tgl_mulai     : hari pertama yang direkap (default 1 = awal bulan).
@@ -1661,12 +1730,14 @@ def rekap_invest_ulang(tahun: int = None, bulan: int = None, tgl_mulai: int = 1)
     if not data_per_sheet:
         return {}
 
+    tanggal_target = set(tanggal_list)
     client = get_client()
     spreadsheet_invest = client.open_by_key(SPREADSHEET_INVEST_ID)
     hasil = {}
     for nama_sheet, baris_list in data_per_sheet.items():
         try:
             sheet = spreadsheet_invest.worksheet(nama_sheet)
+            _hapus_blok_invest_untuk_tanggal(sheet, tanggal_target)
             info = _tulis_blok_ke_invest(sheet, baris_list, skip_duplikat_check=True)
             hasil[nama_sheet] = {
                 "ditulis": info["ditulis"],
@@ -1687,7 +1758,9 @@ def rekap_invest_range_custom(
     Contoh: 31 Mei 2026 → 30 Juni 2026
 
     Mengambil data dari semua sheet REKAPAN yang tercakup dalam rentang,
-    lalu menulisnya ke invest_netflix (skip_duplikat_check=True — asumsi sheet sudah bersih).
+    lalu menulisnya ke invest_netflix (skip_duplikat_check=True). Blok tanggal
+    yang sudah ada di sheet untuk rentang ini dihapus dulu (lihat
+    _hapus_blok_invest_untuk_tanggal) supaya rekap ulang tidak dobel.
 
     Return: {nama_sheet_invest: {'ditulis': int, 'total': int}}
     """
@@ -1705,6 +1778,8 @@ def rekap_invest_range_custom(
     while d <= tgl_akhir:
         semua_tanggal.append(d)
         d += timedelta(days=1)
+
+    tanggal_target = {f"{d.day} {BULAN_EN[d.month]} {d.year}" for d in semua_tanggal}
 
     # Kelompokkan per bulan → per sheet REKAPAN
     from collections import defaultdict
@@ -1737,6 +1812,7 @@ def rekap_invest_range_custom(
     for nama_sheet, baris_list in semua_data.items():
         try:
             sheet = spreadsheet_invest.worksheet(nama_sheet)
+            _hapus_blok_invest_untuk_tanggal(sheet, tanggal_target)
             info = _tulis_blok_ke_invest(sheet, baris_list, skip_duplikat_check=True)
             hasil[nama_sheet] = {
                 "ditulis": info["ditulis"],

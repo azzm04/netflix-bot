@@ -373,7 +373,7 @@ async function scanAllDevices(page) {
 
 // ── Helper device matching (inline, sama seperti device-auditor) ──
 function _tokenize(text) {
-  const SW = new Set(["dan","browser","web","android","ios","ponsel","smart","hp","handphone","pc","the","a","an","tv","tab","tablet"]);
+  const SW = new Set(["dan","browser","web","android","ios","ponsel","smart","antarmuka","interface","hp","handphone","pc","the","a","an","tv","tab","tablet"]);
   return (text||"").toLowerCase().replace(/[.,()-]/g," ").split(/\s+/).map((w)=>w.trim()).filter((w)=>w.length>2&&!SW.has(w));
 }
 function _levenshtein(a,b) {
@@ -393,8 +393,9 @@ function _classifyDevice(text){
   const t=(text||"").toLowerCase();
   if(/\btv\b|smart\s*tv|android\s*tv|tv\s*box/.test(t))return"tv";
   if(/\btab(let)?\b|ipad/.test(t))return"tablet";
-  if(/\bpc\b|browser\s*web|laptop|notebook|macbook|chrome\s*-|windows|mac\s*os/.test(t))return"pc";
-  if(/\bhp\b|handphone|\biphone\b|redmi|xiaomi|oppo|vivo|infinix|realme|poco/.test(t))return"phone";
+  if(/\bpc\b|browser\s*web|laptop|notebook|macbook|thinkpad|zenbook|chrome\s*-|windows|mac\s*os/.test(t))return"pc";
+  if(/\bhp\b|handphone|ponsel|\biphone\b|\bip\b/.test(t))return"phone";
+  if(/\b(redmi|xiaomi|oppo|vivo|itel|infinix|realme|poco|iphone|ip)\b/.test(t))return"phone";
   return"unknown";
 }
 function _deviceMatchesAllowed(netflixName, allowedDevices){
@@ -436,8 +437,11 @@ function decideKickTargets(snapshot, expiredTargets, allProfileRows) {
     console.log("  [kick] ⚠ Tidak ada data profil lengkap — pakai logic target saja.");
     for (const d of snapshot) {
       if (d.isCurrent) continue;
-      if (!d.profileText) { addToKick(d); continue; }
-      if (expiredTargets.some((t) => profileNameMatches(extractProfileName(d.profileText), t, d.profileText)))
+      // "Tidak ada aktivitas" tanpa profil → selalu kick (jejak bot lama).
+      if (d.noActivity && !d.profileText) { addToKick(d); continue; }
+      // Selain itu, HANYA kick kalau device memang cocok profil yang expired —
+      // jangan kick device aktif hanya karena profileText gagal terparse.
+      if (d.profileText && expiredTargets.some((t) => profileNameMatches(extractProfileName(d.profileText), t, d.profileText)))
         addToKick(d);
     }
     return toKick.map((x) => x.deviceName);
@@ -521,7 +525,20 @@ function decideKickTargets(snapshot, expiredTargets, allProfileRows) {
 
 // ── Kick satu device berdasarkan nama ────────────────────
 async function kickDeviceByName(page, deviceName) {
-  for (let round = 0; round < 10; round++) {
+  const MAX_ROUNDS   = 50; // samakan dengan kickOneDevice di device-auditor.js
+  // MAX_ROUNDS saja tidak cukup: tiap round-miss bisa makan puluhan detik (lihat
+  // waitForKickToastMatch timeout 10s + wait stale-alert 5s dkk), jadi 50 round
+  // worst-case bisa >25 menit untuk SATU device — kalau banyak device sama-sama
+  // gagal, proses kick sequential bisa "tersandera" berjam-jam. Cap wall-clock
+  // memastikan satu device paling lama 3 menit sebelum dilewati.
+  const MAX_WALL_MS  = 3 * 60 * 1000;
+  const deadline      = Date.now() + MAX_WALL_MS;
+
+  for (let round = 0; round < MAX_ROUNDS; round++) {
+    if (Date.now() >= deadline) {
+      console.warn(`  [kick] ⏱ "${deviceName}" timeout ${MAX_WALL_MS / 1000}s — lanjut device berikutnya.`);
+      break;
+    }
     const cards = page.locator('li[data-uia^="device-list+"]');
     const count = await cards.count();
     let found   = false;
@@ -568,11 +585,11 @@ async function kickDeviceByName(page, deviceName) {
         await sleep(4000);
         return true;
       } else {
-        console.warn(`  [kick] ⚠ MISS: "${deviceName}" — toast tidak muncul.`);
+        console.warn(`  [kick] ⚠ MISS: "${deviceName}" — toast tidak muncul, retry...`);
         const closeBtn = page.locator('button[aria-label="Tutup Toast"], button[aria-label="Close"], button[aria-label="Dismiss"]').first();
         if (await closeBtn.isVisible({ timeout: 1000 }).catch(() => false)) await closeBtn.click().catch(() => {});
         await sleep(1500);
-        return false;
+        break; // retry round berikutnya, bukan langsung menyerah (samakan dengan device-auditor.js)
       }
     }
     if (!found) break;
