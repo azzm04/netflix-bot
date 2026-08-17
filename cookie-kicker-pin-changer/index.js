@@ -2,6 +2,8 @@
 
 
 require("dotenv").config();
+const fs = require("fs");
+const path = require("path");
 const cron = require("node-cron");
 const {
   getExpiredAccounts,
@@ -30,8 +32,46 @@ const CRON_SCHEDULE = process.env.CRON_SCHEDULE;
 const RUN_NOW = process.argv.includes("--run-now");
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
-// Lock agar tidak overlap antar cron tick
+// Lock dalam-memori agar tidak overlap antar cron tick DI PROSES YANG SAMA.
 let _isRunning = false;
+
+// ── Lock lintas-proses (file) ─────────────────────────────
+// _isRunning saja tidak cukup: kalau index.js jalan persistent (cron internal)
+// DAN ada proses "node index.js --run-now" terpisah dipicu manual (mis. dari
+// bot Telegram /logout-sekarang), keduanya proses OS yang beda — _isRunning
+// di masing-masing proses tidak saling tahu. Lock file (berisi PID) mencegah
+// dua proses kick jalan bersamaan dan rebutan device/akun yang sama.
+const LOCK_FILE = path.join(__dirname, ".kick.lock");
+
+function isPidAlive(pid) {
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch (err) {
+    return err.code === "EPERM"; // ada tapi beda owner → anggap masih hidup
+  }
+}
+
+function acquireLock() {
+  if (fs.existsSync(LOCK_FILE)) {
+    const pidLama = parseInt(fs.readFileSync(LOCK_FILE, "utf8").trim(), 10);
+    if (pidLama && isPidAlive(pidLama)) return false; // proses lain masih jalan
+    // Lock basi (proses lama sudah mati tanpa sempat hapus lock) — timpa.
+  }
+  fs.writeFileSync(LOCK_FILE, String(process.pid));
+  return true;
+}
+
+function releaseLock() {
+  try {
+    if (
+      fs.existsSync(LOCK_FILE) &&
+      parseInt(fs.readFileSync(LOCK_FILE, "utf8").trim(), 10) === process.pid
+    ) {
+      fs.unlinkSync(LOCK_FILE);
+    }
+  } catch {}
+}
 
 // ── Notifikasi cookie expired ─────────────────────────────
 async function notifyCookieExpired(email, profiles) {
@@ -48,7 +88,18 @@ async function notifyCookieExpired(email, profiles) {
 // ── Main ──────────────────────────────────────────────────
 async function processExpiredAccounts() {
   if (_isRunning) {
-    console.log("[cookie-server] Proses sebelumnya masih berjalan — skip.");
+    console.log("[cookie-server] Proses sebelumnya masih berjalan (proses ini) — skip.");
+    return;
+  }
+  if (!acquireLock()) {
+    console.log("[cookie-server] Proses lain (PID beda) sedang pegang lock — skip.");
+    if (RUN_NOW) {
+      await sendTelegram(
+        "⚠️ *Trigger Manual Dibatalkan*\n\n" +
+        "Proses kick/ganti-PIN otomatis (jadwal rutin) sedang berjalan. " +
+        "Coba lagi beberapa menit lagi."
+      ).catch(() => {});
+    }
     return;
   }
   _isRunning = true;
@@ -380,6 +431,7 @@ async function processExpiredAccounts() {
     console.error("[cookie-server] Fatal error:", fatalErr.message);
   } finally {
     _isRunning = false;
+    releaseLock();
   }
 }
 

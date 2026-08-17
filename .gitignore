@@ -16,3 +16,6 @@ mahesh.session
 
 # Persistent browser profiles per akun (localStorage/IndexedDB = sesi Netflix)
 browser-profiles/
+
+# Lock file lintas-proses untuk cookie-kicker-pin-changer/index.js
+.kick.lock

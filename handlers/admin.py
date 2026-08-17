@@ -779,6 +779,77 @@ async def cmd_cekcookies(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     await pesan.edit_text(teks, parse_mode="Markdown")
 
+
+# ─── /logout_sekarang ──────────────────────────────────────
+
+async def cmd_logout_sekarang(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """
+    Trigger manual: jalankan cookie-kicker-pin-changer/index.js sekarang
+    (di luar jadwal cron rutinnya), untuk kick device & ganti PIN akun
+    yang sudah expired tanpa perlu nunggu tick berikutnya.
+
+    Fire-and-forget dari sisi bot: index.js sendiri yang kirim notifikasi
+    hasil kick/ganti PIN/ringkasan ke Telegram (lihat notify.js di sana,
+    pakai BOT_TOKEN & ADMIN_ID yang sama). index.js juga sudah punya
+    file-lock lintas-proses jadi aman kalau kepencet pas cron rutinnya
+    (tiap 15 menit) kebetulan lagi jalan — otomatis dibatalkan + dapat notif.
+    """
+    if update.effective_user.id != ADMIN_ID:
+        await update.message.reply_text("⛔ Hanya admin utama.")
+        return
+
+    import asyncio
+    import os
+
+    base_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    ckpc_dir = os.path.join(base_dir, "cookie-kicker-pin-changer")
+
+    pesan = await update.message.reply_text("🚀 Memicu proses kick device & ganti PIN sekarang...")
+
+    try:
+        proc = await asyncio.create_subprocess_exec(
+            "node", "index.js", "--run-now",
+            cwd=ckpc_dir,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
+        )
+    except Exception as e:
+        logger.error(f"Error logout-sekarang: {e}", exc_info=True)
+        await pesan.edit_text(f"⚠️ Gagal memicu proses.\n\n`{e}`", parse_mode="Markdown")
+        return
+
+    await pesan.edit_text(
+        "✅ *Proses dipicu!*\n\n"
+        "Kalau ada akun expired, hasil kick device / ganti PIN akan dikirim "
+        "otomatis ke sini begitu selesai (bisa beberapa menit tergantung "
+        "jumlah akun). Kalau jadwal rutin (tiap 15 menit) kebetulan lagi "
+        "jalan, trigger ini otomatis dibatalkan dan kamu akan dapat notif.",
+        parse_mode="Markdown"
+    )
+
+    # Pantau di background: kalau prosesnya crash duluan sebelum sempat kirim
+    # notif sendiri, kabari admin. Tidak menahan respons awal di atas.
+    asyncio.create_task(_pantau_logout_sekarang(proc, update.effective_chat.id, context))
+
+
+async def _pantau_logout_sekarang(proc, chat_id: int, context: ContextTypes.DEFAULT_TYPE):
+    try:
+        _, stderr = await proc.communicate()
+        if proc.returncode != 0:
+            err_text = stderr.decode(errors="ignore").strip()[-800:]
+            logger.error(f"[logout-sekarang] exit code {proc.returncode}: {err_text}")
+            await context.bot.send_message(
+                chat_id=chat_id,
+                text=(
+                    f"⚠️ *Proses kick/ganti PIN berhenti tidak normal* (exit code {proc.returncode})\n\n"
+                    f"`{err_text or '(tidak ada output error)'}`"
+                ),
+                parse_mode="Markdown",
+            )
+    except Exception as e:
+        logger.error(f"[logout-sekarang] Gagal pantau proses: {e}", exc_info=True)
+
+
 # ─── /setcookie ────────────────────────────────────────────
 
 async def cmd_setcookie(update: Update, context: ContextTypes.DEFAULT_TYPE):
