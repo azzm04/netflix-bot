@@ -28,7 +28,7 @@ async def stok(update: Update, context: ContextTypes.DEFAULT_TYPE):
         hasil = cek_stok()
         teks = "📊 *STOK SLOT KOSONG*\n\n"
         for sheet, jumlah in hasil.items():
-            teks += f"• {sheet}: *{jumlah}* slot\n"
+            teks += f"• `{sheet}`: *{jumlah}* slot\n"
         await pesan.edit_text(teks, parse_mode="Markdown")
     except Exception as e:
         logger.error(f"Error cek stok: {e}", exc_info=True)
@@ -64,7 +64,7 @@ async def ceklogout(update: Update, context: ContextTypes.DEFAULT_TYPE):
         teks += "━━━━━━━━━━━━━━━━\n"
 
         for sheet, items in by_sheet.items():
-            teks += f"\n📌 *{sheet}:*\n"
+            teks += f"\n📌 `{sheet}`:\n"
             for item in items[:15]:  # Max 15 per sheet biar tidak kepanjangan
                 teks += (
                     f"• Baris {item['baris']}: `{item['email']}`\n"
@@ -105,7 +105,7 @@ async def cmd_gantihari(update: Update, context: ContextTypes.DEFAULT_TYPE):
             teks += f"Masih ada *{len(data)} akun* yang belum lewat waktu logout:\n\n"
             for item in data[:10]:
                 teks += (
-                    f"• Baris {item['baris']} ({item['sheet']})\n"
+                    f"• Baris {item['baris']} (`{item['sheet']}`)\n"
                     f"  `{item['email']}` — {item['profil']}\n"
                     f"  ⏰ {item['logout_text']}\n\n"
                 )

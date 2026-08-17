@@ -26,7 +26,7 @@ async def kirim_notif_admin(context: ContextTypes.DEFAULT_TYPE, data: dict):
     teks = (
         f"🎬 *Order Baru Masuk*\n"
         f"┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄\n"
-        f"📦 Paket     : {data['produk']}\n"
+        f"📦 Paket     : `{data['produk']}`\n"
         f"💰 Harga     : {data['harga']}\n"
         f"👤 Pelanggan : {pelanggan_aman}\n"
         f"✉️ Akun      : {data['email']}\n"

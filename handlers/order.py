@@ -564,7 +564,7 @@ async def callback_durasi(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
     sheet_info = pilih_sheet(durasi)
 
     await query.edit_message_text(
-        f"✅ Durasi: *{durasi} hari* (Sheet: {sheet_info})\n\n"
+        f"✅ Durasi: *{durasi} hari* (Sheet: `{sheet_info}`)\n\n"
         f"Masukkan *nomor / nama pelanggan*:",
         parse_mode="Markdown"
     )
@@ -619,7 +619,7 @@ async def callback_device(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
             if slot is None:
                 sheet_info = pilih_sheet(durasi)
                 await query.edit_message_text(
-                    f"😔 *Maaf, stok akun di sheet {sheet_info} sedang habis.*\n\n"
+                    f"😔 *Maaf, stok akun di sheet* `{sheet_info}` *sedang habis.*\n\n"
                     "Semua slot sudah terisi. Hubungi admin.",
                     parse_mode="Markdown"
                 )
