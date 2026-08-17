@@ -1229,7 +1229,7 @@ def format_template(data: dict, tanggal_logout: str, nomor_pelanggan: str, duras
             f"🔖 Profile ⦂ {data['profil']}\n"
             f"🔒 Pin ⦂ {data['pin']}\n"
             f"⏰ Logout ⦂ {tanggal_logout}\n"
-            f"✅ wajib kirim bukti login maks 5 jam untuk aktifkan garansi!\n"
+            f"✅ wajib kirim bukti login maks 1x24 jam untuk aktifkan garansi!\n"
             f"\n"
             f"𓄳  🌸.  𝗦𝗡𝗞 𝐖𝐀𝐉𝐈𝐁 𝐁𝐀𝐂𝐀 ☘️📮 ◎\n"
             f"✿ — tidak menerima refund setelah akun diterima\n"
