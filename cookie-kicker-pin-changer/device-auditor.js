@@ -73,8 +73,11 @@ function parseAllowedDevices(colG) {
 function classifyDeviceCategory(text) {
   const t = (text || "").toLowerCase();
 
-  // Sinyal TV (cek paling awal, paling spesifik)
-  if (/\btv\b|smart\s*tv|android\s*tv|tv\s*box/.test(t)) return "tv";
+  // Sinyal TV (cek paling awal, paling spesifik). Termasuk dekoder/STB —
+  // brand seperti Xiaomi juga bikin TV box/dekoder (mis. "Xiaomi - Dekoder"),
+  // jangan sampai ketimpa fallback brand di bawah yang nganggep brand itu
+  // selalu HP.
+  if (/\btv\b|smart\s*tv|android\s*tv|tv\s*box|dekoder|decoder|set.?top.?box|\bstb\b/.test(t)) return "tv";
 
   // Sinyal tablet
   if (/\btab(let)?\b|ipad/.test(t)) return "tablet";

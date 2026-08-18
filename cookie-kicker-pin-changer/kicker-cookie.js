@@ -404,7 +404,10 @@ function _wordsSimilar(a,b){
 }
 function _classifyDevice(text){
   const t=(text||"").toLowerCase();
-  if(/\btv\b|smart\s*tv|android\s*tv|tv\s*box/.test(t))return"tv";
+  // Cek dekoder/STB SEBELUM fallback brand HP di bawah — brand seperti Xiaomi
+  // juga bikin TV box/dekoder (mis. "Xiaomi - Dekoder"), jangan sampai
+  // ketimpa fallback yang nganggep brand itu selalu HP.
+  if(/\btv\b|smart\s*tv|android\s*tv|tv\s*box|dekoder|decoder|set.?top.?box|\bstb\b/.test(t))return"tv";
   if(/\btab(let)?\b|ipad/.test(t))return"tablet";
   if(/\bpc\b|browser\s*web|laptop|notebook|macbook|thinkpad|zenbook|chrome\s*-|windows|mac\s*os/.test(t))return"pc";
   if(/\bhp\b|handphone|ponsel|\biphone\b|\bip\b/.test(t))return"phone";
