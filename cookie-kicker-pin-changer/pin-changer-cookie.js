@@ -179,12 +179,21 @@ async function changePinsForProfilesCookie(
     for (const target of targets) {
       console.log(`\n  [pin-cookie] ➔ Memproses profil target: "${target}"`);
 
-      // 1. Pastikan selalu mulai dari halaman daftar profil di setiap iterasi
+      // 1. Pastikan selalu mulai dari halaman daftar profil di setiap iterasi.
+      // Kalau baru saja simpan PIN profil sebelumnya, Netflix kadang masih
+      // di tengah redirect chain-nya sendiri walau sudah ditunggu di step 8
+      // — goto() ini bisa gagal "interrupted by another navigation". Retry
+      // sekali setelah jeda, jangan langsung gagalkan seluruh profil lain.
       if (!page.url().includes("/account/profiles")) {
-        await page.goto(startUrl, {
-          waitUntil: "domcontentloaded",
-          timeout: TIMEOUT_NAV,
-        });
+        try {
+          await page.goto(startUrl, { waitUntil: "domcontentloaded", timeout: TIMEOUT_NAV });
+        } catch (navErr) {
+          console.warn(
+            `  [pin-cookie] ⚠ goto() gagal (${navErr.message.split("\n")[0]}), tunggu & retry sekali...`,
+          );
+          await sleep(3000);
+          await page.goto(startUrl, { waitUntil: "domcontentloaded", timeout: TIMEOUT_NAV });
+        }
         await sleep(2000);
       }
 
@@ -354,13 +363,20 @@ async function changePinsForProfilesCookie(
       );
       await savePinBtn.click();
 
-      // Tunggu hingga URL berpindah keluar dari halaman pin-entry
+      // Tunggu hingga URL berpindah keluar dari halaman pin-entry, LALU
+      // tunggu redirect lanjutannya settle (Netflix redirect sendiri:
+      // pin-entry → /settings/...?profilePinUpdated=success → dst). Kalau
+      // tidak ditunggu penuh, page.goto() di iterasi profil berikutnya bisa
+      // gagal "interrupted by another navigation" karena nyelonong di
+      // tengah redirect chain Netflix yang belum kelar.
       await page
         .waitForURL((url) => !url.toString().includes("pin-entry"), {
           timeout: TIMEOUT_NAV,
         })
         .catch(() => {});
-      await sleep(1000);
+      await page.waitForLoadState("domcontentloaded").catch(() => {});
+      await page.waitForLoadState("networkidle", { timeout: 8000 }).catch(() => {});
+      await sleep(1500);
 
       // 9. Verifikasi: pastikan tidak ada error message (PIN tidak tersimpan)
       const saveError = page.locator(
