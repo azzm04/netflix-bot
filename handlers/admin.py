@@ -945,6 +945,94 @@ async def cmd_setcookie(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await pesan.edit_text(f"⚠️ Gagal menyimpan cookie: `{e}`", parse_mode="Markdown")
 
 
+# ─── /login_tv ─────────────────────────────────────────────
+
+async def cmd_login_tv(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """
+    Login-kan TV Netflix pakai kode 8 digit dari layar TV pelanggan, lewat
+    sesi cookie yang sama dengan kick/ganti-PIN (tv-login-cookie.js).
+
+    Cara pakai: /login_tv email@domain.com 03535357
+    """
+    if update.effective_user.id != ADMIN_ID:
+        await update.message.reply_text("⛔ Hanya admin utama.")
+        return
+
+    args = context.args
+    if not args or len(args) < 2:
+        await update.message.reply_text(
+            "⚠️ *Format salah*\n\n"
+            "Cara pakai:\n"
+            "`/login_tv email@domain.com 03535357`\n\n"
+            "Kode 8 digit didapat dari layar TV pelanggan setelah mereka "
+            "buka aplikasi Netflix di TV.",
+            parse_mode="Markdown"
+        )
+        return
+
+    email    = args[0].strip()
+    kode_raw = args[1].strip()
+    kode     = "".join(ch for ch in kode_raw if ch.isdigit())
+
+    if "@" not in email:
+        await update.message.reply_text("⚠️ Email tidak valid.")
+        return
+
+    if len(kode) != 8:
+        await update.message.reply_text(
+            f"⚠️ Kode harus 8 digit angka. Diterima: `{kode_raw}` ({len(kode)} digit).",
+            parse_mode="Markdown"
+        )
+        return
+
+    import asyncio
+    import os
+
+    base_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    ckpc_dir = os.path.join(base_dir, "cookie-kicker-pin-changer")
+
+    pesan = await update.message.reply_text(
+        f"📺 Login-kan TV untuk `{email}`, mohon tunggu...",
+        parse_mode="Markdown"
+    )
+
+    try:
+        proc = await asyncio.create_subprocess_exec(
+            "node", "tv-login-cookie.js", "login", email, kode,
+            cwd=ckpc_dir,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
+        )
+        try:
+            stdout, stderr = await asyncio.wait_for(proc.communicate(), timeout=120)
+        except asyncio.TimeoutError:
+            proc.kill()
+            await proc.wait()
+            await pesan.edit_text(
+                "❌ *Timeout* setelah 120 detik.\n"
+                "Proses di server mungkin macet — cek log server atau coba lagi.",
+                parse_mode="Markdown",
+            )
+            return
+    except Exception as e:
+        logger.error(f"Error login_tv: {e}", exc_info=True)
+        await pesan.edit_text(f"⚠️ Gagal jalankan proses.\n\n`{e}`", parse_mode="Markdown")
+        return
+
+    if proc.returncode == 0:
+        await pesan.edit_text(
+            f"✅ *TV berhasil di-login!*\n\n📧 Akun: `{email}`",
+            parse_mode="Markdown"
+        )
+    else:
+        detail = stderr.decode(errors="ignore").strip() or stdout.decode(errors="ignore").strip()
+        detail = (detail or "(tidak ada output)")[-500:]
+        await pesan.edit_text(
+            f"❌ *Gagal login TV.*\n\n📧 Akun: `{email}`\n\n`{detail}`",
+            parse_mode="Markdown"
+        )
+
+
 async def cancel(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     """Batalkan proses."""
     await update.message.reply_text(
