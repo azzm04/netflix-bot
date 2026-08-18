@@ -145,6 +145,80 @@ async function newCookiePage(email, targetUrl) {
   return page;
 }
 
+// ── Ambil kode verifikasi 6-digit (nfpro / Mahesh Bot / fallback Telegram) ──
+// Diekstrak dari checkForExtraVerification supaya bisa dipakai ulang di luar
+// halaman MFA penuh — juga dipakai pin-changer-cookie.js untuk modal
+// "Email a code" saat ganti PIN akun tanpa password (PAKE KODE).
+async function fetchVerificationCode(page, email, isMahesh = false) {
+  let code6 = null;
+  try {
+    if (isMahesh) {
+      const { fetchFromMaheshBot } = require("./mahesh-fetcher");
+      for (let mA = 1; mA <= 3; mA++) {
+        console.log(`  [mfa] Fetch kode via Mahesh Bot (percobaan ${mA}/3)...`);
+        try { code6 = await fetchFromMaheshBot(email, "vercode", { retries: 0, retryDelay: 5000 }); break; }
+        catch (mErr) {
+          console.warn(`  [mfa] Mahesh Bot gagal (percobaan ${mA}): ${mErr.message}`);
+          if (mA < 3) {
+            const resend = page.locator('button:has-text("Kirim Ulang Kode"), button:has-text("Resend"), button:has-text("Email a code"), button:has-text("Kirim kode")').first();
+            if (await resend.isVisible({ timeout: 3000 }).catch(() => false)) await resend.click();
+            await sleep(5000);
+          } else throw mErr;
+        }
+      }
+    } else {
+      const { fetchNetflixCode } = require("./nfpro");
+      console.log(`  [mfa] Auto-fetch kode 6 digit via nfpro...`);
+      code6 = await fetchNetflixCode(email, "signin6", { retries: 2, retryDelay: 5000 });
+    }
+    console.log(`  [mfa] Kode: ${maskCode(code6)}`);
+  } catch (err) {
+    console.warn(`  [mfa] Auto-fetch gagal: ${err.message}`);
+    console.log(`  [mfa] Minta kode manual via Telegram...`);
+    try {
+      code6 = await requestCodeFromTelegram(email, "6digit", isMahesh ? "MAHESH" : "");
+    } catch (tgErr) {
+      throw new Error(`MFA gagal untuk ${email}: ${tgErr.message}`);
+    }
+  }
+
+  if (!code6) throw new Error(`Kode MFA tidak tersedia untuk ${email}`);
+  return code6;
+}
+
+// ── Isi kode ke input digit (single box atau banyak box terpisah) ────────
+async function fillCodeInputs(page, code6) {
+  const digits = code6.replace(/\D/g, "").split("");
+  console.log(`  [mfa] Isi ${digits.length} digit: ${maskCode(code6)}`);
+
+  let inputs = [];
+  for (const sel of ['input[inputmode="numeric"]', 'input[maxlength="1"]', 'input[autocomplete="one-time-code"]']) {
+    inputs = await page.$$(sel);
+    if (inputs.length >= digits.length) break;
+  }
+  console.log(`  [mfa] Input boxes ditemukan: ${inputs.length}`);
+
+  if (inputs.length === 0) {
+    const single = page.locator('input[type="text"], input[type="number"]').first();
+    if (await single.isVisible({ timeout: 2000 }).catch(() => false)) await single.fill(code6);
+  } else if (inputs.length === 1) {
+    console.log(`  [mfa] Single input — isi sekaligus: ${code6}`);
+    await inputs[0].click(); await sleep(100);
+    await inputs[0].evaluate((el) => { el.value = ""; });
+    await inputs[0].evaluate((el, val) => {
+      const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value").set;
+      setter.call(el, val);
+      el.dispatchEvent(new Event("input", { bubbles: true }));
+      el.dispatchEvent(new Event("change", { bubbles: true }));
+    }, code6);
+    await sleep(300);
+  } else {
+    for (let i = 0; i < digits.length && i < inputs.length; i++) {
+      await inputs[i].click(); await inputs[i].press(digits[i]); await sleep(100);
+    }
+  }
+}
+
 // ── Verifikasi MFA ────────────────────────────────────────
 async function checkForExtraVerification(page, email, isMahesh = false) {
   await sleep(1000);
@@ -181,69 +255,8 @@ async function checkForExtraVerification(page, email, isMahesh = false) {
     console.log(`  [mfa] Tunggu 10 detik agar email terkirim...`);
     await sleep(10_000);
 
-    let code6 = null;
-    try {
-      if (isMahesh) {
-        const { fetchFromMaheshBot } = require("./mahesh-fetcher");
-        for (let mA = 1; mA <= 3; mA++) {
-          console.log(`  [mfa] Fetch kode via Mahesh Bot (percobaan ${mA}/3)...`);
-          try { code6 = await fetchFromMaheshBot(email, "vercode", { retries: 0, retryDelay: 5000 }); break; }
-          catch (mErr) {
-            console.warn(`  [mfa] Mahesh Bot gagal (percobaan ${mA}): ${mErr.message}`);
-            if (mA < 3) {
-              const resend = page.locator('button:has-text("Kirim Ulang Kode"), button:has-text("Resend"), button:has-text("Email a code"), button:has-text("Kirim kode")').first();
-              if (await resend.isVisible({ timeout: 3000 }).catch(() => false)) await resend.click();
-              await sleep(5000);
-            } else throw mErr;
-          }
-        }
-      } else {
-        const { fetchNetflixCode } = require("./nfpro");
-        console.log(`  [mfa] Auto-fetch kode 6 digit via nfpro...`);
-        code6 = await fetchNetflixCode(email, "signin6", { retries: 2, retryDelay: 5000 });
-      }
-      console.log(`  [mfa] Kode: ${maskCode(code6)}`);
-    } catch (err) {
-      console.warn(`  [mfa] Auto-fetch gagal: ${err.message}`);
-      console.log(`  [mfa] Minta kode manual via Telegram...`);
-      try {
-        code6 = await requestCodeFromTelegram(email, "6digit", isMahesh ? "MAHESH" : "");
-      } catch (tgErr) {
-        throw new Error(`MFA gagal untuk ${email}: ${tgErr.message}`);
-      }
-    }
-
-    if (!code6) throw new Error(`Kode MFA tidak tersedia untuk ${email}`);
-
-    const digits = code6.replace(/\D/g, "").split("");
-    console.log(`  [mfa] Isi ${digits.length} digit: ${maskCode(code6)}`);
-
-    let inputs = [];
-    for (const sel of ['input[inputmode="numeric"]', 'input[maxlength="1"]', 'input[autocomplete="one-time-code"]']) {
-      inputs = await page.$$(sel);
-      if (inputs.length >= digits.length) break;
-    }
-    console.log(`  [mfa] Input boxes ditemukan: ${inputs.length}`);
-
-    if (inputs.length === 0) {
-      const single = page.locator('input[type="text"], input[type="number"]').first();
-      if (await single.isVisible({ timeout: 2000 }).catch(() => false)) await single.fill(code6);
-    } else if (inputs.length === 1) {
-      console.log(`  [mfa] Single input — isi sekaligus: ${code6}`);
-      await inputs[0].click(); await sleep(100);
-      await inputs[0].evaluate((el) => { el.value = ""; });
-      await inputs[0].evaluate((el, val) => {
-        const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value").set;
-        setter.call(el, val);
-        el.dispatchEvent(new Event("input", { bubbles: true }));
-        el.dispatchEvent(new Event("change", { bubbles: true }));
-      }, code6);
-      await sleep(300);
-    } else {
-      for (let i = 0; i < digits.length && i < inputs.length; i++) {
-        await inputs[i].click(); await inputs[i].press(digits[i]); await sleep(100);
-      }
-    }
+    const code6 = await fetchVerificationCode(page, email, isMahesh);
+    await fillCodeInputs(page, code6);
 
     await sleep(500);
     const submitBtn = page.locator('button[type="submit"], button:has-text("Kirim")').first();
@@ -702,6 +715,8 @@ module.exports = {
   kickDevicesForProfilesCookie,
   CookieExpiredError,
   checkForExtraVerification,
+  fetchVerificationCode,
+  fillCodeInputs,
   refreshAndSaveCookies,
   waitForKickToastMatch,
   extractProfileName,

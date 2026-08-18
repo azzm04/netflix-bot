@@ -7,7 +7,12 @@ const {
   deleteCookieForEmail,
   launchAccountContext,
 } = require("./cookie-helper");
-const { CookieExpiredError, checkForExtraVerification } = require("./kicker-cookie");
+const {
+  CookieExpiredError,
+  checkForExtraVerification,
+  fetchVerificationCode,
+  fillCodeInputs,
+} = require("./kicker-cookie");
 
 const TIMEOUT_NAV = 45_000;
 const URL_PIN_SETTINGS = "https://www.netflix.com/settings/migration";
@@ -84,6 +89,74 @@ async function newCookiePage(email, targetUrl, isMahesh = false) {
 
   console.log(`  [pin-cookie] Berhasil akses: ${page.url()}`);
   return page;
+}
+
+// ── Verifikasi modal "First, let's make sure it's you" via Email a Code ──
+// Fallback untuk akun tanpa password asli (kolom B = "PAKE KODE") — pilih
+// opsi "Email a code" alih-alih "Confirm password", lalu isi kode 6 digit
+// yang sama seperti alur MFA login biasa (nfpro / Mahesh Bot / Telegram manual).
+// Return true kalau verifikasi berhasil (form input PIN sudah muncul).
+async function verifyPinChangeViaEmailCode(page, email, isMahesh, emailCodeBtn) {
+  for (let attempt = 1; attempt <= 3; attempt++) {
+    console.log(`  [pin-cookie] [kode-email] Percobaan ${attempt}/3...`);
+
+    if (await emailCodeBtn.isVisible({ timeout: 2000 }).catch(() => false)) {
+      await emailCodeBtn.click();
+    } else {
+      // Di percobaan ulang tombolnya biasanya berubah jadi "Kirim Ulang Kode"/Resend.
+      const resend = page.locator(
+        'button:has-text("Kirim Ulang Kode"), button:has-text("Resend"), button:has-text("Email a code"), button:has-text("Kirim kode")'
+      ).first();
+      if (await resend.isVisible({ timeout: 2000 }).catch(() => false)) await resend.click();
+    }
+
+    await page.waitForFunction(
+      () => document.querySelectorAll('input[inputmode="numeric"], input[maxlength="1"]').length >= 4 ||
+            document.body.innerText.toLowerCase().includes("code will expire") ||
+            document.body.innerText.toLowerCase().includes("kode tersebut akan kedaluwarsa"),
+      { timeout: 15_000, polling: 500 }
+    ).catch(() => {});
+
+    console.log(`  [pin-cookie] [kode-email] Tunggu 10 detik agar email terkirim...`);
+    await sleep(10_000);
+
+    const code6 = await fetchVerificationCode(page, email, isMahesh);
+    await fillCodeInputs(page, code6);
+
+    await sleep(500);
+    const submitBtn = page.locator('button[type="submit"], button:has-text("Kirim")').first();
+    if (await submitBtn.isVisible({ timeout: 2000 }).catch(() => false)) {
+      await submitBtn.click();
+    } else {
+      await page.keyboard.press("Enter");
+    }
+
+    await sleep(3000);
+
+    // Sukses kalau modal verifikasi sudah hilang & form input PIN muncul.
+    const pinReady = await page
+      .locator('[data-uia="profile-lock+pin-input"]')
+      .isVisible({ timeout: 5000 })
+      .catch(() => false);
+    if (pinReady) {
+      console.log(`  [pin-cookie] [kode-email] ✅ Verifikasi berhasil.`);
+      return true;
+    }
+
+    const bodyAfter = await page.locator("body").innerText().catch(() => "");
+    const isWrong =
+      bodyAfter.toLowerCase().includes("kode tersebut salah") ||
+      bodyAfter.toLowerCase().includes("code is incorrect") ||
+      bodyAfter.toLowerCase().includes("kode salah");
+    if (isWrong && attempt < 3) {
+      console.warn(`  [pin-cookie] [kode-email] ❌ Kode salah, coba lagi...`);
+      await sleep(2000);
+      continue;
+    }
+  }
+
+  console.error(`  [pin-cookie] [kode-email] ✗ Verifikasi gagal setelah 3 percobaan untuk ${email}.`);
+  return false;
 }
 
 // ── Ganti PIN ─────────────────────────────────────────────
@@ -178,46 +251,68 @@ async function changePinsForProfilesCookie(
       }
 
       // 5. Cek Form MFA (Confirm Password / Email Code)
-      const confirmPwBtn = page.locator(
-        'button:has([data-uia="account-mfa-button-PASSWORD+label"])',
-      );
-      if (await confirmPwBtn.isVisible({ timeout: 3000 }).catch(() => false)) {
-        console.log(
-          `  [pin-cookie] MFA Terdeteksi, memilih Confirm Password...`,
+      const isPakeKode = (password || "").toUpperCase() === "PAKE KODE";
+
+      if (isPakeKode) {
+        // Akun tanpa password asli → WAJIB lewat "Email a code", tidak ada
+        // fallback ke password karena memang tidak ada password yang valid.
+        const emailCodeBtn = page.locator(
+          'button:has([data-uia="account-mfa-button-OTP_EMAIL+label"])',
         );
-        await confirmPwBtn.click();
-        await sleep(1000);
-
-        // 6. Masukkan Password Akun
-        const pwInput = page.locator(
-          '[data-uia="collect-password-input-modal-entry"]',
+        if (await emailCodeBtn.isVisible({ timeout: 3000 }).catch(() => false)) {
+          console.log(
+            `  [pin-cookie] MFA Terdeteksi (akun PAKE KODE), memilih Email a Code...`,
+          );
+          const ok = await verifyPinChangeViaEmailCode(page, email, isMahesh, emailCodeBtn);
+          if (!ok) {
+            console.warn(`  [pin-cookie] ⚠ Verifikasi kode email gagal untuk "${target}" — skip.`);
+            continue;
+          }
+        }
+        // Kalau tombolnya tidak muncul sama sekali, anggap tidak perlu
+        // verifikasi tambahan (Netflix kadang skip step ini) — lanjut seperti biasa.
+      } else {
+        const confirmPwBtn = page.locator(
+          'button:has([data-uia="account-mfa-button-PASSWORD+label"])',
         );
-        const konfirmPwButtons = page.locator(
-        '[data-uia="collect-input-submit-cta"]',
-      );
-        console.log(`  [pin-cookie] Memasukkan password akun...`);
-        await pwInput.fill(password);
-        await sleep(500);
+        if (await confirmPwBtn.isVisible({ timeout: 3000 }).catch(() => false)) {
+          console.log(
+            `  [pin-cookie] MFA Terdeteksi, memilih Confirm Password...`,
+          );
+          await confirmPwBtn.click();
+          await sleep(1000);
 
-        // Tekan Enter untuk submit modal password
-        await konfirmPwButtons.click();
+          // 6. Masukkan Password Akun
+          const pwInput = page.locator(
+            '[data-uia="collect-password-input-modal-entry"]',
+          );
+          const konfirmPwButtons = page.locator(
+            '[data-uia="collect-input-submit-cta"]',
+          );
+          console.log(`  [pin-cookie] Memasukkan password akun...`);
+          await pwInput.fill(password);
+          await sleep(500);
 
-        // Tunggu hingga masuk ke input PIN atau muncul error password
-        await Promise.race([
-          page
-            .locator('[data-uia="profile-lock+pin-input"]')
-            .waitFor({ state: "visible", timeout: 10_000 }),
-          page
-            .locator('[data-uia="input-message-error"]')
-            .waitFor({ state: "visible", timeout: 10_000 }),
-        ]).catch(() => {});
+          // Tekan Enter untuk submit modal password
+          await konfirmPwButtons.click();
 
-        const pwError = page.locator(
-          '[data-uia="input-message-error"], .ui-message-error',
-        );
-        if (await pwError.isVisible({ timeout: 1000 }).catch(() => false)) {
-          console.error(`  [pin-cookie] ✗ Password ditolak.`);
-          throw new WrongPasswordError(email);
+          // Tunggu hingga masuk ke input PIN atau muncul error password
+          await Promise.race([
+            page
+              .locator('[data-uia="profile-lock+pin-input"]')
+              .waitFor({ state: "visible", timeout: 10_000 }),
+            page
+              .locator('[data-uia="input-message-error"]')
+              .waitFor({ state: "visible", timeout: 10_000 }),
+          ]).catch(() => {});
+
+          const pwError = page.locator(
+            '[data-uia="input-message-error"], .ui-message-error',
+          );
+          if (await pwError.isVisible({ timeout: 1000 }).catch(() => false)) {
+            console.error(`  [pin-cookie] ✗ Password ditolak.`);
+            throw new WrongPasswordError(email);
+          }
         }
       }
 

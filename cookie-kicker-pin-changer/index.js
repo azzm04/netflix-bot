@@ -138,19 +138,22 @@ async function processExpiredAccounts() {
       (a) => !a.isSkipped || a.blockLabel === "MAHESH",
     ); // semua + MAHESH (ROSE tetap PIN-only)
 
-    const toPin = expiredList.filter((a) => a.isSkipped && !a.noPassword); // MAHESH DAN ROSE UNTUK YANG TIDAK ADA PASSWORD DI SKIP
+    // noPassword (kolom B = "PAKE KODE") TIDAK lagi di-skip dari ganti PIN —
+    // pin-changer-cookie.js sekarang punya fallback "Email a code" untuk akun
+    // yang tidak punya password asli, jadi tetap masuk antrian toPin/toPinMeet.
+    const toPin = expiredList.filter((a) => a.isSkipped); // MAHESH & ROSE
     const toPinMeet = expiredList.filter(
-      (a) => !a.isSkipped && a.isMeet && !a.noPassword,
-    ); // MEET, punya password
+      (a) => !a.isSkipped && a.isMeet,
+    ); // MEET
 
-    const noPasswordSkipped = expiredList.filter(
+    const noPasswordFallback = expiredList.filter(
       (a) => (a.isSkipped || a.isMeet) && a.noPassword,
     );
-    if (noPasswordSkipped.length > 0) {
+    if (noPasswordFallback.length > 0) {
       console.log(
-        `\n[cookie-server] ⚠ ${noPasswordSkipped.length} akun di-skip (PAKE KODE, tidak ada password):`,
+        `\n[cookie-server] ℹ ${noPasswordFallback.length} akun PAKE KODE (tanpa password) — ganti PIN via verifikasi Email a Code:`,
       );
-      for (const a of noPasswordSkipped) {
+      for (const a of noPasswordFallback) {
         console.log(
           `  - ${a.email} / ${a.profile} (${a.sheetName} baris ${a.rowIndex})`,
         );
