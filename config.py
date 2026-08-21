@@ -20,24 +20,6 @@ if not BOT_TOKEN:
 CREDENTIALS_FILE = "credentials.json"
 SPREADSHEET_NAME = "netflix account jaeminies"
 INVEST_EMAIL_SHEET_MAP = {
-    "cresser.gb@mahesh.co":           "rekapan_ena",
-    "kylieanndodds2010.uk@mahesh.co": "rekapan_ena",
-    "rvisa25@maheshpro.com":          "rekapan_ena",   
-    
-    "mixdue@stayhome.li":             "rekapan_umi",
-    "ivotunaska@gmail.com":           "rekapan_umi",
-    "ribdogash@stayhome.li":          "rekapan_umi",
-    "aptputoak@fanclub.pm":           "rekapan_umi",
-    "jasminecurdos@gmail.com":        "rekapan_umi",
-    
-    "humpadhis@stayhome.li":          "rekapan_ena_2",
-    "fitwhovex@fuwari.be":            "rekapan_ena_2",
-    
-    "ivot.u.nask.a@gmail.com":          "rekapan_UMI_rose",
-    "k.r.istel.anne1212@gmail.com":            "rekapan_UMI_rose",
-    "ournapapt@stayhome.li":          "rekapan_UMI_rose",
-    "wagmug733@fuwari.be":          "rekapan_UMI_rose",
-
     "humbinfoe@stayhome.li":          "rekapan_UMI_rose_2",
     "kittab982@tapi.re":          "rekapan_UMI_rose_2",
     
@@ -46,6 +28,11 @@ INVEST_EMAIL_SHEET_MAP = {
     "splashwater_albercas.mx@mrthala.com": "rekapan_ena_std_plan",
     "michel5@ramaco.tech": "rekapan_ena_std_plan",
     "tjbzqu@mahesh.co": "rekapan_ena_std_plan",
+
+    "chapman.brooke.11@gmail.com" : "rekapan_ena_rose_21",
+    "wagmug733@fuwari.be" : "rekapan_ena_rose_21",
+    "lagion777@fanclub.pm" : "rekapan_ena_rose_21",
+    "ivot.u.nask.a@gmail.com" : "rekapan_ena_rose_21",
 }
 # SHEET_MODAL dibuat dinamis per bulan di sheets_handler: "modal netflix_Juni", dst.
 SHEET_GESTUN = "rekapan"   # Sheet PENDAPATAN GESTUN di spreadsheet REKAPAN MODAL
