@@ -230,8 +230,21 @@ async function setupAccountProfiles(email) {
         await createLockBtn.click();
         await sleep(2000);
         
+        // --- VERIFIKASI (Password / OTP) ---
+        // Jika diminta masukkan password, kita pilih opsi fallback ke Email
+        const passInput = page.locator('input[type="password"]');
+        if (await passInput.isVisible({ timeout: 2000 }).catch(() => false)) {
+            console.error(`[account-setup] Netflix meminta konfirmasi password untuk ${name}...`);
+            // Klik "Forgot Password" / "Use a sign-in code" / "Email a code"
+            const fallbackLink = page.locator('a:has-text("Email a code"), button:has-text("Email a code"), a:has-text("Use a sign-in code"), button:has-text("Use a sign-in code")').first();
+            if (await fallbackLink.isVisible().catch(() => false)) {
+                await fallbackLink.click();
+                await sleep(2000);
+            }
+        }
+
         // Cek "First, let's make sure it's you" -> Email a code
-        const emailCodeBtn = page.locator('[data-uia="account-mfa-button-OTP_EMAIL"] button').first();
+        const emailCodeBtn = page.locator('button[data-uia="account-mfa-button-OTP_EMAIL"], [data-uia="account-mfa-button-OTP_EMAIL"] button, button:has-text("Email a code")').first();
         if (await emailCodeBtn.isVisible().catch(() => false)) {
           console.error(`[account-setup] Meminta OTP email untuk ${name}...`);
           await emailCodeBtn.click();
