@@ -149,15 +149,32 @@ async function setupAccountProfiles(email) {
       }
     }
 
+    // Biarkan proses submit form sebelumnya (Kids/Language) selesai terlebih dahulu
+    // agar tidak terjadi bentrok navigasi (ERR_ABORTED).
+    await sleep(4000);
+
     // Step 4: Menyiapkan PIN
     console.error(`[account-setup] Menyiapkan PIN untuk setiap profil...`);
     const { fetchVerificationCode, fillCodeInputs } = require("./kicker-cookie");
     const pinData = [];
 
-    await page.goto("https://www.netflix.com/account/profiles", {
-      waitUntil: "domcontentloaded",
-      timeout: TIMEOUT_NAV,
-    });
+    const safeGoto = async (url) => {
+        for (let r = 0; r < 3; r++) {
+            try {
+                await page.goto(url, { waitUntil: "domcontentloaded", timeout: TIMEOUT_NAV });
+                return;
+            } catch (err) {
+                if (err.message.includes("ERR_ABORTED") && r < 2) {
+                    console.error(`[account-setup] Navigasi aborted, retry ${r+1}...`);
+                    await sleep(2000);
+                } else {
+                    throw err;
+                }
+            }
+        }
+    };
+
+    await safeGoto("https://www.netflix.com/account/profiles");
     
     await sleep(2000);
     
@@ -166,7 +183,7 @@ async function setupAccountProfiles(email) {
       console.error(`[account-setup] Memproses PIN untuk profil: ${name}`);
       
       if (!page.url().includes("/account/profiles")) {
-        await page.goto("https://www.netflix.com/account/profiles", { waitUntil: "domcontentloaded" });
+        await safeGoto("https://www.netflix.com/account/profiles");
         await sleep(2000);
       }
 
