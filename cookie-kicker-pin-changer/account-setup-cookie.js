@@ -1,10 +1,22 @@
 "use strict";
 
 require("dotenv").config();
+const fs = require("fs");
 const { launchAccountContext, getCookieForEmail } = require("./cookie-helper");
 
 const TIMEOUT_NAV = 45_000;
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+
+// ── Debug Screenshot (sama seperti pin-changer-cookie.js/kicker-cookie.js) ──
+function debugShot(page, name) {
+  const dir = process.env.DEBUG_SHOT_DIR ?? "/tmp/nfdebug";
+  try {
+    fs.mkdirSync(dir, { recursive: true });
+  } catch {}
+  return page
+    .screenshot({ path: `${dir}/${name}_${Date.now()}.png`, fullPage: true })
+    .catch(() => {});
+}
 
 const PROFILE_NAMES = [
   "CUSTARD", "ELLIOT", "DEXTER", "BLAIR", "NOVA",
@@ -158,9 +170,15 @@ async function setupAccountProfiles(email) {
     const { fetchVerificationCode, fillCodeInputs } = require("./kicker-cookie");
     const pinData = [];
 
-    // Cek apakah akun ini adalah MAHESH/ROSE
-    const { getAllProfilesForEmail } = require("./sheets");
+    // Cek apakah akun ini adalah MAHESH/ROSE + ambil password dari sheet.
+    // Verifikasi Profile Lock diprioritaskan lewat PASSWORD (lebih andal &
+    // tidak bergantung rantai fetch OTP yang rapuh). Kalau kolom B = "PAKE KODE"
+    // (tidak punya password asli), baru fallback ke Email code — pola yang
+    // sama persis dengan pin-changer-cookie.js.
+    const { getAllProfilesForEmail, getPasswordForEmail } = require("./sheets");
     let isMaheshAccount = false;
+    let accountPassword = "";
+    let isPakeKode = true; // default aman: kalau password tak ditemukan, pakai jalur kode
     try {
         const pList = await getAllProfilesForEmail(email);
         if (pList && pList.length > 0) {
@@ -169,7 +187,15 @@ async function setupAccountProfiles(email) {
     } catch (e) {
         console.error(`[account-setup] Cek tipe akun gagal: ${e.message}`);
     }
-    console.error(`[account-setup] Tipe akun: ${isMaheshAccount ? "MAHESH" : "MEET/NFPRO"}`);
+    try {
+        const pw = await getPasswordForEmail(email);
+        accountPassword = pw.password;
+        // Pakai password hanya kalau ADA password asli (found & bukan "PAKE KODE").
+        isPakeKode = pw.noPassword || !pw.found || !accountPassword;
+    } catch (e) {
+        console.error(`[account-setup] Ambil password gagal: ${e.message}`);
+    }
+    console.error(`[account-setup] Tipe akun: ${isMaheshAccount ? "MAHESH" : "MEET/NFPRO"} | Verifikasi: ${isPakeKode ? "EMAIL CODE (PAKE KODE)" : "PASSWORD"}`);
 
     const safeGoto = async (url) => {
         for (let r = 0; r < 3; r++) {
@@ -224,52 +250,97 @@ async function setupAccountProfiles(email) {
       await page.waitForURL("**/settings/lock/**", { timeout: 10000 }).catch(() => {});
       await sleep(2000);
       
-      // 5. Cek apakah button Create a Profile Lock ada
+      // 5. Halaman profile-lock-page punya DUA kondisi (dikonfirmasi dari HTML real):
+      //  - Lock OFF (profil belum pernah di-PIN): hanya ada satu tombol
+      //    <button data-uia="profile-lock-off+add-button">Create a Profile Lock</button>
+      //  - Lock ON (profil sudah punya PIN): ada kartu status + tombol
+      //    <button data-uia="profile-lock-page+edit-button">Edit PIN</button>
+      // Deteksi lewat visibilitas tombol langsung (bukan teks status), karena
+      // kondisi OFF tidak punya elemen teks "On/Off" sama sekali. Selector Edit
+      // ini sama persis dengan yang sudah terbukti jalan di pin-changer-cookie.js.
       const createLockBtn = page.locator('button[data-uia="profile-lock-off+add-button"]');
-      if (await createLockBtn.isVisible().catch(() => false)) {
-        await createLockBtn.click();
-        await sleep(2000);
-        
-        // --- VERIFIKASI (Password / OTP) ---
-        // Jika diminta masukkan password, kita pilih opsi fallback ke Email
-        const passInput = page.locator('input[type="password"]');
-        if (await passInput.isVisible({ timeout: 2000 }).catch(() => false)) {
-            console.error(`[account-setup] Netflix meminta konfirmasi password untuk ${name}...`);
-            // Klik "Forgot Password" / "Use a sign-in code" / "Email a code"
-            const fallbackLink = page.locator('a:has-text("Email a code"), button:has-text("Email a code"), a:has-text("Use a sign-in code"), button:has-text("Use a sign-in code")').first();
-            if (await fallbackLink.isVisible().catch(() => false)) {
-                await fallbackLink.click();
-                await sleep(2000);
-            }
-        }
+      const editLockBtn = page.locator('button[data-uia="profile-lock-page+edit-button"]');
 
-        // Cek "First, let's make sure it's you" -> Email a code
-        const emailCodeBtn = page.locator('button[data-uia="account-mfa-button-OTP_EMAIL"], [data-uia="account-mfa-button-OTP_EMAIL"] button, button:has-text("Email a code")').first();
-        if (await emailCodeBtn.isVisible().catch(() => false)) {
-          console.error(`[account-setup] Meminta OTP email untuk ${name}...`);
-          await emailCodeBtn.click();
-          
-          await page.waitForFunction(
-            () => document.querySelectorAll('input[inputmode="numeric"], input[maxlength="1"]').length >= 4 ||
-                  document.body.innerText.toLowerCase().includes("code will expire") ||
-                  document.body.innerText.toLowerCase().includes("kode tersebut akan kedaluwarsa"),
-            { timeout: 15000, polling: 500 }
-          ).catch(() => {});
-          
-          const code6 = await fetchVerificationCode(page, email, isMaheshAccount);
-          if (code6) {
-              await fillCodeInputs(page, code6);
-              await sleep(500);
-              const submitBtn = page.locator('button[data-uia="collect-input-submit-cta"], button[type="submit"]').first();
-              if (await submitBtn.isVisible().catch(() => false)) {
-                await submitBtn.click();
-              } else {
-                await page.keyboard.press("Enter");
-              }
-              await sleep(3000);
-          } else {
-              console.error(`[account-setup] Gagal mendapatkan OTP untuk ${name}. Melewati profil ini.`);
-              continue; // Skip profil ini jika gagal OTP
+      const createVisible = await createLockBtn.isVisible({ timeout: 8000 }).catch(() => false);
+      const editVisible = !createVisible && (await editLockBtn.isVisible({ timeout: 3000 }).catch(() => false));
+
+      if (createVisible || editVisible) {
+        console.error(`[account-setup] ${createVisible ? "Lock belum aktif, klik Create" : "Lock sudah aktif, klik Edit"} untuk ${name}...`);
+        await (createVisible ? createLockBtn : editLockBtn).click();
+        await sleep(2000);
+
+        // --- VERIFIKASI "First, let's make sure it's you" ---
+        // Netflix menampilkan pilihan metode: Confirm Password / Email a code.
+        // Prioritas PASSWORD kalau akun punya password asli (lebih andal),
+        // fallback Email code untuk akun "PAKE KODE". Sama seperti pin-changer-cookie.js.
+        if (!isPakeKode) {
+          // Jalur PASSWORD
+          const confirmPwBtn = page.locator(
+            'button:has([data-uia="account-mfa-button-PASSWORD+label"]), button[data-uia="account-mfa-button-PASSWORD"]'
+          ).first();
+          if (await confirmPwBtn.isVisible({ timeout: 3000 }).catch(() => false)) {
+            console.error(`[account-setup] Verifikasi via Confirm Password untuk ${name}...`);
+            await confirmPwBtn.click();
+            await sleep(1000);
+          }
+
+          const pwInput = page.locator(
+            '[data-uia="collect-password-input-modal-entry"], input[type="password"]'
+          ).first();
+          if (await pwInput.isVisible({ timeout: 5000 }).catch(() => false)) {
+            await pwInput.fill(accountPassword);
+            await sleep(500);
+            const pwSubmit = page.locator('[data-uia="collect-input-submit-cta"], button[type="submit"]').first();
+            if (await pwSubmit.isVisible().catch(() => false)) {
+              await pwSubmit.click();
+            } else {
+              await page.keyboard.press("Enter");
+            }
+
+            // Tunggu masuk input PIN atau muncul error password
+            await Promise.race([
+              page.locator('[data-uia="profile-lock+pin-input"]').waitFor({ state: "visible", timeout: 10000 }),
+              page.locator('[data-uia="input-message-error"]').waitFor({ state: "visible", timeout: 10000 }),
+            ]).catch(() => {});
+
+            const pwError = page.locator('[data-uia="input-message-error"], .ui-message-error');
+            if (await pwError.isVisible({ timeout: 1000 }).catch(() => false)) {
+              console.error(`[account-setup] Password ditolak untuk ${name}. Melewati profil ini.`);
+              await debugShot(page, `account_setup_pw_rejected_${name}`);
+              continue; // Skip profil ini jika password salah
+            }
+          }
+        } else {
+          // Jalur EMAIL CODE (akun tanpa password asli / PAKE KODE)
+          const emailCodeBtn = page.locator(
+            'button:has([data-uia="account-mfa-button-OTP_EMAIL+label"]), [data-uia="account-mfa-button-OTP_EMAIL"] button, button[data-uia="account-mfa-button-OTP_EMAIL"], button:has-text("Email a code"), button:has-text("Kirim kode")'
+          ).first();
+          if (await emailCodeBtn.isVisible().catch(() => false)) {
+            console.error(`[account-setup] Meminta OTP email untuk ${name}...`);
+            await emailCodeBtn.click();
+
+            await page.waitForFunction(
+              () => document.querySelectorAll('input[inputmode="numeric"], input[maxlength="1"]').length >= 4 ||
+                    document.body.innerText.toLowerCase().includes("code will expire") ||
+                    document.body.innerText.toLowerCase().includes("kode tersebut akan kedaluwarsa"),
+              { timeout: 15000, polling: 500 }
+            ).catch(() => {});
+
+            const code6 = await fetchVerificationCode(page, email, isMaheshAccount);
+            if (code6) {
+                await fillCodeInputs(page, code6);
+                await sleep(500);
+                const submitBtn = page.locator('button[data-uia="collect-input-submit-cta"], button[type="submit"]').first();
+                if (await submitBtn.isVisible().catch(() => false)) {
+                  await submitBtn.click();
+                } else {
+                  await page.keyboard.press("Enter");
+                }
+                await sleep(3000);
+            } else {
+                console.error(`[account-setup] Gagal mendapatkan OTP untuk ${name}. Melewati profil ini.`);
+                continue; // Skip profil ini jika gagal OTP
+            }
           }
         }
       }
@@ -294,7 +365,8 @@ async function setupAccountProfiles(email) {
           await sleep(2000);
         }
       } else {
-        console.error(`[account-setup] Halaman input PIN tidak terbuka untuk ${name}`);
+        console.error(`[account-setup] Halaman input PIN tidak terbuka untuk ${name} (URL: ${page.url()}, createBtn=${createVisible}, editBtn=${editVisible})`);
+        await debugShot(page, `account_setup_no_pin_${name}`);
       }
     }
 

@@ -510,9 +510,51 @@ async function getAllProfilesForEmail(targetEmail) {
   return results;
 }
 
+/**
+ * Ambil password akun (kolom B) untuk sebuah email dari semua sheet.
+ * Dipakai account-setup-cookie.js untuk memilih jalur verifikasi Profile Lock:
+ * kalau ada password asli -> Confirm Password; kalau "PAKE KODE" -> Email code.
+ *
+ * @param {string} targetEmail
+ * @returns {Promise<{ password: string, noPassword: boolean, found: boolean }>}
+ */
+async function getPasswordForEmail(targetEmail) {
+  const sheets = await getSheets();
+  const spreadsheetId = await findSpreadsheetId();
+
+  const sheetNames = (process.env.SHEETS_TO_CHECK ?? "HARIAN_DURASI-1,HARIAN_DURASI-2&3,MINGGUAN,BULANAN")
+    .split(",").map((s) => s.trim()).filter(Boolean);
+
+  for (const sheetName of sheetNames) {
+    let rows;
+    try {
+      const res = await sheets.spreadsheets.values.get({ spreadsheetId, range: sheetName });
+      rows = res.data.values ?? [];
+    } catch {
+      continue;
+    }
+
+    for (const row of rows) {
+      const colA = row[COL_EMAIL]?.trim() ?? "";
+      if (colA.toLowerCase() !== targetEmail.toLowerCase()) continue;
+
+      const password = row[COL_PASSWORD]?.trim() ?? "";
+      if (!password) continue; // baris email ini tanpa isi password, coba baris lain
+      return {
+        password,
+        noPassword: password.toUpperCase() === "PAKE KODE",
+        found: true,
+      };
+    }
+  }
+
+  return { password: "", noPassword: false, found: false };
+}
+
 module.exports = {
   getExpiredAccounts,
   getAllProfilesForEmail,
+  getPasswordForEmail,
   markAsKicked,
   updatePin,
   findSpreadsheetId,
