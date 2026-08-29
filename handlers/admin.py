@@ -7,7 +7,7 @@ import logging
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import ContextTypes, ConversationHandler
 from config import ADMIN_ID, NOTIF_ORDER_IDS
-from sheets_handler import cek_stok, cek_logout, gantihari, rekap_pendapatan, closing_hari, rekap_invest_harian, rekap_invest_ulang, rekap_invest_range_custom
+from sheets_handler import cek_stok, cek_logout, gantihari, rekap_pendapatan, closing_hari, rekap_invest_harian, rekap_invest_ulang, rekap_invest_range_custom, update_profiles_and_pins
 from handlers.auth import is_allowed
 from utils.pin_manager import verifikasi_pin, ganti_pin as _ganti_pin, verifikasi_pin_admin, ganti_pin_admin as _ganti_pin_admin
 
@@ -1031,6 +1031,133 @@ async def cmd_login_tv(update: Update, context: ContextTypes.DEFAULT_TYPE):
             f"❌ *Gagal login TV.*\n\n📧 Akun: `{email}`\n\n`{detail}`",
             parse_mode="Markdown"
         )
+
+
+# ─── /setting_akun ─────────────────────────────────────────
+
+async def cmd_setting_akun(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """
+    Setup akun Netflix baru: simpan cookie, setup profil, set PIN, update spreadsheet.
+    Format: /setting_akun email NetflixId SecureNetflixId
+    """
+    if update.effective_user.id != ADMIN_ID:
+        await update.message.reply_text("⛔ Hanya admin utama.")
+        return
+
+    args = context.args
+    if not args or len(args) < 3:
+        await update.message.reply_text(
+            "⚠️ *Format salah*\n\n"
+            "Cara pakai:\n"
+            "`/setting_akun email NetflixId SecureNetflixId`",
+            parse_mode="Markdown"
+        )
+        return
+
+    email      = args[0].strip()
+    netflix_id = args[1].strip()
+    secure_id  = args[2].strip()
+
+    if "@" not in email:
+        await update.message.reply_text("⚠️ Email tidak valid.")
+        return
+
+    try:
+        await update.message.delete()
+    except Exception:
+        pass
+
+    pesan = await update.effective_chat.send_message("⏳ Menyimpan cookie ke server...")
+
+    import os
+    import json
+    import asyncio
+    from datetime import datetime, timezone
+
+    base_dir     = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    ckpc_dir     = os.path.join(base_dir, "cookie-kicker-pin-changer")
+    cookies_file = os.path.join(ckpc_dir, "cookies.json")
+
+    try:
+        if os.path.exists(cookies_file):
+            with open(cookies_file, "r") as f:
+                cookies = json.load(f)
+        else:
+            cookies = {}
+
+        cookies[email.lower()] = {
+            "netflixId":       netflix_id,
+            "secureNetflixId": secure_id,
+            "memclid":         None,
+            "nfvdid":          None,
+            "savedAt":         datetime.now(timezone.utc).isoformat(),
+        }
+
+        with open(cookies_file, "w") as f:
+            json.dump(cookies, f, indent=2)
+
+        await pesan.edit_text(f"✅ *Cookie disimpan!*\n\n⏳ Setup profil untuk `{email}`...\nStep 1-3: Generate profil, setting Kids, dan Bahasa.", parse_mode="Markdown")
+        
+        proc = await asyncio.create_subprocess_exec(
+            "node", "account-setup-cookie.js", email,
+            cwd=ckpc_dir,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
+        )
+        
+        try:
+            stdout, stderr = await asyncio.wait_for(proc.communicate(), timeout=300) # 5 menit
+        except asyncio.TimeoutError:
+            proc.kill()
+            await proc.wait()
+            await pesan.edit_text("❌ *Timeout* saat setup profil.")
+            return
+
+        if proc.returncode != 0:
+            err_text = stderr.decode(errors="ignore").strip()
+            await pesan.edit_text(f"❌ *Gagal setup profil.*\n\n`{err_text}`", parse_mode="Markdown")
+            return
+            
+        output_str = stdout.decode(errors="ignore").strip()
+        # Find the JSON block in stdout (last line)
+        try:
+            lines = output_str.split('\n')
+            json_str = lines[-1]
+            result = json.loads(json_str)
+            if not result.get("success"):
+                await pesan.edit_text(f"❌ *Gagal setup profil.*\n\n`{result.get('error')}`", parse_mode="Markdown")
+                return
+                
+            profiles = result.get("profiles", [])
+            pinData = result.get("pinData", [])
+            
+            # Step 4: Update spreadsheet dengan nama-nama profil dan PIN
+            update_res = update_profiles_and_pins(email, pinData)
+            
+            if update_res:
+                await pesan.edit_text(
+                    f"✅ *Setup Profil & PIN Selesai!*\n\n"
+                    f"📧 Email: `{email}`\n"
+                    f"👥 Profil: {', '.join(profiles)}\n\n"
+                    f"Semua PIN telah diset dan disimpan di Spreadsheet.",
+                    parse_mode="Markdown"
+                )
+            else:
+                await pesan.edit_text(
+                    f"✅ *Setup Profil Selesai (di Netflix)*\n\n"
+                    f"📧 Email: `{email}`\n"
+                    f"👥 Profil: {', '.join(profiles)}\n\n"
+                    f"⚠️ Gagal mengupdate nama profil dan PIN di Spreadsheet (akun tidak ditemukan/kosong di {email}).",
+                    parse_mode="Markdown"
+                )
+                
+        except json.JSONDecodeError:
+            await pesan.edit_text(f"❌ *Gagal parsing output dari script.*\n\n`{output_str}`", parse_mode="Markdown")
+            return
+
+    except Exception as e:
+        logger.error(f"Error setting_akun: {e}", exc_info=True)
+        await pesan.edit_text(f"⚠️ Gagal: `{e}`", parse_mode="Markdown")
 
 
 async def cancel(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:

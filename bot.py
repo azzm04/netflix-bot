@@ -1,4 +1,4 @@
-﻿# ============================================================
+# ============================================================
 #  bot.py — Entry point bot Netflix Telegram
 # ============================================================
 
@@ -55,6 +55,7 @@ from handlers.admin import (
     cmd_cekcookies, cmd_setcookie,
     cmd_logout_sekarang,
     cmd_login_tv,
+    cmd_setting_akun,
 )
 from handlers.group import (
     cmd_feeadmin, callback_fee_pilih_tanggal, terima_tanggal_fee,
@@ -127,6 +128,7 @@ async def post_init(application):
                 BotCommand("setcookie", "Simpan cookie akun expired"),
                 BotCommand("logout_sekarang", "Kick device & ganti PIN akun expired sekarang"),
                 BotCommand("login_tv", "Login-kan TV pakai kode 8 digit dari layar TV"),
+                BotCommand("setting_akun", "Setup akun Netflix baru & generate profil"),
                 BotCommand("cancel", "Batalkan proses"),
             ],
             scope=BotCommandScopeChat(chat_id=ADMIN_ID)
@@ -314,6 +316,7 @@ def main():
     app.add_handler(CommandHandler("setcookie", cmd_setcookie, filters=PRIVATE))
     app.add_handler(CommandHandler("logout_sekarang", cmd_logout_sekarang, filters=PRIVATE))
     app.add_handler(CommandHandler("login_tv", cmd_login_tv, filters=PRIVATE))
+    app.add_handler(CommandHandler("setting_akun", cmd_setting_akun, filters=PRIVATE))
     app.add_handler(CommandHandler("cancel", cancel, filters=PRIVATE))
 
     # Command khusus GROUP (rekap, closing, feeadmin)

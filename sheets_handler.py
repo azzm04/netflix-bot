@@ -1832,3 +1832,53 @@ def _parse_tanggal_str_ke_day(tanggal_str: str) -> int:
         return int(tanggal_str.split()[0])
     except Exception:
         return 0
+
+def update_profiles_and_pins(email: str, pinData: list) -> int:
+    """
+    Cari 5 baris dengan email yang sama di SHEETS_TO_CHECK, lalu isi
+    kolom C (profil) dan kolom D (PIN) secara berurutan.
+    pinData: list of dict, misal [{"name": "ELLIOT", "pin": "1234"}, ...]
+    Return jumlah baris yang berhasil diupdate.
+    """
+    spreadsheet = get_spreadsheet()
+    sheets_to_check_names = [SHEET_HARIAN_1, SHEET_HARIAN_23, SHEET_MINGGUAN, SHEET_BULANAN]
+    
+    total_updated = 0
+    profil_idx = 0
+    max_profil = len(pinData)
+
+    # Pakai batch update untuk efisiensi per sheet
+    for sheet_name in sheets_to_check_names:
+        try:
+            sheet = spreadsheet.worksheet(sheet_name)
+            semua_data = sheet.get_all_values()
+        except Exception:
+            continue
+
+        updates = []
+        for i, baris in enumerate(semua_data):
+            if (i + 1) < DATA_START_ROW:
+                continue
+            if len(baris) <= COL_EMAIL or "@" not in baris[COL_EMAIL]:
+                continue
+            
+            baris_email = baris[COL_EMAIL].strip() if len(baris) > COL_EMAIL else ""
+            if baris_email.lower() == email.lower():
+                if profil_idx < max_profil:
+                    cell_C = f"C{i+1}"
+                    cell_D = f"D{i+1}"
+                    updates.append({
+                        "range": f"C{i+1}:D{i+1}",
+                        "values": [[pinData[profil_idx].get("name", ""), pinData[profil_idx].get("pin", "")]]
+                    })
+                    profil_idx += 1
+        
+        if updates:
+            sheet.batch_update(updates, value_input_option="RAW")
+            total_updated += len(updates)
+            
+        if profil_idx >= max_profil:
+            break
+            
+    return total_updated
+
