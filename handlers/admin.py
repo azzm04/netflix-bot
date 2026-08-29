@@ -1049,7 +1049,10 @@ async def cmd_setting_akun(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text(
             "⚠️ *Format salah*\n\n"
             "Cara pakai:\n"
-            "`/setting_akun email NetflixId SecureNetflixId`",
+            "`/setting_akun email NetflixId SecureNetflixId [akun_siapa]`\n\n"
+            "Contoh:\n"
+            "`/setting_akun user@email.com netflix_id secure_id mahesh`\n"
+            "`/setting_akun user@email.com netflix_id secure_id meet`",
             parse_mode="Markdown"
         )
         return
@@ -1057,6 +1060,7 @@ async def cmd_setting_akun(update: Update, context: ContextTypes.DEFAULT_TYPE):
     email      = args[0].strip()
     netflix_id = args[1].strip()
     secure_id  = args[2].strip()
+    tipe_akun  = args[3].strip().lower() if len(args) > 3 else ""
 
     if "@" not in email:
         await update.message.reply_text("⚠️ Email tidak valid.")
@@ -1096,21 +1100,26 @@ async def cmd_setting_akun(update: Update, context: ContextTypes.DEFAULT_TYPE):
         with open(cookies_file, "w") as f:
             json.dump(cookies, f, indent=2)
 
-        await pesan.edit_text(f"✅ *Cookie disimpan!*\n\n⏳ Setup profil untuk `{email}`...\nStep 1-3: Generate profil, setting Kids, dan Bahasa.", parse_mode="Markdown")
+        tipe_info = f" ({tipe_akun.upper()})" if tipe_akun else ""
+        await pesan.edit_text(f"✅ *Cookie disimpan!*\n\n⏳ Setup profil untuk `{email}`{tipe_info}...\nStep 1-3: Generate profil, setting Kids, dan Bahasa.\nStep 4: Setting PIN & simpan ke Spreadsheet.", parse_mode="Markdown")
         
+        cmd_args = ["node", "account-setup-cookie.js", email]
+        if tipe_akun:
+            cmd_args.append(tipe_akun)
+
         proc = await asyncio.create_subprocess_exec(
-            "node", "account-setup-cookie.js", email,
+            *cmd_args,
             cwd=ckpc_dir,
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
         )
         
         try:
-            stdout, stderr = await asyncio.wait_for(proc.communicate(), timeout=300) # 5 menit
+            stdout, stderr = await asyncio.wait_for(proc.communicate(), timeout=600) # 10 menit
         except asyncio.TimeoutError:
             proc.kill()
             await proc.wait()
-            await pesan.edit_text("❌ *Timeout* saat setup profil.")
+            await pesan.edit_text("❌ *Timeout* saat setup profil (melebihi 10 menit).")
             return
 
         if proc.returncode != 0:
@@ -1147,7 +1156,7 @@ async def cmd_setting_akun(update: Update, context: ContextTypes.DEFAULT_TYPE):
                     f"✅ *Setup Profil & PIN Selesai!*\n\n"
                     f"📧 Email: `{email}`\n"
                     f"👥 Profil: {', '.join(profiles)}\n\n"
-                    f"Semua PIN telah diset dan disimpan di Spreadsheet.",
+                    f"📊 Berhasil mengupdate {update_res} baris di Spreadsheet (Profil + PIN).",
                     parse_mode="Markdown"
                 )
             else:
@@ -1155,7 +1164,7 @@ async def cmd_setting_akun(update: Update, context: ContextTypes.DEFAULT_TYPE):
                     f"✅ *Setup Profil Selesai (di Netflix)*\n\n"
                     f"📧 Email: `{email}`\n"
                     f"👥 Profil: {', '.join(profiles)}\n\n"
-                    f"⚠️ Gagal mengupdate nama profil dan PIN di Spreadsheet (akun tidak ditemukan/kosong di {email}).",
+                    f"⚠️ Gagal mengupdate nama profil dan PIN di Spreadsheet (email `{email}` tidak ditemukan di Sheet).",
                     parse_mode="Markdown"
                 )
                 

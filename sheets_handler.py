@@ -1840,17 +1840,31 @@ def update_profiles_and_pins(email: str, pinData: list) -> int:
     pinData: list of dict, misal [{"name": "ELLIOT", "pin": "1234"}, ...]
     Return jumlah baris yang berhasil diupdate.
     """
+    if not pinData:
+        return 0
+
     spreadsheet = get_spreadsheet()
-    sheets_to_check_names = [SHEET_HARIAN_1, SHEET_HARIAN_23, SHEET_MINGGUAN, SHEET_BULANAN]
+    sheets_to_check = []
+    
+    for s_name in [SHEET_HARIAN_1, SHEET_HARIAN_23, SHEET_MINGGUAN]:
+        try:
+            sheets_to_check.append((s_name, spreadsheet.worksheet(s_name)))
+        except Exception:
+            pass
+            
+    try:
+        ws_bulanan = cari_worksheet_bulanan(spreadsheet)
+        sheets_to_check.append(("BULANAN", ws_bulanan))
+    except Exception:
+        pass
     
     total_updated = 0
     profil_idx = 0
     max_profil = len(pinData)
+    email_clean = email.strip().lower()
 
-    # Pakai batch update untuk efisiensi per sheet
-    for sheet_name in sheets_to_check_names:
+    for sheet_name, sheet in sheets_to_check:
         try:
-            sheet = spreadsheet.worksheet(sheet_name)
             semua_data = sheet.get_all_values()
         except Exception:
             continue
@@ -1862,20 +1876,23 @@ def update_profiles_and_pins(email: str, pinData: list) -> int:
             if len(baris) <= COL_EMAIL or "@" not in baris[COL_EMAIL]:
                 continue
             
-            baris_email = baris[COL_EMAIL].strip() if len(baris) > COL_EMAIL else ""
-            if baris_email.lower() == email.lower():
+            baris_email = baris[COL_EMAIL].strip().lower()
+            if baris_email == email_clean:
                 if profil_idx < max_profil:
-                    cell_C = f"C{i+1}"
-                    cell_D = f"D{i+1}"
+                    p_name = pinData[profil_idx].get("name", "")
+                    p_pin  = pinData[profil_idx].get("pin", "")
+                    row_num = i + 1
+                    cell_range = f"C{row_num}:D{row_num}"
                     updates.append({
-                        "range": f"C{i+1}:D{i+1}",
-                        "values": [[pinData[profil_idx].get("name", ""), pinData[profil_idx].get("pin", "")]]
+                        "range": cell_range,
+                        "values": [[p_name, p_pin]]
                     })
                     profil_idx += 1
         
         if updates:
             sheet.batch_update(updates, value_input_option="RAW")
             total_updated += len(updates)
+            print(f"[sheets] Berhasil update {len(updates)} profil & PIN di sheet '{sheet_name}' untuk {email}")
             
         if profil_idx >= max_profil:
             break
