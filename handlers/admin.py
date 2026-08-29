@@ -1119,10 +1119,18 @@ async def cmd_setting_akun(update: Update, context: ContextTypes.DEFAULT_TYPE):
             return
             
         output_str = stdout.decode(errors="ignore").strip()
-        # Find the JSON block in stdout (last line)
+        # Find the JSON block in stdout
         try:
-            lines = output_str.split('\n')
-            json_str = lines[-1]
+            json_str = ""
+            for line in reversed(output_str.split('\n')):
+                line = line.strip()
+                if line.startswith('{') and '"success"' in line:
+                    json_str = line
+                    break
+            
+            if not json_str:
+                raise ValueError("JSON output not found")
+                
             result = json.loads(json_str)
             if not result.get("success"):
                 await pesan.edit_text(f"❌ *Gagal setup profil.*\n\n`{result.get('error')}`", parse_mode="Markdown")

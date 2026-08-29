@@ -158,6 +158,19 @@ async function setupAccountProfiles(email) {
     const { fetchVerificationCode, fillCodeInputs } = require("./kicker-cookie");
     const pinData = [];
 
+    // Cek apakah akun ini adalah MAHESH/ROSE
+    const { getAllProfilesForEmail } = require("./sheets");
+    let isMaheshAccount = false;
+    try {
+        const pList = await getAllProfilesForEmail(email);
+        if (pList && pList.length > 0) {
+            isMaheshAccount = pList[0].isMahesh;
+        }
+    } catch (e) {
+        console.error(`[account-setup] Cek tipe akun gagal: ${e.message}`);
+    }
+    console.error(`[account-setup] Tipe akun: ${isMaheshAccount ? "MAHESH" : "MEET/NFPRO"}`);
+
     const safeGoto = async (url) => {
         for (let r = 0; r < 3; r++) {
             try {
@@ -230,17 +243,21 @@ async function setupAccountProfiles(email) {
             { timeout: 15000, polling: 500 }
           ).catch(() => {});
           
-          const code6 = await fetchVerificationCode(page, email, false);
-          await fillCodeInputs(page, code6);
-          
-          await sleep(500);
-          const submitBtn = page.locator('button[data-uia="collect-input-submit-cta"], button[type="submit"]').first();
-          if (await submitBtn.isVisible().catch(() => false)) {
-            await submitBtn.click();
+          const code6 = await fetchVerificationCode(page, email, isMaheshAccount);
+          if (code6) {
+              await fillCodeInputs(page, code6);
+              await sleep(500);
+              const submitBtn = page.locator('button[data-uia="collect-input-submit-cta"], button[type="submit"]').first();
+              if (await submitBtn.isVisible().catch(() => false)) {
+                await submitBtn.click();
+              } else {
+                await page.keyboard.press("Enter");
+              }
+              await sleep(3000);
           } else {
-            await page.keyboard.press("Enter");
+              console.error(`[account-setup] Gagal mendapatkan OTP untuk ${name}. Melewati profil ini.`);
+              continue; // Skip profil ini jika gagal OTP
           }
-          await sleep(3000);
         }
       }
       
