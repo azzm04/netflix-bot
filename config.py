@@ -93,6 +93,6 @@ HARGA_BULANAN = {
 
 # ---- Durasi bulanan dalam hari ----
 DURASI_BULANAN_HARI = {
-    1: 27,   # 1 bulan = 27 hari
-    2: 54,   # 2 bulan = 54 hari
+    1: 28,   # 1 bulan = 27 hari
+    2: 55,   # 2 bulan = 54 hari
 }
