@@ -195,14 +195,14 @@ async function changePinsForProfilesCookie(
 
       for (let i = 0; i < count; i++) {
         const btn = profileButtons.nth(i);
-        const text = (await btn.textContent()) || "";
 
-        // Bersihkan teks Netflix dan target: jadikan huruf kecil, ubah spasi ganda jadi spasi tunggal, dan hilangkan spasi ujung
-        const cleanText = text.toLowerCase().replace(/\s+/g, " ").trim();
+        const labelEl = btn.locator('[data-uia*="+item+label"]').first();
+        const nameText = (await labelEl.textContent().catch(() => "")) || "";
+
+        const cleanText = nameText.toLowerCase().replace(/\s+/g, " ").trim();
         const cleanTarget = target.toLowerCase().replace(/\s+/g, " ").trim();
 
-        // Gunakan .includes() untuk mengabaikan teks tambahan tersembunyi dari Netflix (seperti "Now Watching")
-        if (cleanText.includes(cleanTarget)) {
+        if (cleanText === cleanTarget) {
           targetBtn = btn;
           break;
         }
