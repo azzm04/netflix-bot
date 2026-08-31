@@ -139,15 +139,6 @@ async function fetchNetflixCode(email, choice, opts = {}) {
         console.warn(`  [nfpro] ✗ Kode tidak ditemukan di halaman hasil.`);
       }
 
-      // Debug: simpan screenshot jika diminta
-      if (process.env.NFPRO_DEBUG === "true") {
-        const path = require("path");
-        const shot = path.join(process.env.DEBUG_SHOT_DIR ?? "/tmp/nfdebug", `nfpro-${choice}-attempt${attempt}-${Date.now()}.png`);
-        require("fs").mkdirSync(require("path").dirname(shot), { recursive: true });
-        await page.screenshot({ path: shot, fullPage: true }).catch(() => {});
-        console.log(`  [nfpro] Screenshot disimpan: ${shot}`);
-      }
-
       if (attempt < retries) {
         console.log(`  [nfpro] Retry dalam ${retryDelay / 1000}s...`);
         await sleep(retryDelay);

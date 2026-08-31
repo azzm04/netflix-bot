@@ -22,9 +22,6 @@ const MASS_LOGOUT_THRESHOLD = parseInt(process.env.MASS_LOGOUT_THRESHOLD, 10) ||
 // Resource yang aman diblokir untuk mempercepat load — TIDAK termasuk "stylesheet"
 const BLOCKED_RESOURCE_TYPES = new Set(["image", "media", "font"]);
 
-const DEBUG_SHOT_RETENTION_MS =
-  (parseInt(process.env.DEBUG_SHOT_RETENTION_DAYS, 10) || 7) * 24 * 60 * 60 * 1000;
-
 // ── Custom Errors ─────────────────────────────────────────
 class CookieExpiredError extends Error {
   constructor(email) {
@@ -43,25 +40,6 @@ function maskCode(code) {
   return code.length <= visible
     ? "*".repeat(code.length)
     : "*".repeat(code.length - visible) + code.slice(-visible);
-}
-
-// ── Debug Screenshot (dengan retensi, biar tidak menumpuk selamanya) ─
-function pruneOldDebugShots(dir) {
-  try {
-    const now = Date.now();
-    for (const file of fs.readdirSync(dir)) {
-      const filePath = `${dir}/${file}`;
-      const stat = fs.statSync(filePath);
-      if (now - stat.mtimeMs > DEBUG_SHOT_RETENTION_MS) fs.unlinkSync(filePath);
-    }
-  } catch {}
-}
-
-function debugShot(page, name) {
-  const dir = process.env.DEBUG_SHOT_DIR ?? "/tmp/nfdebug";
-  try { fs.mkdirSync(dir, { recursive: true }); } catch {}
-  pruneOldDebugShots(dir);
-  return page.screenshot({ path: `${dir}/${name}_${Date.now()}.png`, fullPage: true }).catch(() => {});
 }
 
 // ── Ekstrak nama profil dari teks card Netflix ────────────
@@ -136,7 +114,6 @@ async function newCookiePage(email, targetUrl) {
 
   const url = page.url();
   if (url.includes("/login") || url.includes("/LoginHelp")) {
-    await debugShot(page, `cookie_expired_${email.split("@")[0]}`);
     deleteCookieForEmail(email);
     await ctx.close().catch(() => {});
     throw new CookieExpiredError(email);
@@ -590,7 +567,7 @@ async function kickDeviceByName(page, deviceName) {
       }
 
       try { await keluarBtn.click({ timeout: 10000 }); }
-      catch { await debugShot(page, `click_blocked_${deviceName.replace(/\s+/g,"_")}`); await keluarBtn.click({ force: true, timeout: 10000 }); }
+      catch { await keluarBtn.click({ force: true, timeout: 10000 }); }
 
       const toastText = await waitForKickToastMatch(page, deviceName, 10000);
       if (toastText) {

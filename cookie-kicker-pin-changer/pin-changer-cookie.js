@@ -19,17 +19,6 @@ const URL_PIN_SETTINGS = "https://www.netflix.com/settings/migration";
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
-// ── Debug Screenshot ──────────────────────────────────────
-function debugShot(page, name) {
-  const dir = process.env.DEBUG_SHOT_DIR ?? "/tmp/nfdebug";
-  try {
-    fs.mkdirSync(dir, { recursive: true });
-  } catch {}
-  return page
-    .screenshot({ path: `${dir}/${name}_${Date.now()}.png`, fullPage: true })
-    .catch(() => {});
-}
-
 class WrongPasswordError extends Error {
   constructor(email) {
     super(`Password salah untuk ${email} (Kontrol Orang Tua).`);
@@ -408,7 +397,6 @@ async function changePinsForProfilesCookie(
       await refreshAndSaveCookies(page.context(), email);
     } else {
       console.log("\n  [pin-cookie] Tidak ada profil yang berhasil diubah.");
-      await debugShot(page, `pin_no_changes_${email.split("@")[0]}`);
     }
   } finally {
     if (page) await page.context().close().catch(() => {});

@@ -370,17 +370,6 @@ async function launchBrowser() {
   });
 }
 
-// ── Debug Screenshot ──────────────────────────────────────
-function debugShot(page, name) {
-  const dir = process.env.DEBUG_SHOT_DIR ?? "/tmp/nfdebug";
-  try {
-    fs.mkdirSync(dir, { recursive: true });
-  } catch {}
-  return page
-    .screenshot({ path: `${dir}/${name}_${Date.now()}.png`, fullPage: true })
-    .catch(() => {});
-}
-
 // ── Buat Context + Inject Cookie ──────────────────────────
 async function newCookiePage(browser, email, targetUrl) {
   const cookieData = getCookieForEmail(email);
@@ -412,7 +401,6 @@ async function newCookiePage(browser, email, targetUrl) {
 
   const url = page.url();
   if (url.includes("/login") || url.includes("/LoginHelp")) {
-    await debugShot(page, `cookie_expired_${email.split("@")[0]}`);
     deleteCookieForEmail(email);
     await page.close();
     throw new CookieExpiredError(email);
@@ -580,10 +568,6 @@ async function kickOneDevice(page, deviceName) {
         await keluarBtn.click({ timeout: 10000 });
       } catch (clickErr) {
         console.warn(`  [audit-kick] ⚠ Klik normal gagal, coba force click...`);
-        await debugShot(
-          page,
-          `click_blocked_${deviceName.replace(/\s+/g, "_")}`,
-        );
         await keluarBtn.click({ force: true, timeout: 10000 });
       }
 
