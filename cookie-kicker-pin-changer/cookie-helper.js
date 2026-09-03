@@ -129,6 +129,38 @@ function profileDirForEmail(email) {
   return path.join(PROFILE_ROOT, safe);
 }
 
+// ── Prune cache Chromium internal (BUKAN fingerprint device) ─────────────
+//
+// Cache/Code Cache/GPUCache dkk cuma nyimpen file statis (JS/CSS/gambar/shader)
+// buat mempercepat load — beda dari Local Storage/IndexedDB/Cookies yang jadi
+// identitas device di mata Netflix (lihat komentar launchAccountContext di
+// bawah). Tanpa prune, tiap kunjungan nambah cache dan profile per akun bisa
+// numpuk sampai ratusan MB tanpa batas. Dihapus tiap SEBELUM launch — aman,
+// Chromium bikin ulang sesuai kebutuhan, dan fingerprint tetap utuh.
+const CACHE_DIR_NAMES = new Set([
+  "Cache", "Code Cache", "GPUCache", "Cache_Data",
+  "GrShaderCache", "ShaderCache", "DawnCache", "DawnGraphiteCache", "GraphiteDawnCache",
+  "component_crx_cache", "Crashpad",
+]);
+
+function pruneProfileCache(userDataDir) {
+  const stack = [userDataDir];
+  while (stack.length) {
+    const dir = stack.pop();
+    let entries;
+    try { entries = fs.readdirSync(dir, { withFileTypes: true }); } catch { continue; }
+    for (const entry of entries) {
+      if (!entry.isDirectory()) continue;
+      const full = path.join(dir, entry.name);
+      if (CACHE_DIR_NAMES.has(entry.name)) {
+        fs.rmSync(full, { recursive: true, force: true });
+      } else {
+        stack.push(full);
+      }
+    }
+  }
+}
+
 /**
  * Launch persistent browser context untuk satu akun. Dipakai bareng oleh
  * keep-alive.js, kicker-cookie.js, dan pin-changer-cookie.js supaya semuanya
@@ -158,6 +190,7 @@ async function launchAccountContext(email, opts = {}) {
 
   const userDataDir = profileDirForEmail(email);
   fs.mkdirSync(userDataDir, { recursive: true });
+  pruneProfileCache(userDataDir);
 
   const ctx = await chromium.launchPersistentContext(userDataDir, {
     headless,
@@ -171,6 +204,7 @@ async function launchAccountContext(email, opts = {}) {
       "--disable-setuid-sandbox",
       "--disable-blink-features=AutomationControlled",
       "--disable-dev-shm-usage",
+      "--disk-cache-size=10485760",
       "--lang=id-ID",
       ...extraArgs,
     ],
@@ -438,4 +472,5 @@ module.exports = {
   loadAllCookies,
   launchAccountContext,
   profileDirForEmail,
+  pruneProfileCache,
 };
