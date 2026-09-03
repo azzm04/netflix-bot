@@ -12,10 +12,15 @@ const {
   checkForExtraVerification,
   fetchVerificationCode,
   fillCodeInputs,
+  MFA_EMAIL_WAIT_MS,
 } = require("./kicker-cookie");
 
 const TIMEOUT_NAV = 45_000;
 const URL_PIN_SETTINGS = "https://www.netflix.com/settings/migration";
+
+// Verifikasi nama profil setelah klik kartu (lihat changePinsForProfilesCookie).
+// Bisa dimatikan lewat .env kalau ternyata terlalu ketat: PIN_VERIFY_PROFILE=false
+const VERIFY_PROFILE_AFTER_CLICK = process.env.PIN_VERIFY_PROFILE !== "false";
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
@@ -38,6 +43,21 @@ function generateNewPin(oldPin) {
     if (attempts > 100) break;
   } while (pin === oldPin || /^(.)\1{3}$/.test(pin)); // Hindari juga 1111, 2222, dst.
   return pin;
+}
+
+// ── Normalisasi nama profil untuk matching ────────────────
+// Netflix menampilkan nama profil apa adanya — bisa ada emoji ("dolphin 🐬"),
+// spasi ganda, atau zero-width char sisa copy-paste — sementara nama target
+// dari spreadsheet biasanya ditulis polos. Bandingkan versi ternormalisasi
+// supaya "dolphin 🐬" == "dolphin", tapi tetap perbandingan PENUH (bukan
+// substring) supaya "budi" tidak pernah nyasar ke "budi 2".
+function normalizeProfileName(name) {
+  return (name ?? "")
+    .replace(/[\u200B-\u200D\uFEFF]/g, "")
+    .replace(/[\p{Emoji_Presentation}\p{Extended_Pictographic}\uFE0F]/gu, "")
+    .toLowerCase()
+    .replace(/\s+/g, " ")
+    .trim();
 }
 
 // ── Buat Context (persistent, per akun) + Buka Halaman ────
@@ -86,6 +106,10 @@ async function newCookiePage(email, targetUrl, isMahesh = false) {
 // yang sama seperti alur MFA login biasa (nfpro / Mahesh Bot / Telegram manual).
 // Return true kalau verifikasi berhasil (form input PIN sudah muncul).
 async function verifyPinChangeViaEmailCode(page, email, isMahesh, emailCodeBtn) {
+  // Kode yang sudah ditolak Netflix — supaya kalau mailbox masih balas kode
+  // basi yang sama, bot menunggu email baru ketimbang submit kode mati itu lagi.
+  const rejectedCodes = new Set();
+
   for (let attempt = 1; attempt <= 3; attempt++) {
     console.log(`  [pin-cookie] [kode-email] Percobaan ${attempt}/3...`);
 
@@ -106,10 +130,14 @@ async function verifyPinChangeViaEmailCode(page, email, isMahesh, emailCodeBtn) 
       { timeout: 15_000, polling: 500 }
     ).catch(() => {});
 
-    console.log(`  [pin-cookie] [kode-email] Tunggu 10 detik agar email terkirim...`);
-    await sleep(10_000);
+    console.log(
+      `  [pin-cookie] [kode-email] Tunggu ${MFA_EMAIL_WAIT_MS / 1000}s agar email Netflix sampai ke mailbox...`,
+    );
+    await sleep(MFA_EMAIL_WAIT_MS);
 
-    const code6 = await fetchVerificationCode(page, email, isMahesh);
+    const code6 = await fetchVerificationCode(page, email, isMahesh, {
+      rejectedCodes: [...rejectedCodes],
+    });
     await fillCodeInputs(page, code6);
 
     await sleep(500);
@@ -137,6 +165,7 @@ async function verifyPinChangeViaEmailCode(page, email, isMahesh, emailCodeBtn) 
       bodyAfter.toLowerCase().includes("kode tersebut salah") ||
       bodyAfter.toLowerCase().includes("code is incorrect") ||
       bodyAfter.toLowerCase().includes("kode salah");
+    if (isWrong) rejectedCodes.add(code6);
     if (isWrong && attempt < 3) {
       console.warn(`  [pin-cookie] [kode-email] ❌ Kode salah, coba lagi...`);
       await sleep(2000);
@@ -190,33 +219,73 @@ async function changePinsForProfilesCookie(
       const profileButtons = page.locator(
         'button[data-uia^="menu-card+account-profiles-page+profiles-menu-card+"]',
       );
-      const count = await profileButtons.count();
-      let targetBtn = null;
+      let count = await profileButtons.count();
+
+      // Cek URL saja tidak cukup: halaman profile-lock/pin-entry pun URL-nya
+      // masih mengandung "/account/profiles", jadi guard di step 1 bisa
+      // meloloskan halaman yang TIDAK punya daftar kartu profil sama sekali.
+      // Kalau kartunya nol, paksa balik ke daftar profil dulu.
+      if (count === 0) {
+        console.warn(
+          `  [pin-cookie] ⚠ Daftar kartu profil tidak ada di ${page.url()} — balik ke daftar profil...`,
+        );
+        await page
+          .goto(startUrl, { waitUntil: "domcontentloaded", timeout: TIMEOUT_NAV })
+          .catch(() => {});
+        await sleep(2000);
+        count = await profileButtons.count();
+      }
+
+      // Kumpulkan SEMUA kandidat — jangan ambil yang pertama ketemu lalu break.
+      // Netflix mengizinkan dua profil dengan nama sama/serupa; kalau langsung
+      // ambil index pertama, PIN profil pelanggan LAIN yang bisa ke-ganti.
+      const cleanTarget = normalizeProfileName(target);
+      const namesOnPage = [];
+      const matches = [];
 
       for (let i = 0; i < count; i++) {
         const btn = profileButtons.nth(i);
 
         const labelEl = btn.locator('[data-uia*="+item+label"]').first();
-        const nameText = (await labelEl.textContent().catch(() => "")) || "";
+        // Badge "Sedang Menonton" ada di <div> SEBELAH label, bukan di dalamnya,
+        // jadi textContent label tetap bersih. aria-label dipakai cadangan saja.
+        const rawName =
+          (await labelEl.textContent().catch(() => "")) ||
+          (await btn.getAttribute("aria-label").catch(() => "")) ||
+          "";
 
-        const cleanText = nameText.toLowerCase().replace(/\s+/g, " ").trim();
-        const cleanTarget = target.toLowerCase().replace(/\s+/g, " ").trim();
-
-        if (cleanText === cleanTarget) {
-          targetBtn = btn;
-          break;
+        namesOnPage.push(rawName.trim() || "(kosong)");
+        if (normalizeProfileName(rawName) === cleanTarget) {
+          matches.push({ btn, rawName: rawName.trim(), index: i });
         }
       }
 
-      if (!targetBtn) {
+      console.log(
+        `  [pin-cookie] Profil terbaca (${count}): ${namesOnPage.join(" | ")}`,
+      );
+
+      if (matches.length === 0) {
         console.warn(
           `  [pin-cookie] ⚠ Profil "${target}" tidak ditemukan di halaman ini.`,
         );
         continue;
       }
 
+      if (matches.length > 1) {
+        console.error(
+          `  [pin-cookie] ✗ AMBIGU: ada ${matches.length} profil yang cocok "${target}" ` +
+            `(index ${matches.map((m) => m.index).join(", ")}: ${matches.map((m) => `"${m.rawName}"`).join(", ")}) ` +
+            `— dilewati supaya tidak salah ganti PIN.`,
+        );
+        continue;
+      }
+
+      const { btn: targetBtn, rawName: targetRawName, index: targetIndex } = matches[0];
+
       // 2. Klik profil (Masuk ke halaman Manage profile and preferences)
-      console.log(`  [pin-cookie] Klik profil "${target}"...`);
+      console.log(
+        `  [pin-cookie] Klik profil "${targetRawName}" (index ${targetIndex})...`,
+      );
       await targetBtn.click();
       await page.waitForLoadState("domcontentloaded");
       await sleep(1500);
@@ -233,6 +302,27 @@ async function changePinsForProfilesCookie(
         );
         continue;
       }
+
+      // 3b. Palang terakhir: pastikan halaman ini benar-benar milik profil
+      // target. Kalau klik nyasar (kartu bergeser saat DOM re-render, atau
+      // Netflix redirect ke profil sesi bot sendiri), halaman "Kelola profil"
+      // akan menampilkan nama profil LAIN — lebih baik batal daripada
+      // mengganti PIN profil pelanggan yang salah.
+      if (VERIFY_PROFILE_AFTER_CLICK) {
+        const pageText = normalizeProfileName(
+          await page.locator("body").innerText().catch(() => ""),
+        );
+        if (cleanTarget && !pageText.includes(cleanTarget)) {
+          console.error(
+            `  [pin-cookie] ✗ Halaman setelah klik tidak menampilkan "${targetRawName}" ` +
+              `(url: ${page.url()}) — dibatalkan demi keamanan. ` +
+              `Set PIN_VERIFY_PROFILE=false di .env kalau cek ini terlalu ketat.`,
+          );
+          continue;
+        }
+        console.log(`  [pin-cookie] ✓ Konfirmasi halaman profil "${targetRawName}".`);
+      }
+
       console.log(`  [pin-cookie] Masuk ke pengaturan Profile Lock...`);
       await profileLockBtn.click();
       await page.waitForLoadState("domcontentloaded");

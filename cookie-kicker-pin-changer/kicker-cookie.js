@@ -19,6 +19,17 @@ const URL_DEVICES = "https://www.netflix.com/manageaccountaccess";
 // Kalau device "tidak ada aktivitas" (jejak bot sendiri: keep-alive/kick/pin-changer
 const MASS_LOGOUT_THRESHOLD = parseInt(process.env.MASS_LOGOUT_THRESHOLD, 10) || 20;
 
+// ── Timing MFA ────────────────────────────────────────────
+// Email kode 6 digit dari Netflix sering telat: beberapa detik s/d puluhan
+// detik sampai masuk mailbox yang dibaca Mahesh Bot / nfpro. Kalau bot nanya
+// kode terlalu cepat, mailbox masih kosong → dianggap gagal → bot klik "Kirim
+// Ulang Kode", yang bikin Netflix meng-invalidate kode pertama. Efeknya bot
+// bisa dapat kode lama yang sudah mati → "kode tersebut salah" berulang.
+// Jadi: tunggu dulu (EMAIL_WAIT), lalu POLL beberapa kali tanpa resend.
+const MFA_EMAIL_WAIT_MS = parseInt(process.env.MFA_EMAIL_WAIT_MS, 10) || 20_000;
+const MFA_POLL_DELAY_MS = parseInt(process.env.MFA_POLL_DELAY_MS, 10) || 8_000;
+const MFA_POLL_ROUNDS   = parseInt(process.env.MFA_POLL_ROUNDS, 10)   || 3;
+
 // Resource yang aman diblokir untuk mempercepat load — TIDAK termasuk "stylesheet"
 const BLOCKED_RESOURCE_TYPES = new Set(["image", "media", "font"]);
 
@@ -126,41 +137,67 @@ async function newCookiePage(email, targetUrl) {
 // Diekstrak dari checkForExtraVerification supaya bisa dipakai ulang di luar
 // halaman MFA penuh — juga dipakai pin-changer-cookie.js untuk modal
 // "Email a code" saat ganti PIN akun tanpa password (PAKE KODE).
-async function fetchVerificationCode(page, email, isMahesh = false) {
-  let code6 = null;
-  try {
-    if (isMahesh) {
-      const { fetchFromMaheshBot } = require("./mahesh-fetcher");
-      for (let mA = 1; mA <= 3; mA++) {
-        console.log(`  [mfa] Fetch kode via Mahesh Bot (percobaan ${mA}/3)...`);
-        try { code6 = await fetchFromMaheshBot(email, "vercode", { retries: 0, retryDelay: 5000 }); break; }
-        catch (mErr) {
-          console.warn(`  [mfa] Mahesh Bot gagal (percobaan ${mA}): ${mErr.message}`);
-          if (mA < 3) {
-            const resend = page.locator('button:has-text("Kirim Ulang Kode"), button:has-text("Resend"), button:has-text("Email a code"), button:has-text("Kirim kode")').first();
-            if (await resend.isVisible({ timeout: 3000 }).catch(() => false)) await resend.click();
-            await sleep(5000);
-          } else throw mErr;
-        }
-      }
-    } else {
-      const { fetchNetflixCode } = require("./nfpro");
-      console.log(`  [mfa] Auto-fetch kode 6 digit via nfpro...`);
-      code6 = await fetchNetflixCode(email, "signin6", { retries: 2, retryDelay: 5000 });
-    }
-    console.log(`  [mfa] Kode: ${maskCode(code6)}`);
-  } catch (err) {
-    console.warn(`  [mfa] Auto-fetch gagal: ${err.message}`);
-    console.log(`  [mfa] Minta kode manual via Telegram...`);
+/**
+ * @param {object}   [opts]
+ * @param {string[]} [opts.rejectedCodes] - kode yang sudah ditolak Netflix di
+ *   attempt sebelumnya. Kalau mailbox masih balas kode yang sama, artinya email
+ *   BARU belum masuk — jangan disubmit ulang, tunggu & poll lagi.
+ * @param {number}   [opts.rounds]
+ */
+async function fetchVerificationCode(page, email, isMahesh = false, opts = {}) {
+  const rejected = new Set(opts.rejectedCodes ?? []);
+  const rounds   = opts.rounds ?? MFA_POLL_ROUNDS;
+  const source   = isMahesh ? "Mahesh Bot" : "nfpro";
+
+  // Poll mailbox berulang kali TANPA klik "Kirim Ulang Kode". Resend bikin
+  // Netflix meng-invalidate kode yang sudah terkirim, dan mailbox rawan balas
+  // kode lama yang sudah mati → "kode tersebut salah". Lebih baik sabar nunggu
+  // email pertama sampai; resend cuma dilakukan caller di attempt berikutnya.
+  for (let round = 1; round <= rounds; round++) {
+    console.log(`  [mfa] Ambil kode via ${source} (poll ${round}/${rounds})...`);
+
+    let code = null;
     try {
-      code6 = await requestCodeFromTelegram(email, "6digit", isMahesh ? "MAHESH" : "");
-    } catch (tgErr) {
-      throw new Error(`MFA gagal untuk ${email}: ${tgErr.message}`);
+      if (isMahesh) {
+        const { fetchFromMaheshBot } = require("./mahesh-fetcher");
+        code = await fetchFromMaheshBot(email, "vercode", {
+          retries: 1,
+          retryDelay: MFA_POLL_DELAY_MS,
+        });
+      } else {
+        const { fetchNetflixCode } = require("./nfpro");
+        code = await fetchNetflixCode(email, "signin6", {
+          retries: 2,
+          retryDelay: MFA_POLL_DELAY_MS,
+        });
+      }
+    } catch (err) {
+      console.warn(`  [mfa] ${source} gagal (poll ${round}/${rounds}): ${err.message}`);
+    }
+
+    if (code && rejected.has(code)) {
+      console.warn(
+        `  [mfa] Kode ${maskCode(code)} sama dengan yang sudah ditolak — email baru belum masuk mailbox.`,
+      );
+    } else if (code) {
+      console.log(`  [mfa] Kode: ${maskCode(code)}`);
+      return code;
+    }
+
+    if (round < rounds) {
+      console.log(`  [mfa] Tunggu ${MFA_POLL_DELAY_MS / 1000}s sebelum poll ulang...`);
+      await sleep(MFA_POLL_DELAY_MS);
     }
   }
 
-  if (!code6) throw new Error(`Kode MFA tidak tersedia untuk ${email}`);
-  return code6;
+  console.log(`  [mfa] Auto-fetch gagal setelah ${rounds} poll — minta kode manual via Telegram...`);
+  try {
+    const code6 = await requestCodeFromTelegram(email, "6digit", isMahesh ? "MAHESH" : "");
+    if (!code6) throw new Error("kode kosong dari Telegram");
+    return code6;
+  } catch (tgErr) {
+    throw new Error(`MFA gagal untuk ${email}: ${tgErr.message}`);
+  }
 }
 
 // ── Isi kode ke input digit (single box atau banyak box terpisah) ────────
@@ -211,6 +248,10 @@ async function checkForExtraVerification(page, email, isMahesh = false) {
   if (!needsMfa) return;
   console.log(`  [mfa] Halaman verifikasi terdeteksi (${url})`);
 
+  // Kode yang sudah ditolak Netflix — dipakai untuk mendeteksi mailbox yang
+  // masih balas kode basi (lihat fetchVerificationCode).
+  const rejectedCodes = new Set();
+
   for (let attempt = 1; attempt <= 3; attempt++) {
     console.log(`  [mfa] Attempt ${attempt}/3`);
 
@@ -229,10 +270,12 @@ async function checkForExtraVerification(page, email, isMahesh = false) {
       { timeout: 15_000, polling: 500 }
     ).catch(() => {});
 
-    console.log(`  [mfa] Tunggu 10 detik agar email terkirim...`);
-    await sleep(10_000);
+    console.log(`  [mfa] Tunggu ${MFA_EMAIL_WAIT_MS / 1000}s agar email Netflix sampai ke mailbox...`);
+    await sleep(MFA_EMAIL_WAIT_MS);
 
-    const code6 = await fetchVerificationCode(page, email, isMahesh);
+    const code6 = await fetchVerificationCode(page, email, isMahesh, {
+      rejectedCodes: [...rejectedCodes],
+    });
     await fillCodeInputs(page, code6);
 
     await sleep(500);
@@ -249,7 +292,8 @@ async function checkForExtraVerification(page, email, isMahesh = false) {
     const isWrong = bodyAfter.toLowerCase().includes("kode tersebut salah") ||
                     bodyAfter.toLowerCase().includes("code is incorrect") ||
                     bodyAfter.toLowerCase().includes("kode salah");
-    if (isWrong && attempt < 3) { console.warn(`  [mfa] ❌ Kode salah. Coba lagi...`); await sleep(2000); continue; }
+    if (isWrong) rejectedCodes.add(code6);
+    if (isWrong && attempt < 3) { console.warn(`  [mfa] ❌ Kode ${maskCode(code6)} salah. Coba lagi...`); await sleep(2000); continue; }
     if (attempt === 3) throw new Error(`MFA gagal setelah 3 percobaan untuk ${email}`);
   }
 }
@@ -701,4 +745,5 @@ module.exports = {
   waitForKickToastMatch,
   extractProfileName,
   profileNameMatches,
+  MFA_EMAIL_WAIT_MS,
 };
