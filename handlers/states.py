@@ -20,4 +20,6 @@
  PIN_REKAP, PIN_CLOSING,
  GANTI_PIN_ADMIN_LAMA, GANTI_PIN_ADMIN_BARU,
  # Form order apk prem (/apkprem)
- APK_TUNGGU_FORM, APK_KONFIRMASI) = range(33)
+ APK_TUNGGU_FORM, APK_KONFIRMASI,
+ # Konfirmasi quick order Netflix
+ QUICK_KONFIRMASI) = range(34)

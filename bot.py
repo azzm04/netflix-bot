@@ -34,6 +34,7 @@ from handlers.states import (
     PIN_REKAP, PIN_CLOSING,
     GANTI_PIN_ADMIN_LAMA, GANTI_PIN_ADMIN_BARU,
     APK_TUNGGU_FORM, APK_KONFIRMASI,
+    QUICK_KONFIRMASI,
 )
 from handlers.auth import adduser, removeuser, listuser
 from handlers.order import (
@@ -41,7 +42,7 @@ from handlers.order import (
     callback_tipe, callback_back_tipe, callback_back_durasi, callback_back_paket,
     callback_durasi, terima_nomor, callback_device,
     callback_paket_bulanan, terima_nomor_bulanan, callback_device_bulanan,
-    terima_quick_order,
+    terima_quick_order, callback_konfirmasi_quick,
     callback_order_lagi,
 )
 from handlers.admin import (
@@ -183,11 +184,22 @@ def main():
         )
     # ────────────────────────────────────────────────────────
 
+    # Form order Netflix yang di-paste admin langsung (tanpa /start):
+    # dikenali dari baris "Durasi order" + "Nomor WhatsApp".
+    FORM_NETFLIX = (
+        filters.Regex(r"(?i)durasi\s*order")
+        & filters.Regex(r"(?i)nomor\s*(whatsapp|wa)")
+    )
+
     conv_handler = ConversationHandler(
         entry_points=[
             # /start dan order flow: hanya di private chat
             CommandHandler("start", start, filters=filters.ChatType.PRIVATE),
             CallbackQueryHandler(callback_order_lagi, pattern="^order_lagi$"),
+            MessageHandler(
+                FORM_NETFLIX & filters.TEXT & ~filters.COMMAND & filters.ChatType.PRIVATE,
+                terima_quick_order,
+            ),
         ],
         states={
             TANYA_TIPE: [
@@ -196,6 +208,9 @@ def main():
             # Quick Order
             TANYA_QUICK_ORDER: [
                 MessageHandler(filters.TEXT & ~filters.COMMAND, terima_quick_order)
+            ],
+            QUICK_KONFIRMASI: [
+                CallbackQueryHandler(callback_konfirmasi_quick, pattern="^qo_(ya|batal)$"),
             ],
             # Harian/Mingguan
             TANYA_DURASI: [

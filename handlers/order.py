@@ -31,7 +31,7 @@ from handlers.auth import is_allowed
 from handlers.states import (
     TANYA_TIPE, TANYA_DURASI, TANYA_NOMOR, TANYA_DEVICE,
     TANYA_PAKET_BULANAN, TANYA_NOMOR_BULANAN, TANYA_DEVICE_BULANAN,
-    TANYA_QUICK_ORDER,
+    TANYA_QUICK_ORDER, QUICK_KONFIRMASI,
 )
 from utils.notify import kirim_notif_admin
 
@@ -161,6 +161,20 @@ def _parse_durasi(value: str) -> dict:
 
     # Harian/mingguan
     return {"durasi": durasi_int, "mode": "harian", "tipe": None}
+
+
+def _label_durasi_harga(durasi_info: dict):
+    """Label durasi + harga untuk ditampilkan di konfirmasi order."""
+    if durasi_info["mode"] == "bulanan":
+        bulan = durasi_info.get("bulan", 1)
+        tipe = durasi_info.get("tipe", "1p1u")
+        label = f"{bulan} Bulan " + ("Semi Private" if tipe == "sempriv" else "1P1U")
+        harga = HARGA_BULANAN.get(f"{bulan}_{tipe}", "?")
+    else:
+        durasi = durasi_info["durasi"]
+        label = f"{durasi} Hari"
+        harga = HARGA.get(durasi, "?")
+    return label, harga
 
 
 def _parse_quick_order(teks: str) -> dict:
@@ -364,7 +378,14 @@ async def callback_back_paket(update: Update, context: ContextTypes.DEFAULT_TYPE
 # ═══════════════════════════════════════════════════════════
 
 async def terima_quick_order(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-    """Parse form quick order dan proses."""
+    """
+    Parse form quick order lalu tampilkan konfirmasi dulu (belum ambil slot).
+    Dipakai dua jalur: tombol ⚡ Quick Order, dan form yang langsung di-paste
+    admin tanpa command apa pun.
+    """
+    if not is_allowed(update.effective_user.id):
+        return ConversationHandler.END
+
     teks = update.message.text
 
     # Parse form
@@ -387,7 +408,6 @@ async def terima_quick_order(update: Update, context: ContextTypes.DEFAULT_TYPE)
         return TANYA_QUICK_ORDER
 
     durasi_info = data["durasi_info"]
-    durasi = durasi_info["durasi"]
     nomor_pelanggan = _format_nomor(data["nomor"])
     device_text = data["device"]
     lokasi = data["lokasi"]
@@ -404,20 +424,72 @@ async def terima_quick_order(update: Update, context: ContextTypes.DEFAULT_TYPE)
     # Deteksi tipe device untuk filter akun
     device_type = _detect_device_type(device_text)
 
-    # Hapus pesan user (form yang di-paste) dan pesan bot berisi form kosong
-    # try:
-    #     await update.message.delete()
-    # except Exception:
-    #     pass
+    context.user_data["quick_pending"] = {
+        "durasi_info": durasi_info,
+        "nomor_pelanggan": nomor_pelanggan,
+        "device_text": device_text,
+        "device_type": device_type,
+        "lokasi": lokasi,
+    }
+
+    label_durasi, harga = _label_durasi_harga(durasi_info)
+    keyboard = [[
+        InlineKeyboardButton("✅ Oke, proses", callback_data="qo_ya"),
+        InlineKeyboardButton("❌ Batal", callback_data="qo_batal"),
+    ]]
+    await update.message.reply_text(
+        "📋 *CEK ORDER NETFLIX*\n"
+        "━━━━━━━━━━━━━━━━\n"
+        f"⏳ Durasi   : *{label_durasi}*\n"
+        f"📱 Nomor WA : {escape_markdown(nomor_pelanggan, version=1)}\n"
+        f"📲 Device   : {escape_markdown(device_text, version=1)} → {device_type}\n"
+        f"📍 Lokasi   : {escape_markdown(lokasi, version=1)}\n"
+        f"💰 Harga    : {harga}\n"
+        "━━━━━━━━━━━━━━━━\n"
+        "Data sudah benar? Kalau oke, bot langsung cari slot & kirim akunnya.",
+        parse_mode="Markdown",
+        reply_markup=InlineKeyboardMarkup(keyboard)
+    )
+    return QUICK_KONFIRMASI
+
+
+async def callback_konfirmasi_quick(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    """Tombol Oke / Batal pada konfirmasi quick order."""
+    query = update.callback_query
+    await query.answer()
+
+    if query.data == "qo_batal":
+        context.user_data.pop("quick_pending", None)
+        await query.edit_message_text("❌ Order dibatalkan. Tidak ada slot yang dipakai.")
+        return ConversationHandler.END
+
+    data = context.user_data.pop("quick_pending", None)
+    if not data:
+        await query.edit_message_text("⚠️ Data order sudah kedaluwarsa. Paste ulang formnya ya.")
+        return ConversationHandler.END
+
+    # Hapus pesan bot berisi form kosong (kalau order dimulai dari tombol Quick Order)
     try:
-        form_chat_id = context.user_data.get("quick_form_chat_id")
-        form_msg_id  = context.user_data.get("quick_form_msg_id")
+        form_chat_id = context.user_data.pop("quick_form_chat_id", None)
+        form_msg_id = context.user_data.pop("quick_form_msg_id", None)
         if form_chat_id and form_msg_id:
             await context.bot.delete_message(chat_id=form_chat_id, message_id=form_msg_id)
     except Exception:
         pass
 
-    pesan_loading = await update.message.reply_text("🔍 Sedang mencari slot kosong...")
+    await query.edit_message_text("🔍 Sedang mencari slot kosong...")
+    return await _proses_quick_order(context, query.message, data)
+
+
+async def _proses_quick_order(context: ContextTypes.DEFAULT_TYPE, pesan_loading, data: dict) -> int:
+    """Cari slot, tulis ke sheet, kirim template. Dipanggil setelah admin klik Oke."""
+    durasi_info = data["durasi_info"]
+    durasi = durasi_info["durasi"]
+    nomor_pelanggan = data["nomor_pelanggan"]
+    device_text = data["device_text"]
+    device_type = data["device_type"]
+    lokasi = data["lokasi"]
+    chat_id = pesan_loading.chat_id
 
     try:
         async with _order_lock:
@@ -516,7 +588,7 @@ async def terima_quick_order(update: Update, context: ContextTypes.DEFAULT_TYPE)
         # Kirim pesan terpisah untuk tombol Order Lagi
         keyboard = [[InlineKeyboardButton("🔄 Order Lagi", callback_data="order_lagi")]]
         await context.bot.send_message(
-            chat_id=update.effective_chat.id,
+            chat_id=chat_id,
             text="✅ Selesai!",
             reply_markup=InlineKeyboardMarkup(keyboard)
         )
