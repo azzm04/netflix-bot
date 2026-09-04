@@ -18,4 +18,6 @@
  GANTI_PIN_LAMA, GANTI_PIN_BARU,
  # PIN verifikasi admin (/rekap, /closing)
  PIN_REKAP, PIN_CLOSING,
- GANTI_PIN_ADMIN_LAMA, GANTI_PIN_ADMIN_BARU) = range(31)
+ GANTI_PIN_ADMIN_LAMA, GANTI_PIN_ADMIN_BARU,
+ # Form order apk prem (/apkprem)
+ APK_TUNGGU_FORM, APK_KONFIRMASI) = range(33)

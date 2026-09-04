@@ -47,6 +47,22 @@ COL_MODAL_KET      = 11  # K - Keterangan (Total Akun & Maker)
 # Pajak merchant (0.7%)
 PAJAK_MERCHANT = 0.007
 
+# ---- Sheet REKAPAN APK PREM (order aplikasi selain Netflix) ----
+SHEET_APK_PREM = "REKAPAN APK PREM"
+
+# Kolom sheet REKAPAN APK PREM (1-indexed untuk gspread)
+COL_APK_NO_CUST    = 1   # A - No customer
+COL_APK_TANGGAL    = 2   # B - Tanggal order
+COL_APK_APLIKASI   = 3   # C - Aplikasi (Prime, Viu, Canva, dst)
+COL_APK_PLAN       = 4   # D - Plan (Sharing, Private, dst)
+COL_APK_DURASI     = 5   # E - Durasi
+COL_APK_DATA_AKUN  = 6   # F - Data akun (email + password)
+COL_APK_NAMA_FH    = 7   # G - Nama FH
+COL_APK_HARGA_JUAL = 8   # H - Harga jual (dipakai untuk hitung closing)
+COL_APK_HARGA_BELI = 9   # I - Harga beli
+COL_APK_UNTUNG     = 10  # J - Untung
+COL_APK_NOTES      = 11  # K - Notes (modal / nalangin)
+
 # ---- Nama sheet berdasarkan durasi ----
 SHEET_HARIAN_1  = "HARIAN_DURASI-1"     # Untuk durasi 1 hari
 SHEET_HARIAN_23 = "HARIAN_DURASI-2&3"   # Untuk durasi 2, 3 hari

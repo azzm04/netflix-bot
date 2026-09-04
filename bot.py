@@ -33,6 +33,7 @@ from handlers.states import (
     GANTI_PIN_LAMA, GANTI_PIN_BARU,
     PIN_REKAP, PIN_CLOSING,
     GANTI_PIN_ADMIN_LAMA, GANTI_PIN_ADMIN_BARU,
+    APK_TUNGGU_FORM, APK_KONFIRMASI,
 )
 from handlers.auth import adduser, removeuser, listuser
 from handlers.order import (
@@ -56,6 +57,9 @@ from handlers.admin import (
     cmd_logout_sekarang,
     cmd_login_tv,
     cmd_setting_akun,
+)
+from handlers.apkprem import (
+    cmd_apkprem, terima_form_apk, callback_konfirmasi_apk, cancel_apk,
 )
 from handlers.group import (
     cmd_feeadmin, callback_fee_pilih_tanggal, terima_tanggal_fee,
@@ -105,6 +109,7 @@ async def post_init(application):
             BotCommand("feeadmin", "Input fee admin ke REKAPAN MODAL"),
             BotCommand("gestun", "Input data gestun ke REKAPAN MODAL"),
             BotCommand("modal_netflix", "Input modal Netflix ke REKAPAN MODAL"),
+            BotCommand("apkprem", "Input order apk prem ke REKAPAN APK PREM"),
         ],
         scope=BotCommandScopeAllGroupChats()
     )
@@ -129,6 +134,7 @@ async def post_init(application):
                 BotCommand("logout_sekarang", "Kick device & ganti PIN akun expired sekarang"),
                 BotCommand("login_tv", "Login-kan TV pakai kode 8 digit dari layar TV"),
                 BotCommand("setting_akun", "Setup akun Netflix baru & generate profil"),
+                BotCommand("apkprem", "Input order apk prem ke REKAPAN APK PREM"),
                 BotCommand("cancel", "Batalkan proses"),
             ],
             scope=BotCommandScopeChat(chat_id=ADMIN_ID)
@@ -356,6 +362,33 @@ def main():
         allow_reentry=True,
     )
     app.add_handler(closing_conv)
+
+    # ConversationHandler: /apkprem — form order aplikasi selain Netflix.
+    # Selain lewat command, form yang di-paste langsung juga ditangkap:
+    # dikenali dari baris "NO CUST" + "HARGA JUAL" supaya tidak bentrok
+    # dengan form order Netflix milik customer.
+    FORM_APK = filters.Regex(r"(?is)no\s*cust.*harga\s*jual")
+    apkprem_conv = ConversationHandler(
+        entry_points=[
+            CommandHandler("apkprem", cmd_apkprem),
+            MessageHandler(FORM_APK & filters.TEXT & ~filters.COMMAND, terima_form_apk),
+        ],
+        states={
+            APK_TUNGGU_FORM: [
+                MessageHandler(filters.TEXT & ~filters.COMMAND, terima_form_apk),
+            ],
+            APK_KONFIRMASI: [
+                CallbackQueryHandler(callback_konfirmasi_apk, pattern="^apk_(simpan|batal)$"),
+            ],
+            ConversationHandler.TIMEOUT: [
+                MessageHandler(filters.ALL, timeout_handler)
+            ],
+        },
+        fallbacks=[CommandHandler("cancel", cancel_apk)],
+        conversation_timeout=600,
+        allow_reentry=True,
+    )
+    app.add_handler(apkprem_conv)
 
     # ConversationHandler /feeadmin — group only
     fee_conv_handler = ConversationHandler(

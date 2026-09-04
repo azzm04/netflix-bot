@@ -2,6 +2,7 @@
 #  sheets_handler.py — Logika baca/tulis Google Sheets (Optimized)
 # ============================================================
 
+import re
 import random
 import asyncio
 import gspread
@@ -16,6 +17,10 @@ from config import (
     SPREADSHEET_MODAL_ID, SHEET_GESTUN, PAJAK_MERCHANT,
     COL_MODAL_TGL, COL_MODAL_KOMPONEN, COL_MODAL_BIAYA, COL_MODAL_KET,
     SPREADSHEET_INVEST_ID, INVEST_EMAIL_SHEET_MAP,
+    SHEET_APK_PREM,
+    COL_APK_NO_CUST, COL_APK_TANGGAL, COL_APK_APLIKASI, COL_APK_PLAN,
+    COL_APK_DURASI, COL_APK_DATA_AKUN, COL_APK_NAMA_FH,
+    COL_APK_HARGA_JUAL, COL_APK_HARGA_BELI, COL_APK_UNTUNG, COL_APK_NOTES,
 )
 
 # Scope yang dibutuhkan untuk akses Google Sheets
@@ -846,6 +851,425 @@ def tulis_rekapan_bulanan(nomor_pelanggan: str, jumlah_bulan: int, tipe: str, em
     ])
 
 
+# ─── REKAPAN APK PREM (order aplikasi selain Netflix) ──────
+
+# Field FORM ORDER apk prem: (key internal, label yang tampil di form)
+APK_FIELDS = [
+    ("no_cust",    "NO CUST"),
+    ("tanggal",    "TANGGAL ORDER"),
+    ("aplikasi",   "APLIKASI"),
+    ("plan",       "PLAN"),
+    ("durasi",     "DURASI"),
+    ("data_akun",  "DATA AKUN"),
+    ("nama_fh",    "NAMA FH"),
+    ("harga_jual", "HARGA JUAL"),
+    ("harga_beli", "HARGA BELI"),
+    ("untung",     "UNTUNG"),
+    ("notes",      "NOTES"),
+]
+
+# Pencocokan label baris form → key. Dicek berurutan, pola paling spesifik dulu.
+_APK_LABEL_MATCH = [
+    ("no cust", "no_cust"),
+    ("nomor cust", "no_cust"),
+    ("no hp", "no_cust"),
+    ("tanggal", "tanggal"),
+    ("aplikasi", "aplikasi"),
+    ("data akun", "data_akun"),
+    ("nama fh", "nama_fh"),
+    ("harga jual", "harga_jual"),
+    ("harga beli", "harga_beli"),
+    ("untung", "untung"),
+    ("notes", "notes"),
+    ("note", "notes"),
+    ("catatan", "notes"),
+    ("plan", "plan"),
+    ("durasi", "durasi"),
+    ("akun", "data_akun"),
+    ("fh", "nama_fh"),
+]
+
+# key → nomor kolom di sheet REKAPAN APK PREM
+_APK_KOLOM = {
+    "no_cust":    COL_APK_NO_CUST,
+    "tanggal":    COL_APK_TANGGAL,
+    "aplikasi":   COL_APK_APLIKASI,
+    "plan":       COL_APK_PLAN,
+    "durasi":     COL_APK_DURASI,
+    "data_akun":  COL_APK_DATA_AKUN,
+    "nama_fh":    COL_APK_NAMA_FH,
+    "harga_jual": COL_APK_HARGA_JUAL,
+    "harga_beli": COL_APK_HARGA_BELI,
+    "untung":     COL_APK_UNTUNG,
+    "notes":      COL_APK_NOTES,
+}
+
+# Kolom yang ditulis sebagai ANGKA (selnya sudah ber-format Rp di sheet)
+_APK_KOLOM_ANGKA = ("harga_jual", "harga_beli", "untung")
+
+# Karakter hiasan di form yang dibuang sebelum label dibaca
+_APK_HIASAN = "𖥻•*_`─◟♡"
+
+
+def _bulan_dari_teks(teks: str):
+    """Nama bulan (ID/EN, boleh disingkat 3 huruf) → nomor bulan. None kalau tidak cocok."""
+    t = teks.strip().lower().strip(".")
+    if not t:
+        return None
+    for m in range(1, 13):
+        for nama in (BULAN_EN[m].lower(), BULAN_ID[m].lower()):
+            if t == nama or (len(t) >= 3 and nama.startswith(t)):
+                return m
+    return None
+
+
+def parse_tanggal_bebas(teks: str, now: datetime = None):
+    """
+    Parse tanggal yang diketik admin dengan format bebas.
+    Contoh yang diterima:
+      '1 September 2026', '01 Sep 2026', '4 September', 'hari ini',
+      '01/09/2026', '1-9-2026', '1.9.26'
+    Return datetime, atau None kalau tidak bisa dibaca.
+    """
+    now = now or datetime.now()
+    t = (teks or "").strip().lower()
+    if not t:
+        return None
+    if t in ("hari ini", "hariini", "today", "sekarang", "now"):
+        return now
+    if t in ("kemarin", "yesterday"):
+        return now - timedelta(days=1)
+    if t in ("besok", "tomorrow"):
+        return now + timedelta(days=1)
+
+    bagian = [p for p in re.split(r"[\s/\-.,]+", t) if p]
+    if len(bagian) < 2:
+        return None
+
+    try:
+        hari = int(bagian[0])
+    except ValueError:
+        return None
+
+    b = bagian[1]
+    bulan = int(b) if b.isdigit() else _bulan_dari_teks(b)
+    if not bulan or not (1 <= bulan <= 12):
+        return None
+
+    tahun = now.year
+    if len(bagian) >= 3 and bagian[2].isdigit():
+        tahun = int(bagian[2])
+        if tahun < 100:
+            tahun += 2000
+
+    try:
+        return datetime(tahun, bulan, hari)
+    except ValueError:
+        return None
+
+
+def format_tanggal_sheet(dt: datetime) -> str:
+    """datetime → format tanggal yang dipakai sheet rekapan: '4 September 2026'."""
+    return f"{dt.day} {BULAN_EN[dt.month]} {dt.year}"
+
+
+def _tanggal_key(teks: str):
+    """
+    Normalisasi teks tanggal jadi kunci pembanding 'd-m-yyyy', supaya
+    '1 September 2026', '1 Sep 2026' dan '01/09/2026' dianggap sama.
+    None kalau teks bukan tanggal.
+    """
+    dt = parse_tanggal_bebas(teks)
+    return f"{dt.day}-{dt.month}-{dt.year}" if dt else None
+
+
+def parse_form_apk(teks: str):
+    """
+    Parse FORM ORDER apk prem jadi dict per field.
+    Nilai diambil dari teks setelah ':' pertama, jadi 'DATA AKUN' boleh
+    mengandung ':' lagi (mis. 'email (password: gameboy)').
+
+    Return dict {key: str} — semua key selalu ada — atau None kalau tidak ada
+    satu pun baris field yang dikenali.
+    """
+    hasil = {key: "" for key, _ in APK_FIELDS}
+    ada_field = False
+
+    for line in (teks or "").strip().split("\n"):
+        if ":" not in line:
+            continue
+        label_raw, nilai = line.split(":", 1)
+
+        label = label_raw
+        for ch in _APK_HIASAN:
+            label = label.replace(ch, " ")
+        label = " ".join(label.split()).lower()
+        if not label:
+            continue
+
+        for pola, key in _APK_LABEL_MATCH:
+            if pola in label:
+                nilai = nilai.strip().strip("*").strip()
+                # Buang placeholder yang masih nempel dari template, mis. '(email, pw)'
+                if nilai.startswith("(") and nilai.endswith(")"):
+                    nilai = ""
+                if not hasil[key]:
+                    hasil[key] = nilai
+                ada_field = True
+                break
+
+    return hasil if ada_field else None
+
+
+def normalisasi_form_apk(data: dict) -> dict:
+    """
+    Rapikan hasil parse jadi nilai siap tulis ke sheet.
+    - tanggal        → '4 September 2026'
+    - harga & untung → integer (sel di sheet sudah ber-format Rp)
+    - notes & nama FH → HURUF BESAR
+
+    Return dict semua field + '_kosong' (label yang belum diisi) dan
+    '_catatan' (peringatan untuk ditampilkan sebelum konfirmasi).
+    """
+    hasil = dict(data or {})
+    catatan = []
+
+    # Tanggal
+    dt = parse_tanggal_bebas(hasil.get("tanggal", ""))
+    if dt:
+        hasil["tanggal"] = format_tanggal_sheet(dt)
+    elif hasil.get("tanggal"):
+        catatan.append("Tanggal tidak terbaca — pakai format seperti `4 September 2026`.")
+        hasil["tanggal"] = ""
+
+    # Harga jual / beli / untung → angka
+    for key in _APK_KOLOM_ANGKA:
+        teks = str(hasil.get(key, "")).strip()
+        hasil[key] = _parse_harga(teks) if teks else ""
+
+    jual = hasil.get("harga_jual")
+    beli = hasil.get("harga_beli")
+    if isinstance(jual, int) and isinstance(beli, int):
+        selisih = jual - beli
+        if hasil.get("untung") == "":
+            hasil["untung"] = selisih
+            catatan.append(f"UNTUNG kosong → dihitung otomatis: Rp{selisih:,}")
+        elif hasil["untung"] != selisih:
+            catatan.append(
+                f"UNTUNG yang diketik (Rp{hasil['untung']:,}) tidak sama dengan "
+                f"harga jual - harga beli (Rp{selisih:,})."
+            )
+
+    if hasil.get("notes"):
+        hasil["notes"] = hasil["notes"].upper()
+    if hasil.get("nama_fh"):
+        hasil["nama_fh"] = hasil["nama_fh"].upper()
+
+    hasil["_kosong"] = [
+        label for key, label in APK_FIELDS
+        if str(hasil.get(key, "")).strip() == ""
+    ]
+    hasil["_catatan"] = catatan
+    return hasil
+
+
+def _baris_banner_apk(baris: list) -> bool:
+    """
+    True kalau baris ini banner tanggal (sel A berisi tanggal & di-merge A:K,
+    jadi kolom B kosong). Baris data selalu punya tanggal di kolom B.
+    """
+    kolom_a = baris[0].strip() if len(baris) > 0 else ""
+    kolom_b = baris[1].strip() if len(baris) > 1 else ""
+    if not kolom_a or kolom_b:
+        return False
+    return _tanggal_key(kolom_a) is not None
+
+
+def _buat_blok_tanggal_apk(sheet, baris: int, tanggal_teks: str):
+    """Bikin banner tanggal baru (merge A:K + format) di baris tertentu."""
+    sheet.batch_update(
+        [{"range": gspread.utils.rowcol_to_a1(baris, 1), "values": [[tanggal_teks]]}],
+        value_input_option="USER_ENTERED",
+    )
+    rentang = f"A{baris}:K{baris}"
+    try:
+        sheet.merge_cells(rentang)
+    except Exception:
+        pass  # gagal merge tidak fatal — banner tetap kebaca
+    sheet.format(rentang, {
+        "backgroundColor": {"red": 0.788, "green": 0.855, "blue": 0.973},
+        "horizontalAlignment": "CENTER",
+        "textFormat": {"fontFamily": "Lexend", "bold": True},
+        "numberFormat": {"type": "DATE", "pattern": "d mmmm yyyy"},
+    })
+
+
+def _format_baris_apk(sheet, baris: int):
+    """Samakan format baris order baru dengan baris yang sudah ada."""
+    sheet.format(f"A{baris}:K{baris}", {
+        "backgroundColor": {"red": 1, "green": 1, "blue": 1},
+        "horizontalAlignment": "CENTER",
+        "textFormat": {"fontFamily": "Verdana"},
+    })
+    sheet.format(f"B{baris}", {"numberFormat": {"type": "DATE", "pattern": "d mmmm yyyy"}})
+    sheet.format(f"H{baris}:J{baris}", {
+        "numberFormat": {"type": "CURRENCY", "pattern": "[$Rp]#,##0"}
+    })
+
+
+def tulis_rekapan_apk(data: dict) -> dict:
+    """
+    Tulis 1 order apk prem ke sheet REKAPAN APK PREM.
+
+    Baris ditaruh di dalam blok tanggalnya:
+    - blok tanggal sudah ada  → isi baris kosong pertama di blok itu
+      (kalau blok penuh, sisipkan baris baru di akhir blok)
+    - blok tanggal belum ada  → bikin banner tanggal baru di bawah data
+      terakhir, ordernya ditulis di baris berikutnya
+
+    Return {'ok': True, 'baris': int, 'blok_baru': bool}
+    """
+    spreadsheet = get_spreadsheet()
+    sheet = spreadsheet.worksheet(SHEET_APK_PREM)
+    semua = sheet.get_all_values()
+
+    tanggal_teks = data["tanggal"]
+    kunci_tanggal = _tanggal_key(tanggal_teks)
+
+    idx_banner = None
+    for i, baris in enumerate(semua):
+        if _baris_banner_apk(baris) and _tanggal_key(baris[0]) == kunci_tanggal:
+            idx_banner = i
+            break
+
+    blok_baru = False
+    baris_baru = False
+
+    if idx_banner is None:
+        # Blok tanggal belum ada → bikin banner baru di bawah data terakhir
+        baris_banner = len(semua) + 1          # gspread 1-indexed
+        baris_target = baris_banner + 1
+        _buat_blok_tanggal_apk(sheet, baris_banner, tanggal_teks)
+        blok_baru = True
+        baris_baru = True
+    else:
+        # Cari baris kosong di dalam blok (berhenti di banner tanggal berikutnya)
+        baris_target = None
+        i = idx_banner + 1
+        while i < len(semua):
+            if _baris_banner_apk(semua[i]):
+                break
+            baris = semua[i]
+            kolom_a = baris[0].strip() if len(baris) > 0 else ""
+            kolom_f = baris[COL_APK_DATA_AKUN - 1].strip() if len(baris) >= COL_APK_DATA_AKUN else ""
+            if not kolom_a and not kolom_f:
+                baris_target = i + 1           # gspread 1-indexed
+                break
+            i += 1
+
+        if baris_target is None:
+            # Blok penuh → sisipkan baris baru tepat di akhir blok
+            baris_target = i + 1
+            if i < len(semua):
+                sheet.insert_row([""] * 11, index=baris_target, inherit_from_before=True)
+            baris_baru = True
+
+    # Teks ditulis apa adanya (RAW); tanggal & angka lewat USER_ENTERED supaya
+    # jadi nilai tanggal/angka beneran, bukan teks.
+    teks_batch = []
+    entered_batch = []
+    for key_field, _label in APK_FIELDS:
+        nilai = data.get(key_field, "")
+        sel = gspread.utils.rowcol_to_a1(baris_target, _APK_KOLOM[key_field])
+        if key_field in _APK_KOLOM_ANGKA or key_field == "tanggal":
+            entered_batch.append({"range": sel, "values": [[nilai]]})
+        else:
+            teks_batch.append({"range": sel, "values": [[sanitize_cell_text(str(nilai))]]})
+
+    if teks_batch:
+        sheet.batch_update(teks_batch)
+    if entered_batch:
+        sheet.batch_update(entered_batch, value_input_option="USER_ENTERED")
+
+    if baris_baru:
+        _format_baris_apk(sheet, baris_target)
+
+    return {"ok": True, "baris": baris_target, "blok_baru": blok_baru}
+
+
+def rekap_pendapatan_apk(periode: str) -> dict:
+    """
+    Hitung pendapatan dari sheet REKAPAN APK PREM (kolom HARGA JUAL).
+    periode: 'hari_ini', 'minggu_ini', 'bulan_ini'
+
+    Bentuk return-nya sama dengan rekap_pendapatan() supaya gampang digabung:
+    {'total_order', 'total_pendapatan', 'detail', 'tanggal_range'}
+    detail dikelompokkan per APLIKASI (Prime, Viu, Canva, dst).
+    """
+    now = datetime.now()
+    spreadsheet = get_spreadsheet()
+
+    try:
+        sheet = spreadsheet.worksheet(SHEET_APK_PREM)
+    except Exception:
+        return None
+
+    semua_data = sheet.get_all_values()
+
+    if periode == "hari_ini":
+        target_keys = {_tanggal_key(format_tanggal_sheet(now))}
+        tanggal_range = format_tanggal_sheet(now)
+    elif periode == "minggu_ini":
+        tanggal_list = [now - timedelta(days=i) for i in range(7)]
+        target_keys = {_tanggal_key(format_tanggal_sheet(d)) for d in tanggal_list}
+        tanggal_range = f"{format_tanggal_sheet(tanggal_list[-1])} - {format_tanggal_sheet(now)}"
+    elif periode == "bulan_ini":
+        tanggal_list = [now.replace(day=d) for d in range(1, now.day + 1)]
+        target_keys = {_tanggal_key(format_tanggal_sheet(d)) for d in tanggal_list}
+        tanggal_range = f"1 - {now.day} {BULAN_EN[now.month]} {now.year}"
+    else:
+        return None
+
+    total_order = 0
+    total_pendapatan = 0
+    detail = {}
+
+    for i, baris in enumerate(semua_data):
+        if i == 0:          # header
+            continue
+        if _baris_banner_apk(baris):
+            continue
+
+        tanggal_baris = baris[COL_APK_TANGGAL - 1].strip() if len(baris) >= COL_APK_TANGGAL else ""
+        harga_text = baris[COL_APK_HARGA_JUAL - 1].strip() if len(baris) >= COL_APK_HARGA_JUAL else ""
+        aplikasi = baris[COL_APK_APLIKASI - 1].strip() if len(baris) >= COL_APK_APLIKASI else ""
+
+        if not tanggal_baris or not harga_text:
+            continue
+        if _tanggal_key(tanggal_baris) not in target_keys:
+            continue
+
+        harga = _parse_harga(harga_text)
+        if harga <= 0:
+            continue
+
+        total_order += 1
+        total_pendapatan += harga
+
+        label = aplikasi if aplikasi else "lainnya"
+        if label not in detail:
+            detail[label] = {"count": 0, "total": 0}
+        detail[label]["count"] += 1
+        detail[label]["total"] += harga
+
+    return {
+        "total_order": total_order,
+        "total_pendapatan": total_pendapatan,
+        "detail": detail,
+        "tanggal_range": tanggal_range,
+    }
+
+
 # ─── Rekap & Closing ────────────────────────────────────────
 
 def _parse_harga(harga_str: str) -> int:
@@ -1088,22 +1512,47 @@ def tulis_modal_netflix(tanggal_str: str, nominal: int, keterangan: str) -> dict
 def closing_hari() -> dict:
     """
     Closing hari:
-    1. Hitung total pendapatan hari ini dari REKAPAN
+    1. Hitung total pendapatan hari ini = REKAPAN Netflix + REKAPAN APK PREM
+       (dicocokkan per tanggal di masing-masing sheet)
     2. Kalikan (1 - 0.7%) = pendapatan setelah pajak merchant
     3. Tulis ke spreadsheet REKAPAN MODAL, kolom B pada baris tanggal hari ini
-    
-    Return: {'total': int, 'setelah_pajak': int, 'pajak': int} atau None jika gagal
+
+    Return dict:
+      {'total', 'pajak', 'setelah_pajak', 'total_order', 'detail',
+       'netflix': {'total','order','detail'}, 'apk': {'total','order','detail'}}
+    atau None jika tanggal hari ini tidak ada di REKAPAN MODAL.
     """
     now = datetime.now()
+    kosong = {"total_order": 0, "total_pendapatan": 0, "detail": {}}
 
-    # 1. Hitung total pendapatan hari ini
-    rekap = rekap_pendapatan("hari_ini")
-    if rekap is None or rekap["total_pendapatan"] == 0:
-        return {"total": 0, "setelah_pajak": 0, "pajak": 0}
+    # 1. Pendapatan hari ini dari dua sumber
+    rekap_nf = rekap_pendapatan("hari_ini") or kosong
+    rekap_apk = rekap_pendapatan_apk("hari_ini") or kosong
 
-    total = rekap["total_pendapatan"]
+    total = rekap_nf["total_pendapatan"] + rekap_apk["total_pendapatan"]
     pajak = int(total * PAJAK_MERCHANT)
     setelah_pajak = total - pajak
+
+    hasil = {
+        "total": total,
+        "pajak": pajak,
+        "setelah_pajak": setelah_pajak,
+        "total_order": rekap_nf["total_order"] + rekap_apk["total_order"],
+        "detail": rekap_nf["detail"],   # detail Netflix (dipakai laporan lama)
+        "netflix": {
+            "total": rekap_nf["total_pendapatan"],
+            "order": rekap_nf["total_order"],
+            "detail": rekap_nf["detail"],
+        },
+        "apk": {
+            "total": rekap_apk["total_pendapatan"],
+            "order": rekap_apk["total_order"],
+            "detail": rekap_apk["detail"],
+        },
+    }
+
+    if total == 0:
+        return hasil
 
     # 2. Buka spreadsheet REKAPAN MODAL (pakai ID), sheet dinamis per bulan
     client = get_client()
@@ -1127,13 +1576,7 @@ def closing_hari() -> dict:
     col_b = gspread.utils.rowcol_to_a1(baris_target, 2)
     sheet_modal.update_acell(col_b, f"{setelah_pajak:,}".replace(",", ","))
 
-    return {
-        "total": total,
-        "setelah_pajak": setelah_pajak,
-        "pajak": pajak,
-        "detail": rekap["detail"],
-        "total_order": rekap["total_order"],
-    }
+    return hasil
 
 
 def format_template_bulanan(data: dict, tanggal_logout: str, tipe: str) -> str:

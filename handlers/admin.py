@@ -7,7 +7,7 @@ import logging
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import ContextTypes, ConversationHandler
 from config import ADMIN_ID, NOTIF_ORDER_IDS
-from sheets_handler import cek_stok, cek_logout, gantihari, rekap_pendapatan, closing_hari, rekap_invest_harian, rekap_invest_ulang, rekap_invest_range_custom, update_profiles_and_pins
+from sheets_handler import cek_stok, cek_logout, gantihari, rekap_pendapatan, rekap_pendapatan_apk, closing_hari, rekap_invest_harian, rekap_invest_ulang, rekap_invest_range_custom, update_profiles_and_pins
 from handlers.auth import is_allowed
 from utils.pin_manager import verifikasi_pin, ganti_pin as _ganti_pin, verifikasi_pin_admin, ganti_pin_admin as _ganti_pin_admin
 
@@ -191,27 +191,37 @@ async def callback_rekap(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await query.edit_message_text("🔍 Menghitung rekap...")
 
     try:
-        rekap = rekap_pendapatan(periode)
+        kosong = {"total_order": 0, "total_pendapatan": 0, "detail": {}, "tanggal_range": ""}
+        rekap = rekap_pendapatan(periode) or kosong
+        rekap_apk = rekap_pendapatan_apk(periode) or kosong
 
-        if rekap is None:
-            await query.edit_message_text("⚠️ Sheet rekapan tidak ditemukan.")
-            return
+        total_order = rekap["total_order"] + rekap_apk["total_order"]
+        total_pendapatan = rekap["total_pendapatan"] + rekap_apk["total_pendapatan"]
 
-        if rekap["total_order"] == 0:
+        if total_order == 0:
             await query.edit_message_text("ℹ️ Belum ada order untuk periode ini.")
             return
 
         label = {"hari_ini": "HARI INI", "minggu_ini": "MINGGU INI", "bulan_ini": "BULAN INI"}
-        teks = f"📊 *REKAP {label[periode]}*\n"
-        teks += f"_{rekap['tanggal_range']}_\n"
-        teks += "━━━━━━━━━━━━━━━━\n"
-        teks += f"📦 Total Order: *{rekap['total_order']}*\n\n"
-        teks += "Detail:\n"
+        rentang = rekap["tanggal_range"] or rekap_apk["tanggal_range"]
 
+        teks = f"📊 *REKAP {label[periode]}*\n"
+        teks += f"_{rentang}_\n"
+        teks += "━━━━━━━━━━━━━━━━\n"
+
+        teks += f"🍿 *NETFLIX* — {rekap['total_order']} order\n"
         for durasi, info in sorted(rekap["detail"].items()):
             teks += f"• {durasi}: {info['count']}x (Rp{info['total']:,})\n"
+        teks += f"💰 Subtotal: Rp{rekap['total_pendapatan']:,}\n\n"
 
-        teks += f"\n💰 *Total Pendapatan: Rp{rekap['total_pendapatan']:,}*\n"
+        teks += f"📱 *APK PREM* — {rekap_apk['total_order']} order\n"
+        for aplikasi, info in sorted(rekap_apk["detail"].items()):
+            teks += f"• {aplikasi}: {info['count']}x (Rp{info['total']:,})\n"
+        teks += f"💰 Subtotal: Rp{rekap_apk['total_pendapatan']:,}\n"
+
+        teks += "━━━━━━━━━━━━━━━━\n"
+        teks += f"📦 Total Order: *{total_order}*\n"
+        teks += f"💰 *Total Pendapatan: Rp{total_pendapatan:,}*\n"
         teks += "━━━━━━━━━━━━━━━━"
 
         await query.edit_message_text(teks, parse_mode="Markdown")
@@ -272,6 +282,9 @@ async def terima_pin_closing(update: Update, context: ContextTypes.DEFAULT_TYPE)
 
         teks = (
             f"✅ *CLOSING HARI INI BERHASIL*\n"
+            f"━━━━━━━━━━━━━━━━\n"
+            f"🍿 Netflix : {result['netflix']['order']} order · Rp{result['netflix']['total']:,}\n"
+            f"📱 Apk Prem: {result['apk']['order']} order · Rp{result['apk']['total']:,}\n"
             f"━━━━━━━━━━━━━━━━\n"
             f"📦 Total Order: *{result['total_order']}*\n"
             f"💰 Total Pendapatan: Rp{result['total']:,}\n"
