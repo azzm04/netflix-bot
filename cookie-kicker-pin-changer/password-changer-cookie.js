@@ -34,16 +34,37 @@ const URL_PASSWORD = "https://www.netflix.com/password";
 const TIMEOUT_OUTCOME = 40_000;
 
 // Frasa yang menandakan password BENAR-BENAR terganti (EN + ID).
+// "sandimu telah diperbarui" adalah bunyi toast asli Netflix ID setelah
+// submit — toast itu dirender sebagai div[role="alert"], selector yang sama
+// dengan yang dipakai membaca pesan error, jadi frasa ini WAJIB dikenali
+// duluan supaya sukses tidak salah dibaca sebagai kegagalan.
 const TEXT_SUCCESS = [
   "password has been changed",
   "password was changed",
   "password has been updated",
-  "your password is updated",
+  "password is updated",
+  "password updated",
   "kata sandi anda telah diubah",
   "kata sandi telah diubah",
   "kata sandi anda berhasil",
   "kata sandi berhasil diubah",
+  "kata sandi telah diperbarui",
+  "kata sandimu telah diperbarui",
   "sandi anda telah diperbarui",
+  "sandimu telah diperbarui",
+  "sandi kamu telah diperbarui",
+  "sandimu telah diubah",
+];
+
+// Netflix melempar ke halaman "konfigurasikan nomor pemulihan sandi" setelah
+// ganti password sukses. URL-nya mengandung kata "password" di query string
+// (?confirm=password) — makanya pengecekan URL di bawah spesifik, bukan
+// sekadar "apakah masih ada kata password".
+const URL_SUCCESS_HINTS = [
+  "/addphone",
+  "confirm=password",
+  "passwordchanged",
+  "password=changed",
 ];
 
 // Frasa error yang berarti password lama (kolom B sheet) sudah tidak cocok.
@@ -184,7 +205,12 @@ async function waitForPasswordOutcome(page, email, isMahesh, currentPwInput) {
     lastBody = (await page.locator("body").innerText().catch(() => "")).replace(/\s+/g, " ").trim();
     const lower = lastBody.toLowerCase();
 
-    // 1. Keluar dari /password → Netflix sudah menerima perubahan.
+    // 1a. Redirect ke halaman lanjutan khas pasca-ganti-password.
+    if (URL_SUCCESS_HINTS.some((h) => url.toLowerCase().includes(h))) {
+      return { status: "success", url };
+    }
+
+    // 1b. Keluar dari form /password → Netflix sudah menerima perubahan.
     if (!url.includes("/password")) return { status: "success", url };
 
     // 2. Konfirmasi sukses eksplisit walau URL belum pindah.
@@ -317,6 +343,22 @@ async function changePasswordCookie(email, currentPassword, newPassword, isMahes
     }
 
     console.log(`  [password-cookie] ✅ Password berhasil diganti untuk ${email}.`);
+
+    // Netflix mengarahkan ke /addphone ("konfigurasikan nomor pemulihan
+    // sandi"). Tutup dengan "Tidak, Terima Kasih" supaya alur selesai bersih
+    // dan prompt-nya tidak menyangkut di sesi berikutnya. Sekadar best-effort:
+    // password sudah terganti, jadi kegagalan di sini tidak boleh menggagalkan
+    // apa pun — dan jangan sekali-kali klik "Tambahkan Nomor Ponsel".
+    if (page.url().toLowerCase().includes("/addphone")) {
+      const noThanks = page.locator(
+        'button:has-text("Tidak, Terima Kasih"), button:has-text("No, Thanks"), button:has-text("Nanti Saja")',
+      ).first();
+      if (await noThanks.isVisible({ timeout: 5000 }).catch(() => false)) {
+        console.log(`  [password-cookie] Menutup prompt nomor pemulihan sandi...`);
+        await noThanks.click().catch(() => {});
+        await sleep(1500);
+      }
+    }
 
     // Dynamic Update: password change berpotensi merotasi cookie sesi —
     // simpan cookie terbaru dari server supaya request berikutnya tetap valid.
@@ -462,4 +504,4 @@ if (require.main === module) {
   });
 }
 
-module.exports = { changePasswordCookie, CurrentPasswordWrongError };
+module.exports = { changePasswordCookie, waitForPasswordOutcome, CurrentPasswordWrongError };
