@@ -1046,6 +1046,115 @@ async def cmd_login_tv(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
 
 
+# ─── /gantipw ────────────────────────────────────────────────
+
+async def cmd_gantipw(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """
+    Ganti password akun Netflix lewat netflix.com/password, pakai sesi
+    cookie yang sama dengan kick/ganti-PIN (password-changer-cookie.js).
+
+    Password lama diambil otomatis dari kolom B spreadsheet. Akun yang
+    kolom B-nya "PAKE KODE" (tidak punya password asli) langsung ditolak
+    tanpa buka browser sama sekali — form ganti password Netflix wajib
+    diisi password lama, tidak ada jalur "Email a code" seperti ganti PIN.
+
+    Cara pakai: /gantipw email@domain.com passwordBaru123
+    """
+    if update.effective_user.id != ADMIN_ID:
+        await update.message.reply_text("⛔ Hanya admin utama.")
+        return
+
+    args = context.args
+    if not args or len(args) < 2:
+        await update.message.reply_text(
+            "⚠️ *Format salah*\n\n"
+            "Cara pakai:\n"
+            "`/gantipw email@domain.com passwordBaru123`\n\n"
+            "Password baru harus 6-60 karakter.",
+            parse_mode="Markdown"
+        )
+        return
+
+    email        = args[0].strip()
+    new_password = args[1]
+
+    if "@" not in email:
+        await update.message.reply_text("⚠️ Email tidak valid.")
+        return
+
+    if len(new_password) < 6 or len(new_password) > 60:
+        await update.message.reply_text(
+            f"⚠️ Password baru harus 6-60 karakter. Diterima: {len(new_password)} karakter.",
+        )
+        return
+
+    # Hapus pesan admin — password baru sempat diketik apa adanya di chat.
+    try:
+        await update.message.delete()
+    except Exception:
+        pass
+
+    import asyncio
+    import os
+
+    base_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    ckpc_dir = os.path.join(base_dir, "cookie-kicker-pin-changer")
+
+    pesan = await update.effective_chat.send_message(
+        f"🔑 Mengganti password untuk `{email}`, mohon tunggu...",
+        parse_mode="Markdown"
+    )
+
+    try:
+        proc = await asyncio.create_subprocess_exec(
+            "node", "password-changer-cookie.js", "change", email, new_password,
+            cwd=ckpc_dir,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
+        )
+        try:
+            # Timeout digenerosikan — alur MFA "Email a code" (kalau muncul)
+            # bisa nunggu ~20-60 detik per percobaan, sampai 3x percobaan.
+            stdout, stderr = await asyncio.wait_for(proc.communicate(), timeout=210)
+        except asyncio.TimeoutError:
+            proc.kill()
+            await proc.wait()
+            await pesan.edit_text(
+                "❌ *Timeout* setelah 210 detik.\n"
+                "Proses di server mungkin macet — cek log server atau coba lagi.",
+                parse_mode="Markdown",
+            )
+            return
+    except Exception as e:
+        logger.error(f"Error gantipw: {e}", exc_info=True)
+        await pesan.edit_text(f"⚠️ Gagal jalankan proses.\n\n`{e}`", parse_mode="Markdown")
+        return
+
+    if proc.returncode == 0:
+        await pesan.edit_text(
+            f"✅ *Password berhasil diganti!*\n\n"
+            f"📧 Akun: `{email}`\n\n"
+            f"Password baru sudah aktif di Netflix dan spreadsheet sudah diperbarui.",
+            parse_mode="Markdown"
+        )
+    else:
+        detail = stderr.decode(errors="ignore").strip() or stdout.decode(errors="ignore").strip()
+        detail = (detail or "(tidak ada output)")[-500:]
+        if "Itu tidak ada passwordnya" in detail:
+            await pesan.edit_text(
+                f"❌ *Itu tidak ada passwordnya*\n\n"
+                f"📧 Akun: `{email}`\n\n"
+                f"Kolom password akun ini di sheet = `PAKE KODE`, tidak ada password "
+                f"asli yang bisa dipakai untuk isi form ganti password Netflix.",
+                parse_mode="Markdown"
+            )
+        else:
+            await pesan.edit_text(
+                f"❌ *Gagal ganti password.*\n\n📧 Akun: `{email}`\n\n`{detail}`",
+                parse_mode="Markdown"
+            )
+
+
 # ─── /setting_akun ─────────────────────────────────────────
 
 async def cmd_setting_akun(update: Update, context: ContextTypes.DEFAULT_TYPE):

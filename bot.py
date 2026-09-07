@@ -58,6 +58,7 @@ from handlers.admin import (
     cmd_logout_sekarang,
     cmd_login_tv,
     cmd_setting_akun,
+    cmd_gantipw,
 )
 from handlers.apkprem import (
     cmd_apkprem, terima_form_apk, callback_konfirmasi_apk, cancel_apk,
@@ -135,6 +136,7 @@ async def post_init(application):
                 BotCommand("logout_sekarang", "Kick device & ganti PIN akun expired sekarang"),
                 BotCommand("login_tv", "Login-kan TV pakai kode 8 digit dari layar TV"),
                 BotCommand("setting_akun", "Setup akun Netflix baru & generate profil"),
+                BotCommand("gantipw", "Ganti password akun Netflix"),
                 BotCommand("apkprem", "Input order apk prem ke REKAPAN APK PREM"),
                 BotCommand("cancel", "Batalkan proses"),
             ],
@@ -338,6 +340,7 @@ def main():
     app.add_handler(CommandHandler("logout_sekarang", cmd_logout_sekarang, filters=PRIVATE))
     app.add_handler(CommandHandler("login_tv", cmd_login_tv, filters=PRIVATE))
     app.add_handler(CommandHandler("setting_akun", cmd_setting_akun, filters=PRIVATE))
+    app.add_handler(CommandHandler("gantipw", cmd_gantipw, filters=PRIVATE))
     app.add_handler(CommandHandler("cancel", cancel, filters=PRIVATE))
 
     # Command khusus GROUP (rekap, closing, feeadmin)

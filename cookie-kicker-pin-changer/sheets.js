@@ -515,8 +515,12 @@ async function getAllProfilesForEmail(targetEmail) {
  * Dipakai account-setup-cookie.js untuk memilih jalur verifikasi Profile Lock:
  * kalau ada password asli -> Confirm Password; kalau "PAKE KODE" -> Email code.
  *
+ * sheetName + rowIndex ikut dikembalikan (bukan cuma dipakai internal) supaya
+ * pemanggil lain (mis. password-changer-cookie.js) bisa langsung update sel
+ * yang sama lewat updatePasswordForEmail() tanpa perlu scan ulang.
+ *
  * @param {string} targetEmail
- * @returns {Promise<{ password: string, noPassword: boolean, found: boolean }>}
+ * @returns {Promise<{ password: string, noPassword: boolean, found: boolean, sheetName: string, rowIndex: number }>}
  */
 async function getPasswordForEmail(targetEmail) {
   const sheets = await getSheets();
@@ -534,7 +538,8 @@ async function getPasswordForEmail(targetEmail) {
       continue;
     }
 
-    for (const row of rows) {
+    for (let i = 0; i < rows.length; i++) {
+      const row = rows[i];
       const colA = row[COL_EMAIL]?.trim() ?? "";
       if (colA.toLowerCase() !== targetEmail.toLowerCase()) continue;
 
@@ -544,17 +549,44 @@ async function getPasswordForEmail(targetEmail) {
         password,
         noPassword: password.toUpperCase() === "PAKE KODE",
         found: true,
+        sheetName,
+        rowIndex: i + 1, // 1-based, sama seperti scanSheetForExpired()
       };
     }
   }
 
-  return { password: "", noPassword: false, found: false };
+  return { password: "", noPassword: false, found: false, sheetName: "", rowIndex: 0 };
+}
+
+/**
+ * Tulis password baru ke kolom B (sama seperti updatePin() tapi untuk kolom
+ * password). Dipakai setelah ganti password sukses di Netflix, supaya
+ * spreadsheet tetap sinkron dan tidak ada admin lain yang pakai password lama.
+ *
+ * @param {string} spreadsheetId
+ * @param {string} sheetName
+ * @param {number} rowIndex     - 1-based
+ * @param {string} newPassword
+ */
+async function updatePasswordForEmail(spreadsheetId, sheetName, rowIndex, newPassword) {
+  const sheets = await getSheets();
+  // Kolom B = index 1 → huruf 'B'
+  const colB = String.fromCharCode(65 + COL_PASSWORD);
+  const range = `${sheetName}!${colB}${rowIndex}`;
+  await sheets.spreadsheets.values.update({
+    spreadsheetId,
+    range,
+    valueInputOption: "RAW",
+    requestBody: { values: [[newPassword]] },
+  });
+  console.log(`  [sheets] updatePasswordForEmail: ${sheetName} baris ${rowIndex} → password diperbarui`);
 }
 
 module.exports = {
   getExpiredAccounts,
   getAllProfilesForEmail,
   getPasswordForEmail,
+  updatePasswordForEmail,
   markAsKicked,
   updatePin,
   findSpreadsheetId,
