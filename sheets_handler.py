@@ -5,6 +5,7 @@
 import re
 import random
 import asyncio
+import difflib
 import gspread
 from google.oauth2.service_account import Credentials
 from datetime import datetime, timedelta
@@ -910,6 +911,88 @@ _APK_KOLOM_ANGKA = ("harga_jual", "harga_beli", "untung")
 # Karakter hiasan di form yang dibuang sebelum label dibaca
 _APK_HIASAN = "𖥻•*_`─◟♡"
 
+# Daftar baku APLIKASI & PLAN (sesuai pilihan dropdown di sheet) — dipakai
+# untuk auto-normalisasi input form supaya rekap tidak pecah karena beda
+# casing/typo antar-admin.
+APK_APLIKASI_VALID = [
+    "YOUTUBE", "CANVA", "VIU", "IQIYI", "WETV", "CAPCUT",
+    "DISNEY", "VIDIO", "PRIME", "LOKLOK",
+]
+_APK_APLIKASI_ALIAS = {
+    "YT": "YOUTUBE",
+    "VID": "VIDIO",
+    "CC": "CAPCUT",
+    "DSN": "DISNEY",
+    "DISNEY+": "DISNEY",
+    "DISNEY PLUS": "DISNEY",
+    "PRIME VIDEO": "PRIME",
+    "AMAZON PRIME": "PRIME",
+}
+
+APK_PLAN_VALID = ["PRIVATE", "SHARING", "MEMBER", "FAMPLAN"]
+_APK_PLAN_ALIAS = {
+    "PRIV": "PRIVATE",
+    "SHARE": "SHARING",
+    "SHARED": "SHARING",
+    "FAM": "FAMPLAN",
+    "FAMILY": "FAMPLAN",
+    "FAMILY PLAN": "FAMPLAN",
+}
+
+# Pola DURASI baku: '<angka> HARI/BULAN/TAHUN' atau '<angka>U' (mis. '3U').
+_APK_DURASI_POLA = re.compile(r"^(\d+)\s*(HARI|BULAN|TAHUN|U)$")
+
+
+def _cocokkan_baku(nilai: str, daftar_valid: list, alias: dict, label: str):
+    """
+    Cocokkan nilai bebas (mis. ketikan admin) ke daftar baku dropdown sheet.
+    Return (nilai_final, catatan_atau_None):
+      - cocok persis / lewat alias → dipakai, tanpa catatan
+      - mirip (fuzzy match)        → dikoreksi ke bentuk baku + catatan
+      - tidak dikenali sama sekali → dipakai apa adanya (UPPERCASE) + catatan
+    """
+    asli = nilai.strip()
+    if not asli:
+        return asli, None
+
+    bersih = " ".join(asli.upper().split())
+
+    if bersih in daftar_valid:
+        return bersih, None
+    if bersih in alias:
+        return alias[bersih], None
+
+    cocok = difflib.get_close_matches(bersih, daftar_valid, n=1, cutoff=0.6)
+    if cocok:
+        return cocok[0], f"{label} '{asli}' dikoreksi jadi '{cocok[0]}'."
+
+    return bersih, (
+        f"{label} '{asli}' tidak ada di daftar baku ({', '.join(daftar_valid)})."
+    )
+
+
+def _normalisasi_durasi(nilai: str):
+    """
+    Rapikan DURASI ke pola baku: '<angka> HARI/BULAN/TAHUN' atau '<angka>U'.
+    Return (nilai_final, catatan_atau_None).
+    """
+    asli = nilai.strip()
+    if not asli:
+        return asli, None
+
+    bersih = " ".join(asli.upper().split())
+    m = _APK_DURASI_POLA.match(bersih)
+    if not m:
+        return bersih, (
+            f"DURASI '{asli}' tidak dikenali — pakai format seperti "
+            "'1 HARI', '3 BULAN', '1 TAHUN', atau '3U'."
+        )
+
+    angka, satuan = m.group(1), m.group(2)
+    final = f"{angka}U" if satuan == "U" else f"{angka} {satuan}"
+    catatan = None if final == bersih else f"DURASI '{asli}' dirapikan jadi '{final}'."
+    return final, catatan
+
 
 def _bulan_dari_teks(teks: str):
     """Nama bulan (ID/EN, boleh disingkat 3 huruf) → nomor bulan. None kalau tidak cocok."""
@@ -1059,6 +1142,29 @@ def normalisasi_form_apk(data: dict) -> dict:
                 f"UNTUNG yang diketik (Rp{hasil['untung']:,}) tidak sama dengan "
                 f"harga jual - harga beli (Rp{selisih:,})."
             )
+
+    # Aplikasi & Plan → cocokkan ke daftar baku dropdown sheet
+    if hasil.get("aplikasi"):
+        nilai, catatan_field = _cocokkan_baku(
+            hasil["aplikasi"], APK_APLIKASI_VALID, _APK_APLIKASI_ALIAS, "APLIKASI"
+        )
+        hasil["aplikasi"] = nilai
+        if catatan_field:
+            catatan.append(catatan_field)
+
+    if hasil.get("plan"):
+        nilai, catatan_field = _cocokkan_baku(
+            hasil["plan"], APK_PLAN_VALID, _APK_PLAN_ALIAS, "PLAN"
+        )
+        hasil["plan"] = nilai
+        if catatan_field:
+            catatan.append(catatan_field)
+
+    if hasil.get("durasi"):
+        nilai, catatan_field = _normalisasi_durasi(hasil["durasi"])
+        hasil["durasi"] = nilai
+        if catatan_field:
+            catatan.append(catatan_field)
 
     if hasil.get("notes"):
         hasil["notes"] = hasil["notes"].upper()
