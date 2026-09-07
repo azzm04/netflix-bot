@@ -28,6 +28,67 @@ const URL_PASSWORD = "https://www.netflix.com/password";
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
+// ── Isi input yang dikelola React ─────────────────────────
+// fill() menulis ke DOM tapi kadang tidak memicu onChange React, jadi Netflix
+// menganggap field-nya masih kosong dan tombol Save tidak submit apa-apa.
+// Pola verify + fallback click/type ini sama dengan yang dipakai untuk input
+// PIN di pin-changer-cookie.js.
+async function isiInputAndal(input, value, label) {
+  await input.fill("");
+  await input.fill(value);
+  await sleep(200);
+
+  let isi = await input.inputValue().catch(() => "");
+  if (isi !== value) {
+    console.log(`  [password-cookie] fill() tidak ter-set di ${label}, coba click+selectAll+type...`);
+    await input.click({ clickCount: 3 });
+    await input.type(value, { delay: 60 });
+    await sleep(200);
+    isi = await input.inputValue().catch(() => "");
+  }
+
+  if (isi !== value) {
+    throw new Error(`Gagal mengisi field ${label} — nilai tidak ter-set di form.`);
+  }
+}
+
+// ── Dump kondisi halaman saat hasilnya ambigu ─────────────
+// Dipakai kalau setelah Save tidak ada pesan error DAN form-nya tidak hilang:
+// tanpa ini errornya cuma "status tidak jelas" dan tidak bisa didiagnosis.
+async function dumpDiagnostik(page, email, inputs) {
+  const baris = [];
+
+  for (const [label, loc] of Object.entries(inputs)) {
+    const val = await loc.inputValue().catch(() => null);
+    // Password tidak pernah di-log apa adanya — cukup panjangnya saja.
+    baris.push(`${label}=${val === null ? "(tidak terbaca)" : `${val.length} karakter`}`);
+  }
+
+  const soad = page.locator('[data-uia="change-password-form+soad-checkbox"]');
+  const soadChecked = await soad.isChecked().catch(() => null);
+  baris.push(`soad-checkbox=${soadChecked === null ? "(tidak terbaca)" : soadChecked}`);
+
+  const saveBtn = page.locator('[data-uia="change-password-form+save-button"]');
+  const saveDisabled = await saveBtn.isDisabled().catch(() => null);
+  baris.push(`save-button-disabled=${saveDisabled === null ? "(tidak terbaca)" : saveDisabled}`);
+
+  console.error(`  [password-cookie] [diagnostik] ${baris.join(" | ")}`);
+
+  const teksForm = await page
+    .locator('[data-uia="change-password-page"]')
+    .innerText()
+    .catch(() => "");
+  if (teksForm) {
+    console.error(
+      `  [password-cookie] [diagnostik] Teks form:\n${teksForm.trim().slice(0, 1200)}`,
+    );
+  }
+
+  const path = `debug-gantipw-${email.replace(/[^a-z0-9]/gi, "_")}-${Date.now()}.png`;
+  await page.screenshot({ path, fullPage: true }).catch(() => {});
+  console.error(`  [password-cookie] [diagnostik] Screenshot: ${path}`);
+}
+
 class CurrentPasswordWrongError extends Error {
   constructor(email) {
     super(`Password lama ditolak Netflix untuk ${email} — kemungkinan password di sheet sudah tidak sesuai.`);
@@ -92,18 +153,17 @@ async function changePasswordCookie(email, currentPassword, newPassword, isMahes
       );
     }
 
-    console.log(`  [password-cookie] Mengisi form ganti password...`);
-    await currentPwInput.fill(currentPassword);
-
     const newPwInput = page.locator(
       '[data-uia="change-password-form+new-password-input"]',
     );
-    await newPwInput.fill(newPassword);
-
     const reenterPwInput = page.locator(
       '[data-uia="change-password-form+reeneter-new-password-input"]',
     );
-    await reenterPwInput.fill(newPassword);
+
+    console.log(`  [password-cookie] Mengisi form ganti password...`);
+    await isiInputAndal(currentPwInput, currentPassword, "current-password");
+    await isiInputAndal(newPwInput, newPassword, "new-password");
+    await isiInputAndal(reenterPwInput, newPassword, "reenter-new-password");
 
     // "Sign out all devices" dicentang default oleh Netflix — dimatikan
     // supaya sesi/device pelanggan yang lagi nonton tidak ke-logout paksa.
@@ -111,14 +171,31 @@ async function changePasswordCookie(email, currentPassword, newPassword, isMahes
       '[data-uia="change-password-form+soad-checkbox"]',
     );
     if (await soadCheckbox.isChecked({ timeout: 3000 }).catch(() => false)) {
-      // Klik labelnya, bukan input-nya langsung — checkbox custom Netflix
-      // sering butuh event klik di elemen yang benar-benar visible.
-      await soadCheckbox.click({ force: true });
+      // Input checkbox-nya sendiri ditumpuk elemen "chrome" milik design system
+      // Netflix, jadi klik ke label — itu target yang benar-benar bisa diklik.
+      await page
+        .locator('[data-uia="change-password-form+soad-checkbox+label"]')
+        .click()
+        .catch(async () => {
+          await soadCheckbox.click({ force: true });
+        });
       await sleep(300);
+
+      if (await soadCheckbox.isChecked().catch(() => false)) {
+        console.warn(
+          `  [password-cookie] ⚠ "Sign out all devices" masih tercentang — device pelanggan bisa ke-logout.`,
+        );
+      }
     }
 
     await sleep(300);
     const saveBtn = page.locator('[data-uia="change-password-form+save-button"]');
+    if (await saveBtn.isDisabled().catch(() => false)) {
+      throw new Error(
+        "Tombol Save masih disabled setelah semua field terisi — Netflix menolak isi form (cek panjang/format password baru).",
+      );
+    }
+
     console.log(`  [password-cookie] Menyimpan password baru...`);
     await saveBtn.click();
 
@@ -126,8 +203,10 @@ async function changePasswordCookie(email, currentPassword, newPassword, isMahes
     // (lihat pin-changer-cookie.js) — dipakai lagi di sini karena belum ada
     // konfirmasi DOM sukses/error yang spesifik untuk halaman ini.
     const errorMsg = page.locator(
-      '[data-uia="input-message-error"], .ui-message-error, [data-uia="change-password-page+error"]',
-    );
+      '[data-uia="input-message-error"], .ui-message-error, ' +
+      '[data-uia="change-password-page+error"], [data-uia="UIMessage-content"], ' +
+      '[data-uia$="+error"], [role="alert"]',
+    ).first();
 
     await Promise.race([
       errorMsg.waitFor({ state: "visible", timeout: 15_000 }),
@@ -154,8 +233,13 @@ async function changePasswordCookie(email, currentPassword, newPassword, isMahes
     // (hilang dari DOM atau URL pindah dari /password) → dianggap sukses.
     const stillOnForm = await currentPwInput.isVisible({ timeout: 2000 }).catch(() => false);
     if (stillOnForm) {
+      await dumpDiagnostik(page, email, {
+        "current-password": currentPwInput,
+        "new-password": newPwInput,
+        "reenter-new-password": reenterPwInput,
+      });
       throw new Error(
-        `Status tidak jelas setelah submit (masih di form, URL: ${page.url()}, tidak ada pesan error) — cek manual.`,
+        `Status tidak jelas setelah submit (masih di form, URL: ${page.url()}, tidak ada pesan error) — lihat baris [diagnostik] di log & screenshot yang tersimpan.`,
       );
     }
 

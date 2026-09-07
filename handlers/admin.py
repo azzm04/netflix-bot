@@ -1130,6 +1130,16 @@ async def cmd_gantipw(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await pesan.edit_text(f"⚠️ Gagal jalankan proses.\n\n`{e}`", parse_mode="Markdown")
         return
 
+    # Log langkah-langkah dari node ikut direkam ke log server — kalau tidak,
+    # riwayat proses yang sukses hilang total dan yang gagal cuma kelihatan
+    # 500 karakter terakhirnya di Telegram.
+    log_stdout = stdout.decode(errors="ignore").strip()
+    log_stderr = stderr.decode(errors="ignore").strip()
+    if log_stdout:
+        logger.info(f"[gantipw] {email} stdout:\n{log_stdout}")
+    if log_stderr:
+        logger.warning(f"[gantipw] {email} stderr:\n{log_stderr}")
+
     if proc.returncode == 0:
         await pesan.edit_text(
             f"✅ *Password berhasil diganti!*\n\n"
@@ -1138,8 +1148,7 @@ async def cmd_gantipw(update: Update, context: ContextTypes.DEFAULT_TYPE):
             parse_mode="Markdown"
         )
     else:
-        detail = stderr.decode(errors="ignore").strip() or stdout.decode(errors="ignore").strip()
-        detail = (detail or "(tidak ada output)")[-500:]
+        detail = ((log_stderr or log_stdout) or "(tidak ada output)")[-500:]
         if "Itu tidak ada passwordnya" in detail:
             await pesan.edit_text(
                 f"❌ *Itu tidak ada passwordnya*\n\n"
