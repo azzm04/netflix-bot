@@ -4,6 +4,7 @@
 # ============================================================
 
 import logging
+import re
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import ContextTypes, ConversationHandler
 from config import ADMIN_ID, NOTIF_ORDER_IDS
@@ -1114,13 +1115,15 @@ async def cmd_gantipw(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
         try:
             # Timeout digenerosikan — alur MFA "Email a code" (kalau muncul)
-            # bisa nunggu ~20-60 detik per percobaan, sampai 3x percobaan.
-            stdout, stderr = await asyncio.wait_for(proc.communicate(), timeout=210)
+            # bisa nunggu ~20-60 detik per percobaan, sampai 3x percobaan, dan
+            # password lama bisa dicoba sampai 3 kandidat kalau baris-baris
+            # sheet untuk email ini tidak seragam.
+            stdout, stderr = await asyncio.wait_for(proc.communicate(), timeout=300)
         except asyncio.TimeoutError:
             proc.kill()
             await proc.wait()
             await pesan.edit_text(
-                "❌ *Timeout* setelah 210 detik.\n"
+                "❌ *Timeout* setelah 300 detik.\n"
                 "Proses di server mungkin macet — cek log server atau coba lagi.",
                 parse_mode="Markdown",
             )
@@ -1131,10 +1134,22 @@ async def cmd_gantipw(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
 
     if proc.returncode == 0:
+        # Satu akun dipakai banyak profil, jadi emailnya muncul di banyak baris
+        # sheet. Script mencetak SHEET_ROWS=<n> supaya admin tahu semua baris
+        # ikut ter-update — bukan cuma baris teratas seperti versi sebelumnya.
+        out = stdout.decode(errors="ignore")
+        m = re.search(r"SHEET_ROWS=(\d+)(?: SKIPPED_PAKEKODE=(\d+))?", out)
+        if m:
+            baris = f"{m.group(1)} baris di spreadsheet ikut diperbarui"
+            if m.group(2):
+                baris += f" ({m.group(2)} baris PAKE KODE dilewati)"
+        else:
+            baris = "spreadsheet sudah diperbarui"
+
         await pesan.edit_text(
             f"✅ *Password berhasil diganti!*\n\n"
             f"📧 Akun: `{email}`\n\n"
-            f"Password baru sudah aktif di Netflix dan spreadsheet sudah diperbarui.",
+            f"Password baru sudah aktif di Netflix, {baris}.",
             parse_mode="Markdown"
         )
     else:

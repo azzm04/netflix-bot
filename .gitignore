@@ -19,3 +19,6 @@ browser-profiles/
 
 # Lock file lintas-proses untuk cookie-kicker-pin-changer/index.js
 .kick.lock
+
+# Snapshot debug /gantipw (screenshot + teks halaman Netflix)
+cookie-kicker-pin-changer/debug/

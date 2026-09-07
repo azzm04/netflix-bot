@@ -519,8 +519,14 @@ async function getAllProfilesForEmail(targetEmail) {
  * pemanggil lain (mis. password-changer-cookie.js) bisa langsung update sel
  * yang sama lewat updatePasswordForEmail() tanpa perlu scan ulang.
  *
+ * Mengembalikan juga `rows`: SEMUA baris (lintas sheet) yang kolom A-nya email
+ * ini dan kolom B-nya terisi. Satu akun Netflix dipakai banyak profil, jadi
+ * emailnya muncul di banyak baris — password-changer-cookie.js perlu daftar
+ * lengkap ini supaya sinkronisasi setelah ganti password kena semua baris,
+ * bukan cuma baris pertama.
+ *
  * @param {string} targetEmail
- * @returns {Promise<{ password: string, noPassword: boolean, found: boolean, sheetName: string, rowIndex: number }>}
+ * @returns {Promise<{ password: string, noPassword: boolean, found: boolean, sheetName: string, rowIndex: number, rows: Array<{ sheetName: string, rowIndex: number, password: string }> }>}
  */
 async function getPasswordForEmail(targetEmail) {
   const sheets = await getSheets();
@@ -528,6 +534,8 @@ async function getPasswordForEmail(targetEmail) {
 
   const sheetNames = (process.env.SHEETS_TO_CHECK ?? "HARIAN_DURASI-1,HARIAN_DURASI-2&3,MINGGUAN,BULANAN")
     .split(",").map((s) => s.trim()).filter(Boolean);
+
+  const found = []; // { sheetName, rowIndex, password } — SEMUA baris email ini
 
   for (const sheetName of sheetNames) {
     let rows;
@@ -544,18 +552,34 @@ async function getPasswordForEmail(targetEmail) {
       if (colA.toLowerCase() !== targetEmail.toLowerCase()) continue;
 
       const password = row[COL_PASSWORD]?.trim() ?? "";
-      if (!password) continue; // baris email ini tanpa isi password, coba baris lain
-      return {
-        password,
-        noPassword: password.toUpperCase() === "PAKE KODE",
-        found: true,
+      if (!password) continue; // baris email ini tanpa isi password, lewati
+      found.push({
         sheetName,
         rowIndex: i + 1, // 1-based, sama seperti scanSheetForExpired()
-      };
+        password,
+      });
     }
   }
 
-  return { password: "", noPassword: false, found: false, sheetName: "", rowIndex: 0 };
+  if (found.length === 0) {
+    return { password: "", noPassword: false, found: false, sheetName: "", rowIndex: 0, rows: [] };
+  }
+
+  // Satu email bisa punya password berbeda antar baris kalau ada baris lama
+  // yang belum ikut ter-update. Password "aktif" = entri pertama yang bukan
+  // "PAKE KODE"; kalau semua baris "PAKE KODE" berarti akun ini memang tidak
+  // punya password asli (noPassword).
+  const real = found.find((r) => r.password.toUpperCase() !== "PAKE KODE");
+  const primary = real ?? found[0];
+
+  return {
+    password: primary.password,
+    noPassword: !real,
+    found: true,
+    sheetName: primary.sheetName,
+    rowIndex: primary.rowIndex,
+    rows: found,
+  };
 }
 
 /**
@@ -582,11 +606,50 @@ async function updatePasswordForEmail(spreadsheetId, sheetName, rowIndex, newPas
   console.log(`  [sheets] updatePasswordForEmail: ${sheetName} baris ${rowIndex} → password diperbarui`);
 }
 
+/**
+ * Tulis password baru ke kolom B untuk BANYAK baris sekaligus (satu email
+ * dipakai banyak profil → muncul di banyak baris, bisa lintas sheet).
+ * Semua sel ditulis dalam satu batchUpdate supaya tidak ada kondisi
+ * setengah-jadi (sebagian baris password baru, sebagian masih lama) kalau
+ * request-nya gagal di tengah jalan.
+ *
+ * @param {string} spreadsheetId
+ * @param {Array<{ sheetName: string, rowIndex: number }>} rows - rowIndex 1-based
+ * @param {string} newPassword
+ * @returns {Promise<number>} jumlah sel yang ditulis
+ */
+async function updatePasswordRows(spreadsheetId, rows, newPassword) {
+  if (!rows || rows.length === 0) return 0;
+
+  const sheets = await getSheets();
+  const colB = String.fromCharCode(65 + COL_PASSWORD); // kolom B
+
+  // Nama sheet dikutip — beberapa sheet punya karakter spesial
+  // ("HARIAN_DURASI-2&3") yang bisa bikin A1 notation salah parse kalau polos.
+  const data = rows.map(({ sheetName, rowIndex }) => ({
+    range: `'${String(sheetName).replace(/'/g, "''")}'!${colB}${rowIndex}`,
+    values: [[newPassword]],
+  }));
+
+  await sheets.spreadsheets.values.batchUpdate({
+    spreadsheetId,
+    requestBody: { valueInputOption: "RAW", data },
+  });
+
+  console.log(
+    `  [sheets] updatePasswordRows: ${data.length} baris diperbarui → ${rows
+      .map((r) => `${r.sheetName}!${r.rowIndex}`)
+      .join(", ")}`,
+  );
+  return data.length;
+}
+
 module.exports = {
   getExpiredAccounts,
   getAllProfilesForEmail,
   getPasswordForEmail,
   updatePasswordForEmail,
+  updatePasswordRows,
   markAsKicked,
   updatePin,
   findSpreadsheetId,
