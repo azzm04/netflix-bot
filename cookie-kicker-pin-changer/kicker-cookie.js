@@ -448,40 +448,86 @@ function _deviceMatchesAllowed(netflixName, allowedDevices){
   });
 }
 
-// ── Putuskan device mana yang harus dikick ────────────────
+// ── Audit device: cocokkan snapshot dengan aturan spreadsheet ──
 /**
+ * Sumber kebenaran tunggal untuk "device ini boleh atau tidak".
+ * decideKickTargets() (dipakai kicker) dan device-checker-cookie.js (dipakai
+ * /cekdevice, read-only) sama-sama memakai fungsi ini supaya keputusan kick
+ * dan isi laporan cek tidak pernah beda.
+ *
  * @param {Array}    snapshot        - hasil scanAllDevices()
  * @param {string[]} expiredTargets  - profil yang expired (lowercase)
  * @param {Array}    allProfileRows  - semua profil akun dari getAllProfilesForEmail()
  *                                     [] = gunakan logic target-only (fallback)
- * @returns {string[]} device names yang harus dikick
+ * @returns {{ verdicts: Array, kickNames: string[] }}
+ *   verdicts — satu entri per device: { index, deviceName, action:
+ *   "kick"|"keep"|"unknown", reason, profile, profileOnNetflix, isCurrent,
+ *   noActivity }. kickNames — nama device yang harus dikick, URUT sesuai
+ *   urutan eksekusi kick.
  */
-function decideKickTargets(snapshot, expiredTargets, allProfileRows) {
-  // Pakai array of index, bukan Set nama — karena bisa ada banyak device dengan nama sama
-  const toKickIndices = new Set(); // Set of snapshot index
-  const toKick        = [];        // hasil akhir: array { deviceName, snapshotIndex }
+function auditDevices(snapshot, expiredTargets, allProfileRows) {
+  // Per index, bukan per nama — bisa ada banyak device dengan nama sama.
+  const byIndex   = new Map();
+  const kickOrder = [];
 
-  // Helper: tambahkan device ke toKick berdasarkan index (hindari duplikat index)
-  const addToKick = (d) => {
-    if (!toKickIndices.has(d.index)) {
-      toKickIndices.add(d.index);
-      toKick.push({ deviceName: d.deviceName, snapshotIndex: d.index });
+  const record = (d, action, reason, profile = null) => {
+    const existing = byIndex.get(d.index);
+    // Keputusan kick tidak bisa dianulir oleh evaluasi profil berikutnya.
+    if (existing && existing.action === "kick") return;
+
+    const verdict = {
+      index: d.index,
+      deviceName: d.deviceName,
+      action,
+      reason,
+      profile,
+      profileOnNetflix: d.profileText ? extractProfileName(d.profileText) : "",
+      isCurrent: !!d.isCurrent,
+      noActivity: !!d.noActivity,
+    };
+    byIndex.set(d.index, verdict);
+    if (action === "kick") kickOrder.push(verdict);
+  };
+
+  // Device yang tidak tersentuh aturan apa pun tetap muncul di laporan, tapi
+  // TIDAK ikut dikick — persis seperti perilaku sebelumnya.
+  const finish = () => {
+    for (const d of snapshot) {
+      if (byIndex.has(d.index)) continue;
+      if (d.isCurrent) {
+        record(d, "keep", "sesi bot ini sendiri");
+      } else if (d.profileText) {
+        record(d, "unknown", "profil di Netflix tidak ada di spreadsheet");
+      } else {
+        record(d, "unknown", "profil tidak terbaca dari kartu device");
+      }
     }
+    return {
+      verdicts: snapshot.map((d) => byIndex.get(d.index)).filter(Boolean),
+      kickNames: kickOrder.map((v) => v.deviceName),
+    };
   };
 
   // ── Fallback: tidak ada data spreadsheet ─────────────────
   if (!allProfileRows || allProfileRows.length === 0) {
-    console.log("  [kick] ⚠ Tidak ada data profil lengkap — pakai logic target saja.");
+    console.log("  [audit] ⚠ Tidak ada data profil lengkap — pakai logic target saja.");
     for (const d of snapshot) {
       if (d.isCurrent) continue;
       // "Tidak ada aktivitas" tanpa profil → selalu kick (jejak bot lama).
-      if (d.noActivity && !d.profileText) { addToKick(d); continue; }
+      if (d.noActivity && !d.profileText) {
+        record(d, "kick", "tidak ada aktivitas");
+        continue;
+      }
       // Selain itu, HANYA kick kalau device memang cocok profil yang expired —
       // jangan kick device aktif hanya karena profileText gagal terparse.
-      if (d.profileText && expiredTargets.some((t) => profileNameMatches(extractProfileName(d.profileText), t, d.profileText)))
-        addToKick(d);
+      if (
+        d.profileText &&
+        expiredTargets.some((t) => profileNameMatches(extractProfileName(d.profileText), t, d.profileText))
+      ) {
+        record(d, "kick", "profil expired");
+      }
     }
-    return toKick.map((x) => x.deviceName);
+    return finish();
   }
 
   // ── Evaluasi tiap profil dari spreadsheet ─────────────────
@@ -494,8 +540,8 @@ function decideKickTargets(snapshot, expiredTargets, allProfileRows) {
       snapshot.filter((d) => !d.isCurrent && d.profileText &&
         profileNameMatches(extractProfileName(d.profileText), profile, d.profileText)
       ).forEach((d) => {
-        console.log(`  [kick] ✗ Slot kosong "${profile}" — kick intruder: "${d.deviceName}"`);
-        addToKick(d);
+        console.log(`  [audit] ✗ Slot kosong "${profile}" — kick intruder: "${d.deviceName}"`);
+        record(d, "kick", "slot kosong/expired di sheet — tidak boleh ada device", profile);
       });
       continue;
     }
@@ -505,8 +551,8 @@ function decideKickTargets(snapshot, expiredTargets, allProfileRows) {
       snapshot.filter((d) => !d.isCurrent && d.profileText &&
         profileNameMatches(extractProfileName(d.profileText), profile, d.profileText)
       ).forEach((d) => {
-        console.log(`  [kick] ✗ Profil expired "${profile}" → kick: "${d.deviceName}"`);
-        addToKick(d);
+        console.log(`  [audit] ✗ Profil expired "${profile}" → kick: "${d.deviceName}"`);
+        record(d, "kick", "profil expired", profile);
       });
       continue;
     }
@@ -529,23 +575,25 @@ function decideKickTargets(snapshot, expiredTargets, allProfileRows) {
 
       scoring.forEach((d, i) => {
         if (!_deviceMatchesAllowed(d.deviceName, allowedDevices)) {
-          console.log(`  [kick] ✗ "${d.deviceName}" tidak cocok kolom G "${colGRaw}" → kick`);
-          addToKick(d);
+          console.log(`  [audit] ✗ "${d.deviceName}" tidak cocok kolom G "${colGRaw}" → kick`);
+          record(d, "kick", `tidak cocok device di kolom G ("${colGRaw}")`, profile);
         } else if (i < maxDev) {
-          console.log(`  [kick] ✓ "${d.deviceName}" diizinkan (match kolom G, posisi ${i+1}/${maxDev})`);
+          console.log(`  [audit] ✓ "${d.deviceName}" diizinkan (match kolom G, posisi ${i+1}/${maxDev})`);
+          record(d, "keep", `cocok kolom G ("${colGRaw}"), slot ${i + 1}/${maxDev}`, profile);
         } else {
-          console.log(`  [kick] ✗ "${d.deviceName}" melebihi batas ${maxDev} → kick`);
-          addToKick(d);
+          console.log(`  [audit] ✗ "${d.deviceName}" melebihi batas ${maxDev} → kick`);
+          record(d, "kick", `melebihi batas ${maxDev} device`, profile);
         }
       });
     } else {
       // Tidak ada kolom G → posisi-based
       [...profileDevices].sort((a, b) => a.index - b.index).forEach((d, i) => {
         if (i < maxDev) {
-          console.log(`  [kick] ✓ "${d.deviceName}" dipertahankan (posisi ${i+1}/${maxDev})`);
+          console.log(`  [audit] ✓ "${d.deviceName}" dipertahankan (posisi ${i+1}/${maxDev})`);
+          record(d, "keep", `slot ${i + 1}/${maxDev} (kolom G kosong)`, profile);
         } else {
-          console.log(`  [kick] ✗ "${d.deviceName}" melebihi batas ${maxDev} → kick`);
-          addToKick(d);
+          console.log(`  [audit] ✗ "${d.deviceName}" melebihi batas ${maxDev} → kick`);
+          record(d, "kick", `melebihi batas ${maxDev} device`, profile);
         }
       });
     }
@@ -553,11 +601,22 @@ function decideKickTargets(snapshot, expiredTargets, allProfileRows) {
 
   // Device "tidak ada aktivitas" → selalu kick
   snapshot.filter((d) => !d.isCurrent && d.noActivity && !d.profileText).forEach((d) => {
-    console.log(`  [kick] ✗ "${d.deviceName}" tidak ada aktivitas → kick`);
-    addToKick(d);
+    console.log(`  [audit] ✗ "${d.deviceName}" tidak ada aktivitas → kick`);
+    record(d, "kick", "tidak ada aktivitas");
   });
 
-  return toKick.map((x) => x.deviceName);
+  return finish();
+}
+
+// ── Putuskan device mana yang harus dikick ────────────────
+/**
+ * @param {Array}    snapshot        - hasil scanAllDevices()
+ * @param {string[]} expiredTargets  - profil yang expired (lowercase)
+ * @param {Array}    allProfileRows  - semua profil akun dari getAllProfilesForEmail()
+ * @returns {string[]} device names yang harus dikick
+ */
+function decideKickTargets(snapshot, expiredTargets, allProfileRows) {
+  return auditDevices(snapshot, expiredTargets, allProfileRows).kickNames;
 }
 
 // ── Kick satu device berdasarkan nama ────────────────────
@@ -736,6 +795,13 @@ async function kickDevicesForProfileCookie(email, profileName, isMahesh = false)
 
 module.exports = {
   kickDevicesForProfileCookie,
+  // Dipakai device-checker-cookie.js (/cekdevice) supaya cara baca device &
+  // aturan spreadsheet-nya identik dengan kicker.
+  newCookiePage,
+  scanAllDevices,
+  auditDevices,
+  decideKickTargets,
+  URL_DEVICES,
   kickDevicesForProfilesCookie,
   CookieExpiredError,
   checkForExtraVerification,

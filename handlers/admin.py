@@ -6,6 +6,7 @@
 import logging
 import re
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
+from telegram.helpers import escape_markdown
 from telegram.ext import ContextTypes, ConversationHandler
 from config import ADMIN_ID, NOTIF_ORDER_IDS
 from sheets_handler import cek_stok, cek_logout, gantihari, rekap_pendapatan, rekap_pendapatan_apk, closing_hari, rekap_invest_harian, rekap_invest_ulang, rekap_invest_range_custom, update_profiles_and_pins
@@ -1168,6 +1169,190 @@ async def cmd_gantipw(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 f"❌ *Gagal ganti password.*\n\n📧 Akun: `{email}`\n\n`{detail}`",
                 parse_mode="Markdown"
             )
+
+
+
+# ─── /cekdevice ───────────────────────────────
+
+def _fmt_laporan_device(data: dict) -> list:
+    """
+    Rangkai hasil device-checker-cookie.js jadi pesan Telegram.
+
+    Dipecah jadi beberapa pesan kalau kepanjangan — akun dengan puluhan
+    device gampang menembus batas 4096 karakter Telegram.
+    """
+    esc = lambda s: escape_markdown(str(s), version=1)
+
+    email = esc(data.get("email", "-"))
+    total = data.get("totalDevice", 0)
+    sesuai = data.get("sesuai", 0)
+    tidak = data.get("tidakSesuai", 0)
+    asing = data.get("takDikenal", 0)
+
+    baris = [
+        f"🔍 *Cek Device* — `{email}`",
+        "",
+        f"📊 {total} device • ✅ {sesuai} sesuai • ❌ {tidak} tidak sesuai • ❓ {asing} tak dikenal",
+    ]
+
+    if data.get("sheetError"):
+        baris += ["", f"⚠️ Gagal baca spreadsheet: `{esc(data['sheetError'])}` — device di bawah belum dibandingkan."]
+
+    devices = data.get("devices", [])
+    kelompok = [
+        ("kick", "❌ *TIDAK SESUAI*"),
+        ("unknown", "❓ *TIDAK DIKENALI*"),
+        ("keep", "✅ *SESUAI*"),
+    ]
+    for status, judul in kelompok:
+        isi = [d for d in devices if d.get("status") == status]
+        if not isi:
+            continue
+        baris += ["", judul]
+        for d in isi:
+            nama = esc(d.get("nama") or "(tanpa nama)")
+            profil = esc(d.get("profil") or "-")
+            alasan = esc(d.get("alasan") or "")
+            tanda = " ← sesi bot" if d.get("isCurrent") else ""
+            baris.append(f"• {nama}{tanda}")
+            baris.append(f"  profil: {profil} — _{alasan}_")
+
+    per_profil = data.get("perProfil", [])
+    if per_profil:
+        baris += ["", "📋 *Profil di spreadsheet*"]
+        for pr in per_profil:
+            nama = esc(pr.get("profil") or "-")
+            jml = pr.get("jumlahDevice", 0)
+            if pr.get("slotKosong"):
+                ket = f"slot kosong/expired — {jml} device terdeteksi"
+                ikon = "❌" if jml else "✅"
+            else:
+                batas = pr.get("batas", 1)
+                colg = pr.get("colG") or ""
+                ket = f"{jml}/{batas} device"
+                if colg:
+                    ket += f' — kolom G: "{esc(colg)}"'
+                ikon = "✅" if jml <= batas else "❌"
+            baris.append(f"{ikon} {nama} — {ket}")
+
+    tanpa = data.get("profilTanpaDevice", [])
+    if tanpa:
+        baris += ["", f"ℹ️ Belum ada device: {esc(', '.join(tanpa))}"]
+
+    baris += ["", "_Read-only — tidak ada device yang dikeluarkan._"]
+
+    # Pecah per 3800 karakter di batas baris
+    pesan, buf = [], ""
+    for b in baris:
+        if len(buf) + len(b) + 1 > 3800:
+            pesan.append(buf)
+            buf = ""
+        buf += b + "\n"
+    if buf.strip():
+        pesan.append(buf)
+    return pesan
+
+
+async def cmd_cekdevice(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """
+    Tampilkan semua device yang login di sebuah akun Netflix beserta
+    kesesuaiannya dengan spreadsheet — TANPA mengeluarkan device apa pun.
+
+    Alurnya sama dengan kicker (cookie → manageaccountaccess → MFA kalau
+    muncul → scan device → audit pakai aturan sheet), cuma berhenti sebelum
+    eksekusi kick.
+
+    Cara pakai: /cekdevice email@domain.com
+    """
+    if update.effective_user.id != ADMIN_ID:
+        await update.message.reply_text("⛔ Hanya admin utama.")
+        return
+
+    args = context.args
+    if not args:
+        await update.message.reply_text(
+            "⚠️ *Format salah*\n\n"
+            "Cara pakai:\n"
+            "`/cekdevice email@domain.com`",
+            parse_mode="Markdown"
+        )
+        return
+
+    email = args[0].strip()
+    if "@" not in email:
+        await update.message.reply_text("⚠️ Email tidak valid.")
+        return
+
+    import asyncio
+    import json
+    import os
+
+    base_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    ckpc_dir = os.path.join(base_dir, "cookie-kicker-pin-changer")
+
+    pesan = await update.message.reply_text(
+        f"🔍 Mengecek device `{email}`, mohon tunggu...",
+        parse_mode="Markdown"
+    )
+
+    try:
+        proc = await asyncio.create_subprocess_exec(
+            "node", "device-checker-cookie.js", "check", email,
+            cwd=ckpc_dir,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
+        )
+        try:
+            # Sama longgarnya dengan /gantipw: kalau Netflix minta kode MFA,
+            # satu percobaan saja bisa makan ~60 detik.
+            stdout, stderr = await asyncio.wait_for(proc.communicate(), timeout=300)
+        except asyncio.TimeoutError:
+            proc.kill()
+            await proc.wait()
+            await pesan.edit_text(
+                "❌ *Timeout* setelah 300 detik.\n"
+                "Proses di server mungkin macet — cek log server atau coba lagi.",
+                parse_mode="Markdown",
+            )
+            return
+    except Exception as e:
+        logger.error(f"Error cekdevice: {e}", exc_info=True)
+        await pesan.edit_text(f"⚠️ Gagal jalankan proses.\n\n`{e}`", parse_mode="Markdown")
+        return
+
+    out = stdout.decode(errors="ignore")
+    err = stderr.decode(errors="ignore")
+
+    if proc.returncode != 0 or "<<<CEKDEVICE_JSON>>>" not in out:
+        detail = (err.strip() or out.strip() or "(tidak ada output)")[-500:]
+        if "COOKIE_EXPIRED" in detail:
+            await pesan.edit_text(
+                f"❌ *Cookie akun ini sudah expired.*\n\n"
+                f"📧 Akun: `{email}`\n\n"
+                f"Simpan cookie baru dulu lewat `/setcookie`, lalu ulangi `/cekdevice`.",
+                parse_mode="Markdown"
+            )
+        else:
+            await pesan.edit_text(
+                f"❌ *Gagal cek device.*\n\n📧 Akun: `{email}`\n\n`{detail}`",
+                parse_mode="Markdown"
+            )
+        return
+
+    try:
+        raw = out.split("<<<CEKDEVICE_JSON>>>", 1)[1].splitlines()[0]
+        data = json.loads(raw)
+    except Exception as e:
+        logger.error(f"cekdevice: JSON tidak terbaca: {e}", exc_info=True)
+        await pesan.edit_text(
+            f"⚠️ Hasil cek tidak terbaca.\n\n`{e}`", parse_mode="Markdown"
+        )
+        return
+
+    potongan = _fmt_laporan_device(data)
+    await pesan.edit_text(potongan[0], parse_mode="Markdown")
+    for lanjutan in potongan[1:]:
+        await update.effective_chat.send_message(lanjutan, parse_mode="Markdown")
 
 
 # ─── /setting_akun ─────────────────────────────────────────
